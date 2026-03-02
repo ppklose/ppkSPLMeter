@@ -14,7 +14,8 @@ public:
     void resized () override;
     void mouseDown (const juce::MouseEvent&) override;
 
-    bool isOff() const noexcept { return selectedMetric == PsychoMetric::Off; }
+    bool isOff()           const noexcept { return selectedMetric == PsychoMetric::Off; }
+    bool isSpectroEnabled() const noexcept { return spectroEnableButton.getToggleState(); }
 
 private:
     void timerCallback() override;
@@ -26,9 +27,11 @@ private:
     juce::Slider durationSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttachment;
 
-    juce::Label  gainLabel;
-    juce::Slider gainSlider;
+    juce::Label        gainLabel;
+    juce::Slider       gainSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttachment;
+
+    juce::ToggleButton spectroEnableButton { "Spectrogram" };
 
     std::vector<LogEntry> rows;
 

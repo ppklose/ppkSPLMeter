@@ -50,6 +50,12 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     gainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "spectroGain", gainSlider);
 
+    spectroEnableButton.setToggleState (true, juce::dontSendNotification);
+    spectroEnableButton.setColour (juce::ToggleButton::textColourId,     juce::Colour (0xffaeaeb2));
+    spectroEnableButton.setColour (juce::ToggleButton::tickColourId,     juce::Colour (0xff5ac8fa));
+    spectroEnableButton.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colour (0xff555558));
+    addAndMakeVisible (spectroEnableButton);
+
     startTimerHz (8);
 }
 
@@ -65,6 +71,9 @@ void LogComponent::resized()
     auto gainSection = controlRow.removeFromRight (100);
     gainLabel.setBounds  (gainSection.removeFromTop (18));
     gainSlider.setBounds (gainSection);
+
+    // Spectrogram enable checkbox just left of the gain knob
+    spectroEnableButton.setBounds (controlRow.removeFromRight (130).reduced (4, 12));
 
     durationLabel.setBounds  (controlRow.removeFromLeft (200));
     durationSlider.setBounds (controlRow);

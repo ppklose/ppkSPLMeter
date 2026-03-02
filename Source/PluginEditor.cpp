@@ -172,6 +172,7 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getSharpness(),
                      audioProcessor.getLoudnessSone());
     meter.setPsychoVisible (!log.isOff());
+    spectrogram.setVisible (log.isSpectroEnabled());
 
     float calOffset = audioProcessor.apvts.getRawParameterValue ("calOffset")->load();
     float dbfs = 94.0f - calOffset;
