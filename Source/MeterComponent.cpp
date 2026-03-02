@@ -169,7 +169,7 @@ void MeterComponent::setValues (float peakSPL, float peakDBASPL, float peakDBCSP
     sone_        = sone;
 
     double now = juce::Time::getMillisecondCounterHiRes();
-    if (peakSPL_ >= holdSPL_ || (now - holdTimestampMs_) > kHoldDurationMs)
+    if (peakSPL_ >= holdSPL_ || (now - holdTimestampMs_) > holdDurationMs_)
     {
         holdSPL_          = peakSPL_;
         holdTimestampMs_  = now;

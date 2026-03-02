@@ -124,6 +124,14 @@ public:
     }
 
     //==========================================================================
+    // File mode
+    void loadFile   (const juce::File& file);
+    void setFileMode (bool active);
+    bool isFileModeActive() const noexcept { return fileModeActive.load(); }
+    double getFilePosition() const { return transportSource.getCurrentPosition(); }
+    double getFileLength()   const { return transportSource.getLengthInSeconds(); }
+
+    //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -167,6 +175,13 @@ private:
 
     juce::AbstractFifo                          spectroFifo   { kSpectroFifoSize };
     std::array<float, kSpectroFifoSize>         spectroBuffer {};
+
+    // File playback
+    juce::AudioFormatManager                         formatManager;
+    std::unique_ptr<juce::AudioFormatReaderSource>   readerSource;
+    juce::AudioTransportSource                       transportSource;
+    std::atomic<bool>                                fileModeActive { false };
+    juce::AudioBuffer<float>                         fileReadBuffer;
 
     void pushLogEntry (float rawPeak, float aPeak, float cPeak,
                        float rawRms,  float aRms,  float cRms,

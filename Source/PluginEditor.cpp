@@ -47,6 +47,46 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (saveButton);
 
+    // Real Time / File mode buttons
+    auto setupModeBtn = [this] (juce::TextButton& btn)
+    {
+        btn.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        btn.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));
+        btn.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        btn.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+        btn.setClickingTogglesState (false);
+        addAndMakeVisible (btn);
+    };
+    setupModeBtn (realTimeButton);
+    setupModeBtn (fileButton);
+
+    realTimeButton.onClick = [this]
+    {
+        audioProcessor.setFileMode (false);
+        fileMode = false;
+        updateModeButtons();
+    };
+
+    fileButton.onClick = [this]
+    {
+        fileChooser = std::make_unique<juce::FileChooser> (
+            "Open audio file",
+            juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+            "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+        fileChooser->launchAsync (
+            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this] (const juce::FileChooser& fc)
+            {
+                auto file = fc.getResult();
+                if (file == juce::File{}) return;
+                audioProcessor.loadFile (file);
+                fileMode = true;
+                updateModeButtons();
+            });
+    };
+
+    updateModeButtons();
+
     // FAST / SLOW time-weight toggle buttons
     auto setupTimeBtn = [this] (juce::TextButton& btn, int index)
     {
@@ -90,6 +130,28 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     calAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         audioProcessor.apvts, "calOffset", calSlider);
 
+    // Peak hold rotary
+    holdSlider.setSliderStyle (juce::Slider::Rotary);
+    holdSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 22);
+    holdSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
+                                    juce::MathConstants<float>::pi * 2.75f,
+                                    true);
+    holdSlider.setColour (juce::Slider::rotarySliderFillColourId,   juce::Colour (0xff5ac8fa));
+    holdSlider.setColour (juce::Slider::textBoxTextColourId,        juce::Colours::white);
+    holdSlider.setColour (juce::Slider::textBoxOutlineColourId,     juce::Colours::transparentBlack);
+    holdSlider.setColour (juce::Slider::textBoxHighlightColourId,   juce::Colour (0xff5ac8fa));
+    addAndMakeVisible (holdSlider);
+
+    holdLabel.setText ("Hold Time", juce::dontSendNotification);
+    holdLabel.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
+    holdLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+    holdLabel.setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (holdLabel);
+
+    holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        audioProcessor.apvts, "peakHoldTime", holdSlider);
+    holdSlider.setTooltip ("Hold time in seconds");
+
     setSize (960, 1080);
     startTimerHz (30);
 }
@@ -110,7 +172,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setFont (juce::Font (juce::FontOptions().withHeight (28.0f).withStyle ("Bold")));
     g.setColour (juce::Colours::white);
-    g.drawText ("PPK's SPLMeter", 0, 0, getWidth(), 100, juce::Justification::centred, false);
+    g.drawText ("PPK's SPLMeter", 0, 0, getWidth(), 52, juce::Justification::centred, false);
 
     // Build info strip at the bottom (not covered by any child)
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
@@ -127,12 +189,24 @@ void SPLMeterAudioProcessorEditor::resized()
     auto area = getLocalBounds();
     auto titleBar = area.removeFromTop (100);
     saveButton.setBounds  (titleBar.removeFromLeft  (160).reduced (10, 22));
-    resetButton.setBounds (titleBar.removeFromRight (200).reduced (10, 22));
+    resetButton.setBounds (titleBar.removeFromRight (160).reduced (10, 22));
+
+    // Hold Time section — right side, immediately left of Reset
+    auto holdSection = titleBar.removeFromRight (160);
+    holdLabel.setBounds  (holdSection.removeFromTop (22));
+    holdSlider.setBounds (holdSection.withSizeKeepingCentre (80, 76));
 
     // Calibration section in title bar — left of centre
     auto calSection = titleBar.removeFromLeft (240);
     calLabel.setBounds  (calSection.removeFromTop (22));
     calSlider.setBounds (calSection.withSizeKeepingCentre (80, 76));
+
+    // Real Time / File buttons — centred below the title text
+    const int modeBtnW = 110;
+    const int modeBtnH = 30;
+    const int modeY    = 57;
+    realTimeButton.setBounds (getWidth() / 2 - modeBtnW - 2, modeY, modeBtnW, modeBtnH);
+    fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
 
     const int meterHeight = 215;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -155,6 +229,12 @@ void SPLMeterAudioProcessorEditor::resized()
 }
 
 //==============================================================================
+void SPLMeterAudioProcessorEditor::updateModeButtons()
+{
+    realTimeButton.setToggleState (!fileMode, juce::dontSendNotification);
+    fileButton.setToggleState     ( fileMode, juce::dontSendNotification);
+}
+
 void SPLMeterAudioProcessorEditor::updateTimeWeightButtons()
 {
     int idx = static_cast<int> (audioProcessor.apvts.getRawParameterValue ("splTimeWeight")->load());
@@ -178,5 +258,15 @@ void SPLMeterAudioProcessorEditor::timerCallback()
     float dbfs = 94.0f - calOffset;
     calSlider.setTooltip ("94 dB SPL = " + juce::String (dbfs, 1) + " dBFS");
 
+    float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
+    meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
+
     updateTimeWeightButtons();
+
+    // Auto-return to Real Time when file playback finishes
+    if (fileMode && !audioProcessor.isFileModeActive())
+    {
+        fileMode = false;
+        updateModeButtons();
+    }
 }

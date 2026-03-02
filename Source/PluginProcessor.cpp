@@ -43,12 +43,13 @@ SPLMeterAudioProcessor::SPLMeterAudioProcessor()
                       .withOutput ("Output", juce::AudioChannelSet::discreteChannels (8), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
+    formatManager.registerBasicFormats();
 }
 
 SPLMeterAudioProcessor::~SPLMeterAudioProcessor() {}
 
 //==============================================================================
-void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int)
+void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
     aWeightL.prepare (sampleRate);
@@ -68,9 +69,15 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int)
 
     logIntervalSamples = static_cast<int> (0.125 * sampleRate);
     logSampleCounter = 0;
+
+    transportSource.prepareToPlay (samplesPerBlock, sampleRate);
+    fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
 }
 
-void SPLMeterAudioProcessor::releaseResources() {}
+void SPLMeterAudioProcessor::releaseResources()
+{
+    transportSource.releaseResources();
+}
 
 //==============================================================================
 void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
@@ -99,15 +106,43 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
 
+    // --- File mode: pull audio from transport instead of live input ---
+    const bool fileMode = fileModeActive.load();
+    if (fileMode)
+    {
+        fileReadBuffer.setSize (2, numSamples, false, true, true);
+        juce::AudioSourceChannelInfo info (&fileReadBuffer, 0, numSamples);
+        transportSource.getNextAudioBlock (info);
+
+        // Auto-stop when the file has been fully played back
+        const double len = transportSource.getLengthInSeconds();
+        if (len > 0.0 && transportSource.getCurrentPosition() >= len - 0.05)
+        {
+            transportSource.stop();
+            fileModeActive.store (false);
+        }
+    }
+
     const float channelScale = numChannels > 0 ? 1.0f / static_cast<float> (numChannels) : 1.0f;
 
     for (int s = 0; s < numSamples; ++s)
     {
-        // Average all input channels to mono
+        // Mix source channels to mono
         float raw = 0.0f;
-        for (int ch = 0; ch < numChannels; ++ch)
-            raw += buffer.getReadPointer (ch)[s];
-        raw *= channelScale;
+        if (fileMode)
+        {
+            const int fileCh    = fileReadBuffer.getNumChannels();
+            const float fileScl = fileCh > 0 ? 1.0f / static_cast<float> (fileCh) : 1.0f;
+            for (int ch = 0; ch < fileCh; ++ch)
+                raw += fileReadBuffer.getReadPointer (ch)[s];
+            raw *= fileScl;
+        }
+        else
+        {
+            for (int ch = 0; ch < numChannels; ++ch)
+                raw += buffer.getReadPointer (ch)[s];
+            raw *= channelScale;
+        }
 
         float aSample = aWeightL.processSample (raw);
         float cSample = cWeightL.processSample (raw);
@@ -229,6 +264,32 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
     if (xml && xml->hasTagName (apvts.state.getType()))
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
+}
+
+//==============================================================================
+void SPLMeterAudioProcessor::loadFile (const juce::File& file)
+{
+    auto* reader = formatManager.createReaderFor (file);
+    if (reader == nullptr) return;
+
+    auto newSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
+    transportSource.setSource (newSource.get(), 0, nullptr, reader->sampleRate);
+    readerSource = std::move (newSource);
+
+    transportSource.setPosition (0.0);
+    transportSource.start();
+    fileModeActive.store (true);
+
+    resetForModeSwitch();
+}
+
+void SPLMeterAudioProcessor::setFileMode (bool active)
+{
+    if (!active)
+    {
+        transportSource.stop();
+        fileModeActive.store (false);
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

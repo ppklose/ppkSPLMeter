@@ -44,7 +44,12 @@ private:
     bool  psychoVisible_      = true;
     float holdSPL_            = 0.0f;
     double holdTimestampMs_   = 0.0;
-    static constexpr double kHoldDurationMs = 2000.0;
+    double holdDurationMs_    = 2000.0;
+
+public:
+    void setHoldDuration (double ms) noexcept { holdDurationMs_ = ms; }
+
+private:
 
     static constexpr float kMin = 20.0f;
     static constexpr float kMax = 130.0f;

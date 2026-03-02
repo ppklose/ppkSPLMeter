@@ -31,6 +31,11 @@ private:
     juce::TextButton saveButton  { "Save JPG" };
     juce::TextButton fastButton  { "FAST" };
     juce::TextButton slowButton  { "SLOW" };
+
+    juce::TextButton realTimeButton { "Real Time" };
+    juce::TextButton fileButton     { "File" };
+    bool fileMode = false;
+    void updateModeButtons();
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     void updateTimeWeightButtons();
@@ -38,6 +43,10 @@ private:
     juce::Slider  calSlider;
     juce::Label   calLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> calAttachment;
+
+    juce::Slider  holdSlider;
+    juce::Label   holdLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> holdAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessorEditor)
 };
