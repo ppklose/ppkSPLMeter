@@ -1,0 +1,84 @@
+name: SPLMeter build chain
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # macOS — Standalone, VST3, AU
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: macOS (Standalone · VST3 · AU)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.7-macos
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPLMeter-macOS-Standalone
+          path: build/SPLMeter_artefacts/Release/Standalone/SPLMeter.app
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPLMeter-macOS-VST3
+          path: build/SPLMeter_artefacts/Release/VST3/SPLMeter.vst3
+
+      - name: Upload AU
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPLMeter-macOS-AU
+          path: build/SPLMeter_artefacts/Release/AU/SPLMeter.component
+
+  # ---------------------------------------------------------------------------
+  # Windows — Standalone, VST3
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Windows (Standalone · VST3)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.7-windows
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPLMeter-Windows-Standalone
+          path: build/SPLMeter_artefacts/Release/Standalone/SPLMeter.exe
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPLMeter-Windows-VST3
+          path: build/SPLMeter_artefacts/Release/VST3/SPLMeter.vst3

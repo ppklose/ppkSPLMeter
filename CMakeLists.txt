@@ -18,11 +18,18 @@ FetchContent_MakeAvailable(JUCE)
 # ---------------------------------------------------------------------------
 # Plugin target
 # ---------------------------------------------------------------------------
+# AU is macOS-only
+if(APPLE)
+    set(SPLMETER_FORMATS Standalone VST3 AU)
+else()
+    set(SPLMETER_FORMATS Standalone VST3)
+endif()
+
 juce_add_plugin(SPLMeter
     VERSION                     1.0.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
-    FORMATS                     Standalone VST3
+    FORMATS                     ${SPLMETER_FORMATS}
     PRODUCT_NAME                "SPLMeter"
     COMPANY_NAME                "Philipp Paul Klose Audio Engineering"
     BUNDLE_ID                   com.PhilippPaulKloseAudioEngineering.SPLMeter
