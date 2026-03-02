@@ -115,7 +115,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom (not covered by any child)
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (juce::Colour (0xff555558));
-    g.drawText (juce::String ("Build: ") + __DATE__ + "  " + __TIME__,
+    g.drawText (juce::String (JucePlugin_VersionString) + "   Build: " + __DATE__ + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 
