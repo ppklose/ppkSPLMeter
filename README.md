@@ -1,3 +1,3 @@
 Hello
 
-this is PPK's SPL meter:
+this is PPK's SPLMeter:
