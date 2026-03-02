@@ -1,0 +1,21 @@
+# Claude Code session data
+.claude/
+
+# Build output
+Builds/MacOSX/build/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+Builds/MacOSX/*.xcodeproj/xcuserdata/
+Builds/MacOSX/*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Object files / intermediates
+*.o
+*.a
+*.d
+*.dia

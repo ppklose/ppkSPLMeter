@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="a3f8b2c1" name="SPLMeter" projectType="audioplug" version="1.0.0"
+              jucePath="/Applications/JUCE" displaySplashScreen="0" reportAppUsage="0"
+              splashScreenColour="Dark" projectLineFeed="&#10;" companyName="Philipp Paul Klose Audio Engineering"
+              companyCopyright="2025 Philipp Paul Klose Audio Engineering"
+              companyWebsite="" companyEmail="" pluginFormats="buildAU,buildVST3,buildStandalone"
+              pluginName="SPLMeter" pluginDesc="SPL Meter Plugin" pluginManufacturer="Philipp Paul Klose Audio Engineering"
+              pluginManufacturerCode="Manu" pluginCode="Splm" pluginChannelConfigs="{1, 1}, {2, 2}"
+              pluginCharacteristics="pluginWantsMidiIn" pluginIsSynth="0" pluginWantsMidiInput="0"
+              pluginProducesMidiOut="0" pluginIsMidiEffectPlugin="0" pluginEditorRequiresKeys="0"
+              pluginAUExportPrefix="SPLMeterAU" aaxIdentifier="com.philipppaulklose.splmeter"
+              pluginVSTNumMidiInputs="16" pluginVSTNumMidiOutputs="16" cppLanguageStandard="17"
+              jucerFormatVersion="1">
+  <MAINGROUP id="b1a2c3d4" name="SPLMeter">
+    <GROUP id="c2b3d4e5" name="Source">
+      <FILE id="d3c4e5f6" name="PluginProcessor.cpp" compile="1" resource="0"
+            file="Source/PluginProcessor.cpp"/>
+      <FILE id="e4d5f6a7" name="PluginProcessor.h" compile="0" resource="0"
+            file="Source/PluginProcessor.h"/>
+      <FILE id="f5e6a7b8" name="PluginEditor.cpp" compile="1" resource="0"
+            file="Source/PluginEditor.cpp"/>
+      <FILE id="a6f7b8c9" name="PluginEditor.h" compile="0" resource="0"
+            file="Source/PluginEditor.h"/>
+      <FILE id="b7a8c9d0" name="MeterComponent.cpp" compile="1" resource="0"
+            file="Source/MeterComponent.cpp"/>
+      <FILE id="c8b9d0e1" name="MeterComponent.h" compile="0" resource="0"
+            file="Source/MeterComponent.h"/>
+      <FILE id="d9c0e1f2" name="LogComponent.cpp" compile="1" resource="0"
+            file="Source/LogComponent.cpp"/>
+      <FILE id="e0d1f2a3" name="LogComponent.h" compile="0" resource="0"
+            file="Source/LogComponent.h"/>
+      <FILE id="f1e2a3b4" name="AWeightingFilter.h" compile="0" resource="0"
+            file="Source/AWeightingFilter.h"/>
+      <FILE id="a2b3c4d5" name="CWeightingFilter.h" compile="0" resource="0"
+            file="Source/CWeightingFilter.h"/>
+    </GROUP>
+  </MAINGROUP>
+  <EXPORTFORMATS>
+    <XCODE_MAC targetFolder="Builds/MacOSX">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug" isDebug="1" optimisation="1" targetName="SPLMeter"
+                       enablePluginBinaryCopyStep="1" vstBinaryLocation="~/Library/Audio/Plug-Ins/VST/"
+                       vst3BinaryLocation="~/Library/Audio/Plug-Ins/VST3/"/>
+        <CONFIGURATION name="Release" isDebug="0" optimisation="3" targetName="SPLMeter"
+                       enablePluginBinaryCopyStep="1" vstBinaryLocation="~/Library/Audio/Plug-Ins/VST/"
+                       vst3BinaryLocation="~/Library/Audio/Plug-Ins/VST3/"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="/Applications/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="/Applications/JUCE/modules"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+  </EXPORTFORMATS>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"/>
+</JUCERPROJECT>
