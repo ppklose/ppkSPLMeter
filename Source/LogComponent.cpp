@@ -122,10 +122,6 @@ void LogComponent::paint (juce::Graphics& g)
         graphArea.getWidth()  - marginL - marginR,
         graphArea.getHeight() - marginT - marginB);
 
-    // Cover the full component bounds (including the 4px reduced border) so the
-    // spectrogram does not bleed through the edges.
-    g.fillAll (juce::Colour (0xff1c1c1e));
-
     // ---- Background: fill only margins + control row opaque; leave plot for spectrogram ----
     g.setColour (juce::Colour (0xff1c1c1e));
     // Top margin (covers legend rows)
