@@ -1,0 +1,47 @@
+issues:
+
+  - id: build-001
+    title: "CodeSign fails: resource fork or Finder information not allowed"
+    category: build
+    frequency: every_build
+    cause: >
+      iCloud CloudDocs adds extended attributes (resource forks) to the .app
+      bundle after every build. codesign rejects these.
+    resolution: resolutions/icloud-codesign-fix.md
+    resolution_status: documented
+
+  - id: build-002
+    title: "xcodebuild uses wrong Xcode / CommandLineTools"
+    category: build
+    frequency: occasional
+    cause: >
+      Default DEVELOPER_DIR points to CommandLineTools, not the full Xcode.app.
+      Results in missing SDKs or wrong compiler.
+    resolution: >
+      Always prefix xcodebuild with:
+      DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    resolution_status: documented
+
+  - id: ui-001
+    title: "Spectrogram is invisible / all black"
+    category: ui
+    frequency: rare
+    cause: >
+      An opaque fillAll() call in LogComponent was painting over the spectrogram
+      overlay before it could render.
+    resolution: >
+      Remove or guard any fillAll() in LogComponent::paint() that covers the
+      spectrogram region. Fixed in commit b67ff82.
+    resolution_status: fixed
+
+  - id: dsp-001
+    title: "Loud transient or wrong reading on FAST/SLOW switch"
+    category: dsp
+    frequency: occasional
+    cause: >
+      Switching time weighting without resetting rmsSmoothed* values causes
+      the EMA to jump from a stale state.
+    resolution: >
+      On mode switch: reset rmsSmoothedRaw/A/C to 0, reset peak holds and
+      counters, clear atomics and log. See PluginProcessor.cpp resetMeter().
+    resolution_status: documented
