@@ -21,11 +21,15 @@ A professional Sound Pressure Level (SPL) meter built with JUCE, available as a 
 - Selectable psychoacoustic overlay: Roughness, Fluctuation Strength, Sharpness, Loudness, or OFF
 - Persistent real-time psychoacoustic readout (always visible, independent of log selector)
 
-### 1/3-Octave FFT Overlay
-- 31-band ISO 266 analysis (20 Hz – 20 kHz), toggled via the **FFT** button
-- Bars drawn as a semi-transparent green overlay on the log plot
-- **FFT Gain** rotary knob controls the input signal level into the FFT
+### FFT Spectrum Analyser
+- Toggled via the **FFT** button; displayed as a semi-transparent overlay on the log plot
 - Unweighted (raw) signal — A/C weighting is not applied
+- **Band resolution:** 1/1, 1/3, 1/6, 1/12, or 1/24 octave (up to ~240 bands)
+- **Display modes:** Bars, Area fill, Bars + Peak hold markers
+- **Window functions:** Hann, Hamming, Blackman, Flat-top, Rectangular
+- **Overlap:** 0 %, 25 %, 50 %, 75 %
+- **RTA +3 dB/oct mode** — applies a +3 dB/octave tilt so pink noise appears flat
+- **FFT Gain** and **FFT Smooth** rotary knobs in Settings
 
 ### Psychoacoustic Metrics
 Continuous real-time estimation of:
@@ -40,10 +44,22 @@ Continuous real-time estimation of:
 ### Input Modes
 - **Real Time** — live microphone / audio interface input, up to 8 channels
 - **File** — load and analyse an audio file (WAV, AIFF, …)
+- **Monitor button** — speaker icon next to the File button; mutes the output by default (output is silenced unless monitoring is explicitly enabled)
 
 ### Export
 - **Save JPG** — exports the current view as a JPEG image
 - **Save CSV** — exports the full log (timestamps, all SPL values, all psychoacoustic metrics) as a CSV file
+
+### Settings Panel
+Opened via the **Settings** button. Contains all configuration options:
+
+| Section | Options |
+|---|---|
+| Knobs | Calibration, Hold Time, FFT Gain, FFT Smooth |
+| FFT | Enable toggle, display mode, band resolution, overlap, window function, peak hold, RTA +3 dB/oct |
+| 20-20k Bandpass | 8th-order Butterworth bandpass (48 dB/oct HP at 20 Hz + LP at 20 kHz) |
+| Light Mode | Switches the entire UI to a light theme |
+| Full Screen | Toggles fullscreen mode |
 
 ### MIDI Learn
 Right-click any of the three knobs to assign or clear a MIDI CC mapping:
@@ -61,10 +77,15 @@ Assigned CC numbers are shown next to each knob label (e.g. `[CC 4]`).
 |---|---|
 | FAST / SLOW | IEC 61672 time weighting |
 | Real Time / File | Input source |
+| Monitor (speaker icon) | Enables audio pass-through output; OFF (muted) by default |
+| Settings | Opens the settings panel |
 | Calibration | dB offset to convert full-scale to SPL (right-click for MIDI learn) |
-| FFT Gain | Input gain for the 1/3-octave FFT overlay (right-click for MIDI learn) |
+| FFT Gain | Input gain for the FFT overlay (right-click for MIDI learn) |
+| FFT Smooth | Spectral smoothing factor (0 = off, 0.95 = heavy) |
 | Hold Time | Peak hold duration in seconds (right-click for MIDI learn) |
-| FFT | Toggle 1/3-octave FFT overlay on/off |
+| FFT | Toggle FFT spectrum overlay on/off |
+| 20-20k BP | Enable 8th-order Butterworth bandpass filter (20 Hz – 20 kHz, 48 dB/oct) |
+| Light Mode | Switch to light theme |
 | Log Duration | History length shown in the log plot |
 | dB SPL / dBA SPL / dBC SPL | Visibility checkboxes for each SPL series in the log plot |
 | Roughness / Fluctuation / Sharpness / Loudness / OFF | Select which psychoacoustic metric is overlaid in the log plot |
@@ -157,6 +178,14 @@ The ASIO SDK (part of the Steinberg VST3 SDK) is fetched automatically on Window
 ---
 
 ## Changelog
+
+### v1.2.0
+- **Settings panel** — floating settings window replaces individual toolbar controls; groups all configuration options in one place
+- **FFT overhaul** — band resolution up to 1/24 octave (~240 bands); display modes: Bars, Area, Bars+Peak; window functions: Hann, Hamming, Blackman, Flat-top, Rect; overlap: 0/25/50/75 %; FFT smoothing knob; FFT peak hold toggle
+- **RTA +3 dB/oct mode** — FFT tilt so pink noise appears flat
+- **Light mode** — full light theme switchable via Settings; propagated across all UI components
+- **Monitor/mute button** — speaker icon in the header; output is muted by default, click to enable pass-through monitoring
+- **20-20k Bandpass filter** — 8th-order Butterworth bandpass (48 dB/oct) at 20 Hz and 20 kHz; applied per-channel before metering; toggled in Settings
 
 ### v1.1.0
 - **Resizable window** — drag to any size between 480×500 and 3840×2160 (default 1400×900)
