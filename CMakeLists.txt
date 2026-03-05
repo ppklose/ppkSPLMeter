@@ -24,6 +24,7 @@ if(WIN32)
         GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
         GIT_TAG        master
         GIT_SHALLOW    TRUE
+        GIT_SUBMODULES "asiosdk"            # asiosdk is a submodule — must be explicitly requested
         SOURCE_SUBDIR  "do_not_configure"   # prevent CMake from processing its CMakeLists
     )
     FetchContent_MakeAvailable(vst3sdk)
