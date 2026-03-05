@@ -90,6 +90,7 @@ juce_add_plugin(SPLMeter
     PRODUCT_NAME                "SPLMeter"
     COMPANY_NAME                "Philipp Paul Klose Audio Engineering"
     BUNDLE_ID                   com.PhilippPaulKloseAudioEngineering.SPLMeter
+    ICON_BIG                    "${CMAKE_CURRENT_SOURCE_DIR}/Source/icon_512.png"
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            FALSE
     NEEDS_MIDI_OUTPUT           FALSE
