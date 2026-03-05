@@ -16,13 +16,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------------------
-# ASIO SDK — Windows only, auto-detected from Vendor/asiosdk/common/
+# ASIO SDK — Windows only, auto-detected from Vendor/asiosdk/
 # To enable ASIO: download the SDK from https://www.steinberg.net/asiosdk
-# and copy the contents of asiosdk_x.x.x/common/ into Vendor/asiosdk/common/
+# and copy the unzipped SDK root (the folder containing asio/, common/, host/,
+# driver/, README.md …) into Vendor/asiosdk/ inside the project root.
 # The Vendor/asiosdk/ folder is git-ignored; CI builds without it are fine.
 # ---------------------------------------------------------------------------
 if(WIN32)
-    set(_ASIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk/common")
+    set(_ASIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk/common/common")
     if(EXISTS "${_ASIO_SDK_DIR}/iasiodrv.h")
         set(ASIO_SDK_DIR "${_ASIO_SDK_DIR}")
         message(STATUS "ASIO support enabled: ${ASIO_SDK_DIR}")

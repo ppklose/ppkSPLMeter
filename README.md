@@ -102,16 +102,21 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-**ASIO support (optional):** Download the ASIO SDK from https://www.steinberg.net/asiosdk, then copy the contents of the `asiosdk_x.x.x/common/` folder into `Vendor/asiosdk/common/` inside the project root. CMake will detect the headers automatically and enable ASIO — no extra flags needed:
+**ASIO support (optional):** Download the ASIO SDK from https://www.steinberg.net/asiosdk, unzip it, and copy the entire SDK root (the folder containing `asio/`, `common/`, `host/`, `driver/`, `README.md`, …) into `Vendor/asiosdk/common/` inside the project root. CMake will detect the headers automatically and enable ASIO — no extra flags needed:
 
 ```
 ppkSPLmeter/
   Vendor/
     asiosdk/
-      common/
-        asio.h
-        iasiodrv.h
-        ...
+      common/          ← paste the unzipped SDK root here
+        asio/
+        common/
+          asio.h
+          iasiodrv.h
+          ...
+        driver/
+        host/
+        README.md
 ```
 
 Without `Vendor/asiosdk/common/`, the build completes normally with WASAPI/WDM support only.
