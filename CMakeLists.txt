@@ -49,8 +49,8 @@ if(WIN32)
         message(STATUS "ASIO SDK not found locally — downloading from Steinberg …")
         FetchContent_Declare(
             asiosdk
-            URL      https://download.steinberg.net/sdk_downloads/asiosdk_2.3.3_2019-06-14.zip
-            URL_HASH MD5=86f7e9c1c2c71e1ddc7e78c0febd19b4
+            URL                      https://download.steinberg.net/sdk_downloads/asiosdk_2.3.3_2019-06-14.zip
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         )
         FetchContent_MakeAvailable(asiosdk)
 
