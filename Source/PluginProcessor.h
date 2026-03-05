@@ -84,19 +84,6 @@ public:
 
     std::vector<LogEntry> copyLog();
 
-    // Spectrogram audio feed (audio thread → GUI thread, lock-free)
-    static constexpr int kSpectroFifoSize = 1 << 16;   // 65536 samples
-    int pullSpectroSamples (float* dest, int maxCount) noexcept
-    {
-        int start1, size1, start2, size2;
-        int toRead = std::min (maxCount, spectroFifo.getNumReady());
-        spectroFifo.prepareToRead (toRead, start1, size1, start2, size2);
-        if (size1 > 0) std::memcpy (dest,         spectroBuffer.data() + start1, (size_t)size1 * sizeof(float));
-        if (size2 > 0) std::memcpy (dest + size1,  spectroBuffer.data() + start2, (size_t)size2 * sizeof(float));
-        spectroFifo.finishedRead (size1 + size2);
-        return size1 + size2;
-    }
-
     void resetPeak() noexcept
     {
         rawPeak = aPeak = cPeak = rawPeakHeld = aPeakHeld = cPeakHeld = 0.0f;
@@ -123,6 +110,11 @@ public:
         logEntries.clear();
     }
 
+    // FFT circular buffer (audio thread → GUI, lock-free)
+    static constexpr int kFftCircBufSize = 8192;
+    void copyFftWindow (float* dest, int size) const noexcept;
+    double getSampleRate() const noexcept { return currentSampleRate; }
+
     //==========================================================================
     // File mode
     void loadFile   (const juce::File& file);
@@ -130,6 +122,17 @@ public:
     bool isFileModeActive() const noexcept { return fileModeActive.load(); }
     double getFilePosition() const { return transportSource.getCurrentPosition(); }
     double getFileLength()   const { return transportSource.getLengthInSeconds(); }
+
+    //==========================================================================
+    // MIDI Learn — param indices: 0=calOffset, 1=peakHoldTime, 2=fftGain
+    static constexpr int kNumMidiParams = 3;
+    static const char* const kMidiParamIds[kNumMidiParams];
+
+    void startMidiLearn  (int paramIndex) noexcept { midiLearnParamIndex.store (paramIndex); }
+    void cancelMidiLearn ()               noexcept { midiLearnParamIndex.store (-1); }
+    void clearMidiCC     (int paramIndex) noexcept { midiCC[paramIndex].store (-1); }
+    int  getMidiCC       (int paramIndex) const noexcept { return midiCC[paramIndex].load(); }
+    bool isMidiLearning  (int paramIndex) const noexcept { return midiLearnParamIndex.load() == paramIndex; }
 
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
@@ -173,8 +176,12 @@ private:
     juce::SpinLock       logLock;
     std::deque<LogEntry> logEntries;
 
-    juce::AbstractFifo                          spectroFifo   { kSpectroFifoSize };
-    std::array<float, kSpectroFifoSize>         spectroBuffer {};
+    std::atomic<int> midiCC[kNumMidiParams]  { {-1}, {-1}, {-1} };
+    std::atomic<int> midiLearnParamIndex     { -1 };
+
+    std::array<float, kFftCircBufSize> fftCircBuf_ {};
+    std::atomic<int>                   fftWritePos_ { 0 };
+
 
     // File playback
     juce::AudioFormatManager                         formatManager;

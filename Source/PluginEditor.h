@@ -3,8 +3,6 @@
 #include "PluginProcessor.h"
 #include "MeterComponent.h"
 #include "LogComponent.h"
-#include "SpectrogramComponent.h"
-
 //==============================================================================
 class SPLMeterAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                       private juce::Timer
@@ -18,17 +16,20 @@ public:
 
 private:
     void timerCallback() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void updateMidiLabels();
 
     SPLMeterAudioProcessor& audioProcessor;
 
     MeterComponent       meter;
     LogComponent         log;
-    SpectrogramComponent spectrogram;
 
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
-    juce::TextButton resetButton { "Reset" };
-    juce::TextButton saveButton  { "Save JPG" };
+    juce::TextButton resetButton    { "Reset" };
+    juce::TextButton fftButton      { "FFT" };
+    juce::TextButton saveButton   { "Save JPG" };
+    juce::TextButton saveCsvButton { "Save CSV" };
     juce::TextButton fastButton  { "FAST" };
     juce::TextButton slowButton  { "SLOW" };
 
@@ -47,6 +48,10 @@ private:
     juce::Slider  holdSlider;
     juce::Label   holdLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> holdAttachment;
+
+    juce::Slider  fftGainSlider;
+    juce::Label   fftGainLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> fftGainAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessorEditor)
 };

@@ -14,12 +14,13 @@ public:
     void resized () override;
     void mouseDown (const juce::MouseEvent&) override;
 
-    bool isOff()           const noexcept { return selectedMetric == PsychoMetric::Off; }
-    bool isSpectroEnabled() const noexcept { return spectroEnableButton.getToggleState(); }
+    bool isOff()        const noexcept { return selectedMetric == PsychoMetric::Off; }
+    void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
 
 private:
     void timerCallback() override;
-    void drawLegend (juce::Graphics&, const juce::Rectangle<float>& strip);
+    void computeFftBands();
+    void drawFftOverlay (juce::Graphics&, const juce::Rectangle<float>& plot);
 
     SPLMeterAudioProcessor& processor;
 
@@ -27,11 +28,21 @@ private:
     juce::Slider durationSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttachment;
 
-    juce::Label        gainLabel;
-    juce::Slider       gainSlider;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttachment;
+    juce::ToggleButton splVisButton  { "dB SPL"  };
+    juce::ToggleButton dbaVisButton  { "dBA SPL" };
+    juce::ToggleButton dbcVisButton  { "dBC SPL" };
 
-    juce::ToggleButton spectroEnableButton { "Spectrogram" };
+    // 1/3-octave FFT
+    static constexpr int   kFftOrder   = 13;           // 2^13 = 8192
+    static constexpr int   kFftSize    = 1 << kFftOrder;
+    static constexpr int   kNumFftBands = 31;
+    static const float     kFftBandCenters[kNumFftBands];
+
+    juce::dsp::FFT                  fft_        { kFftOrder };
+    std::array<float, kFftSize>     hannWindow_ {};
+    std::array<float, kFftSize * 2> fftBuffer_  {};
+    float                           fftBands_[kNumFftBands] {};
+    bool                            fftEnabled_ = false;
 
     std::vector<LogEntry> rows;
 

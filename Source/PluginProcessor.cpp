@@ -2,6 +2,9 @@
 #include "PluginEditor.h"
 #include <cmath>
 
+const char* const SPLMeterAudioProcessor::kMidiParamIds[SPLMeterAudioProcessor::kNumMidiParams]
+    = { "calOffset", "peakHoldTime", "fftGain" };
+
 static float linearToDBFS (float linear)
 {
     return 20.0f * std::log10 (std::max (linear, 1e-10f));
@@ -30,7 +33,7 @@ SPLMeterAudioProcessor::createParameterLayout()
         juce::NormalisableRange<float> (80.0f, 140.0f, 0.1f), 127.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        "spectroGain", "Spectrogram Gain (dB)",
+        "fftGain", "FFT Gain (dB)",
         juce::NormalisableRange<float> (-40.0f, 40.0f, 0.5f), 0.0f));
 
     return { params.begin(), params.end() };
@@ -81,9 +84,34 @@ void SPLMeterAudioProcessor::releaseResources()
 
 //==============================================================================
 void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
-                                            juce::MidiBuffer&)
+                                            juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // ---- MIDI CC learn / apply ----
+    for (const auto meta : midiMessages)
+    {
+        const auto msg = meta.getMessage();
+        if (msg.isController())
+        {
+            const int cc  = msg.getControllerNumber();
+            const float v = msg.getControllerValue() / 127.0f;
+
+            int learnIdx = midiLearnParamIndex.load();
+            if (learnIdx >= 0)
+            {
+                midiCC[learnIdx].store (cc);
+                midiLearnParamIndex.store (-1);
+            }
+
+            for (int i = 0; i < kNumMidiParams; ++i)
+            {
+                if (midiCC[i].load() == cc)
+                    if (auto* p = apvts.getParameter (kMidiParamIds[i]))
+                        p->setValueNotifyingHost (v);
+            }
+        }
+    }
 
     const float calOffset    = apvts.getRawParameterValue ("calOffset")->load();
     const float peakHoldSecs = apvts.getRawParameterValue ("peakHoldTime")->load();
@@ -147,13 +175,11 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         float aSample = aWeightL.processSample (raw);
         float cSample = cWeightL.processSample (raw);
 
-        // Feed spectrogram FIFO (drop if full)
+        // Feed FFT circular buffer
         {
-            int s1, n1, s2, n2;
-            spectroFifo.prepareToWrite (1, s1, n1, s2, n2);
-            if (n1 > 0) spectroBuffer[(size_t)s1] = raw;
-            if (n2 > 0) spectroBuffer[(size_t)s2] = raw;
-            spectroFifo.finishedWrite (n1 + n2);
+            int pos = fftWritePos_.load (std::memory_order_relaxed);
+            fftCircBuf_[pos] = raw;
+            fftWritePos_.store ((pos + 1) % kFftCircBufSize, std::memory_order_release);
         }
 
         roughnessEst.processSample (raw);
@@ -240,6 +266,16 @@ void SPLMeterAudioProcessor::pruneLog (float logDurationSeconds)
         logEntries.pop_front();
 }
 
+void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size) const noexcept
+{
+    int writePos = fftWritePos_.load (std::memory_order_acquire);
+    for (int i = 0; i < size; ++i)
+    {
+        int readPos = (writePos - size + i + kFftCircBufSize) % kFftCircBufSize;
+        dest[i] = fftCircBuf_[readPos];
+    }
+}
+
 std::vector<LogEntry> SPLMeterAudioProcessor::copyLog()
 {
     juce::SpinLock::ScopedLockType lock (logLock);
@@ -256,6 +292,8 @@ void SPLMeterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    for (int i = 0; i < kNumMidiParams; ++i)
+        xml->setAttribute (juce::String ("midiCC_") + kMidiParamIds[i], midiCC[i].load());
     copyXmlToBinary (*xml, destData);
 }
 
@@ -263,7 +301,11 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
 {
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
     if (xml && xml->hasTagName (apvts.state.getType()))
+    {
+        for (int i = 0; i < kNumMidiParams; ++i)
+            midiCC[i].store (xml->getIntAttribute (juce::String ("midiCC_") + kMidiParamIds[i], -1));
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    }
 }
 
 //==============================================================================

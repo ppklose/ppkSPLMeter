@@ -1,5 +1,11 @@
 #include "LogComponent.h"
 
+const float LogComponent::kFftBandCenters[LogComponent::kNumFftBands] = {
+    20.f, 25.f, 31.5f, 40.f, 50.f, 63.f, 80.f, 100.f, 125.f, 160.f,
+    200.f, 250.f, 315.f, 400.f, 500.f, 630.f, 800.f, 1000.f, 1250.f, 1600.f,
+    2000.f, 2500.f, 3150.f, 4000.f, 5000.f, 6300.f, 8000.f, 10000.f, 12500.f, 16000.f, 20000.f
+};
+
 // SPL series colours
 const juce::Colour LogComponent::colPeakSPL  { 0xff5ac8fa };  // blue
 const juce::Colour LogComponent::colRmsSPL   { 0xff34c759 };  // green
@@ -32,29 +38,23 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "logDuration", durationSlider);
 
-    gainLabel.setText ("Gain", juce::dontSendNotification);
-    gainLabel.setFont (juce::Font (juce::FontOptions().withHeight (18.0f)));
-    gainLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-    gainLabel.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (gainLabel);
+    // SPL series visibility checkboxes
+    auto setupVisBtn = [this] (juce::ToggleButton& btn, juce::Colour colour)
+    {
+        btn.setToggleState (true, juce::dontSendNotification);
+        btn.setColour (juce::ToggleButton::textColourId,         juce::Colours::white);
+        btn.setColour (juce::ToggleButton::tickColourId,         colour);
+        btn.setColour (juce::ToggleButton::tickDisabledColourId, colour.darker (0.5f));
+        btn.onClick = [this] { repaint(); };
+        addAndMakeVisible (btn);
+    };
+    setupVisBtn (splVisButton, colPeakSPL);
+    setupVisBtn (dbaVisButton, colPeakDBA);
+    setupVisBtn (dbcVisButton, colPeakDBC);
 
-    gainSlider.setSliderStyle (juce::Slider::Rotary);
-    gainSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 60, 18);
-    gainSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                                    juce::MathConstants<float>::pi * 2.75f, true);
-    gainSlider.setColour (juce::Slider::rotarySliderFillColourId,   juce::Colour (0xff5ac8fa));
-    gainSlider.setColour (juce::Slider::textBoxTextColourId,        juce::Colours::white);
-    gainSlider.setColour (juce::Slider::textBoxOutlineColourId,     juce::Colours::transparentBlack);
-    addAndMakeVisible (gainSlider);
-
-    gainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        processor.apvts, "spectroGain", gainSlider);
-
-    spectroEnableButton.setToggleState (true, juce::dontSendNotification);
-    spectroEnableButton.setColour (juce::ToggleButton::textColourId,     juce::Colour (0xffaeaeb2));
-    spectroEnableButton.setColour (juce::ToggleButton::tickColourId,     juce::Colour (0xff5ac8fa));
-    spectroEnableButton.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colour (0xff555558));
-    addAndMakeVisible (spectroEnableButton);
+    for (int i = 0; i < kFftSize; ++i)
+        hannWindow_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
+                                                    * i / (kFftSize - 1)));
 
     startTimerHz (8);
 }
@@ -67,20 +67,28 @@ void LogComponent::resized()
     auto area = getLocalBounds().reduced (4);
     auto controlRow = area.removeFromBottom (48);
 
-    // Gain knob on the right
-    auto gainSection = controlRow.removeFromRight (100);
-    gainLabel.setBounds  (gainSection.removeFromTop (18));
-    gainSlider.setBounds (gainSection);
-
-    // Spectrogram enable checkbox just left of the gain knob
-    spectroEnableButton.setBounds (controlRow.removeFromRight (130).reduced (4, 12));
-
     durationLabel.setBounds  (controlRow.removeFromLeft (200));
     durationSlider.setBounds (controlRow);
+
+    // Position SPL visibility checkboxes in the legend strip (row 1 of the plot header)
+    const float marginL  = 80.0f;
+    const float marginR  = 75.0f;
+    const float controlH = 52.0f;
+    auto graphBounds = getLocalBounds().reduced (4).withTrimmedBottom (static_cast<int> (controlH));
+    const float plotX = graphBounds.getX() + marginL;
+    const float plotW = graphBounds.getWidth() - marginL - marginR;
+    const float btnW  = plotW / 3.0f;
+    const float btnY  = graphBounds.getY();
+    const float btnH  = 36.0f;
+    splVisButton.setBounds (juce::Rectangle<float> (plotX,           btnY, btnW, btnH).toNearestInt());
+    dbaVisButton.setBounds (juce::Rectangle<float> (plotX + btnW,    btnY, btnW, btnH).toNearestInt());
+    dbcVisButton.setBounds (juce::Rectangle<float> (plotX + btnW*2,  btnY, btnW, btnH).toNearestInt());
 }
 
 void LogComponent::timerCallback()
 {
+    if (fftEnabled_)
+        computeFftBands();
     rows = processor.copyLog();
     repaint();
 }
@@ -122,24 +130,16 @@ void LogComponent::paint (juce::Graphics& g)
         graphArea.getWidth()  - marginL - marginR,
         graphArea.getHeight() - marginT - marginB);
 
-    // ---- Background: fill only margins + control row opaque; leave plot for spectrogram ----
+    // ---- Background ----
     g.setColour (juce::Colour (0xff1c1c1e));
-    // Top margin (covers legend rows)
-    g.fillRect (juce::Rectangle<float> (graphArea.getX(), graphArea.getY(), graphArea.getWidth(), marginT));
-    // Left margin
-    g.fillRect (juce::Rectangle<float> (graphArea.getX(), graphArea.getY() + marginT, marginL, graphArea.getHeight() - marginT));
-    // Right margin
-    g.fillRect (juce::Rectangle<float> (plot.getRight(), graphArea.getY() + marginT, marginR, graphArea.getHeight() - marginT));
-    // Bottom margin within graphArea
-    g.fillRect (juce::Rectangle<float> (plot.getX(), plot.getBottom(), plot.getWidth(), graphArea.getBottom() - plot.getBottom()));
-    // Control row below graphArea
-    g.fillRect (juce::Rectangle<float> (bounds.getX(), graphArea.getBottom(), bounds.getWidth(), bounds.getBottom() - graphArea.getBottom()));
-    // Semi-transparent tint over plot so spectrogram shows through
-    g.setColour (juce::Colour (0x601c1c1e));
-    g.fillRect (plot);
+    g.fillRect (bounds);
 
     if (plot.getWidth() < 2.0f || plot.getHeight() < 2.0f)
         return;
+
+    // ---- 1/3-octave FFT overlay ----
+    if (fftEnabled_)
+        drawFftOverlay (g, plot);
 
     // ---- Left Y-axis mapping (dB SPL) ----
     auto splToY = [&] (float spl) -> float {
@@ -238,12 +238,7 @@ void LogComponent::paint (juce::Graphics& g)
         }
     }
 
-    // ---- Legend strip row 1: SPL series ----
-    {
-        const juce::Rectangle<float> splStrip (
-            plot.getX(), graphArea.getY(), plot.getWidth(), 36.0f);
-        drawLegend (g, splStrip);
-    }
+    // Legend strip row 1 is rendered by the ToggleButton children (splVisButton etc.)
 
     // ---- Legend strip row 2: psychoacoustic metric selectors ----
     {
@@ -342,9 +337,9 @@ void LogComponent::paint (juce::Graphics& g)
         g.strokePath (path, juce::PathStrokeType (3.0f));
     };
 
-    drawSeries (colPeakSPL, [] (const LogEntry& e) { return e.peakSPL;    });
-    drawSeries (colPeakDBA, [] (const LogEntry& e) { return e.peakDBASPL; });
-    drawSeries (colPeakDBC, [] (const LogEntry& e) { return e.peakDBCSPL; });
+    if (splVisButton.getToggleState()) drawSeries (colPeakSPL, [] (const LogEntry& e) { return e.peakSPL;    });
+    if (dbaVisButton.getToggleState()) drawSeries (colPeakDBA, [] (const LogEntry& e) { return e.peakDBASPL; });
+    if (dbcVisButton.getToggleState()) drawSeries (colPeakDBC, [] (const LogEntry& e) { return e.peakDBCSPL; });
 
     // ---- Selected psychoacoustic metric (right axis) ----
     if (selectedMetric != PsychoMetric::Off)
@@ -372,35 +367,77 @@ void LogComponent::paint (juce::Graphics& g)
     }
 }
 
-void LogComponent::drawLegend (juce::Graphics& g, const juce::Rectangle<float>& strip)
+//==============================================================================
+void LogComponent::computeFftBands()
 {
-    struct Entry { juce::Colour colour; const char* label; };
-    const Entry entries[] = {
-        { colPeakSPL, "dB SPL"  },
-        { colPeakDBA, "dBA SPL" },
-        { colPeakDBC, "dBC SPL" },
-    };
+    processor.copyFftWindow (fftBuffer_.data(), kFftSize);
 
-    const float itemW   = 140.0f;
-    const float itemH   = 24.0f;
-    const float swatchW = 24.0f;
-    const float gap     = 20.0f;
-    const float totalW  = (itemW + gap) * 3 - gap;
-    float lx = strip.getX() + (strip.getWidth() - totalW) * 0.5f;
-    float ly = strip.getY() + (strip.getHeight() - itemH) * 0.5f;
+    const float fftGainDB   = processor.apvts.getRawParameterValue ("fftGain")->load();
+    const float gainLinear  = std::pow (10.0f, fftGainDB / 20.0f);
+    const float calOffset   = processor.apvts.getRawParameterValue ("calOffset")->load();
+    const double sampleRate = processor.getSampleRate();
 
-    g.setFont (juce::Font (juce::FontOptions().withHeight (19.0f)));
-    for (const auto& entry : entries)
+    // Apply Hann window + gain; zero imaginary half
+    for (int i = 0; i < kFftSize; ++i)
+        fftBuffer_[i] = fftBuffer_[i] * hannWindow_[i] * gainLinear;
+    std::fill (fftBuffer_.begin() + kFftSize, fftBuffer_.end(), 0.0f);
+
+    fft_.performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
+    // fftBuffer_[0..kFftSize/2] now holds magnitudes
+
+    const float bandFactor = std::pow (2.0f, 1.0f / 6.0f);  // 2^(1/6)
+    const float normFactor = static_cast<float> (kFftSize); // matches JUCE SimpleFFT convention
+
+    for (int b = 0; b < kNumFftBands; ++b)
     {
-        g.setColour (entry.colour);
-        g.fillRoundedRectangle (lx, ly + (itemH - 6.0f) * 0.5f, swatchW, 6.0f, 3.0f);
-        g.setColour (juce::Colours::white);
-        g.drawText (entry.label,
-                    static_cast<int>(lx + swatchW + 5.0f),
-                    static_cast<int>(ly),
-                    static_cast<int>(itemW - swatchW - 5.0f),
-                    static_cast<int>(itemH),
-                    juce::Justification::centredLeft, false);
-        lx += itemW + gap;
+        float fc   = kFftBandCenters[b];
+        int binLo  = std::max (1,            static_cast<int> (fc / bandFactor * kFftSize / sampleRate));
+        int binHi  = std::min (kFftSize / 2, static_cast<int> (fc * bandFactor * kFftSize / sampleRate) + 1);
+
+        float peak = 0.0f;
+        for (int k = binLo; k < binHi; ++k)
+            peak = std::max (peak, fftBuffer_[k]);
+
+        float dbSPL = 20.0f * std::log10 (peak / normFactor + 1e-10f) + calOffset;
+        fftBands_[b] = juce::jlimit (kYMin, kYMax, dbSPL);
     }
 }
+
+void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<float>& plot)
+{
+    const float bandFactor = std::pow (2.0f, 1.0f / 6.0f);
+    const float fMin = kFftBandCenters[0]              / bandFactor;
+    const float fMax = kFftBandCenters[kNumFftBands-1] * bandFactor;
+
+    auto freqToX = [&] (float freq) -> float
+    {
+        float t = std::log2 (freq / fMin) / std::log2 (fMax / fMin);
+        return plot.getX() + juce::jlimit (0.0f, 1.0f, t) * plot.getWidth();
+    };
+
+    auto splToY = [&] (float spl) -> float
+    {
+        float t = (spl - kYMin) / (kYMax - kYMin);
+        return plot.getBottom() - juce::jlimit (0.0f, 1.0f, t) * plot.getHeight();
+    };
+
+    for (int b = 0; b < kNumFftBands; ++b)
+    {
+        float fc  = kFftBandCenters[b];
+        float x1   = freqToX (fc / bandFactor);
+        float x2   = freqToX (fc * bandFactor);
+        float yBot = plot.getBottom();
+        float yTop = std::min (splToY (fftBands_[b]), yBot - 3.0f);   // min 3 px bar
+
+        if (x2 - x1 < 1.0f) continue;
+
+        // Bar fill
+        g.setColour (juce::Colour (0xaa34c759));   // 67% opaque green
+        g.fillRect (x1, yTop, x2 - x1 - 1.0f, yBot - yTop);
+
+        // Top highlight line
+        g.setColour (juce::Colour (0xff34c759));   // fully opaque highlight
+        g.fillRect (x1, yTop, x2 - x1 - 1.0f, 2.0f);
+    }
+}
+

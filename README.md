@@ -18,7 +18,6 @@ A professional Sound Pressure Level (SPL) meter built with JUCE, available as a 
 - Large horizontal bargraph meter (20–130 dB SPL scale)
 - Numeric SPL readout with peak-hold indicator
 - Time-series **log plot** — selectable metric: dB / dB(A) / dB(C) peak or RMS, Roughness, Sharpness, Fluctuation Strength, Loudness (Sone)
-- **Spectrogram** overlay (togglable)
 
 ### Psychoacoustic Metrics
 Continuous real-time estimation of:
@@ -48,8 +47,6 @@ Continuous real-time estimation of:
 | Calibration | dB offset to convert full-scale to SPL |
 | Hold Time | Peak hold duration in seconds |
 | Log Duration | History length shown in the log plot |
-| Spectrogram Gain | Brightness of the spectrogram overlay |
-
 ---
 
 ## Building
