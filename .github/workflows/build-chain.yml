@@ -49,21 +49,21 @@ jobs:
           path: build/SPLMeter_artefacts/Release/AU/SPLMeter.component
 
   # ---------------------------------------------------------------------------
-  # Windows — Standalone, VST3
+  # Windows — Standalone, VST3 (with ASIO)
   # ---------------------------------------------------------------------------
   build-windows:
-    name: Windows (Standalone · VST3)
+    name: Windows (Standalone · VST3 · ASIO)
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache JUCE
+      - name: Cache JUCE + ASIO SDK
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-windows
+          key: juce-8.0.7-asio-2.3.3-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release

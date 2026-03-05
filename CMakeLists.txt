@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 1.1.0)
+project(SPLMeter VERSION 1.5.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -16,20 +16,59 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------------------
-# ASIO SDK — Windows only, auto-detected from Vendor/asiosdk/
-# To enable ASIO: download the SDK from https://www.steinberg.net/asiosdk
-# and copy the unzipped SDK root (the folder containing asio/, common/, host/,
-# driver/, README.md …) into Vendor/asiosdk/ inside the project root.
-# The Vendor/asiosdk/ folder is git-ignored; CI builds without it are fine.
+# ASIO SDK — Windows only
+#
+# Priority order:
+#   1. CMake cache variable ASIO_SDK_DIR (set by user / CI: -DASIO_SDK_DIR=...)
+#   2. Vendor/asiosdk/ inside the project root (any nesting depth)
+#   3. Auto-download from Steinberg CDN via FetchContent
+#
+# The ASIO SDK headers (asio.h, iasiodrv.h …) live in the "common/" sub-folder
+# of the SDK root.  CMake locates that folder automatically regardless of the
+# archive structure.
 # ---------------------------------------------------------------------------
 if(WIN32)
-    set(_ASIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk/common/common")
-    if(EXISTS "${_ASIO_SDK_DIR}/iasiodrv.h")
-        set(ASIO_SDK_DIR "${_ASIO_SDK_DIR}")
-        message(STATUS "ASIO support enabled: ${ASIO_SDK_DIR}")
+    set(ASIO_SDK_DIR "" CACHE PATH "Path to the ASIO SDK 'common' directory (containing asio.h)")
+
+    # --- 1. User-provided path (already contains asio.h) ---
+    if(ASIO_SDK_DIR AND EXISTS "${ASIO_SDK_DIR}/iasiodrv.h")
+        message(STATUS "ASIO SDK (user-supplied): ${ASIO_SDK_DIR}")
+
+    # --- 2. Vendor directory (any depth) ---
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk")
+        file(GLOB_RECURSE _ASIO_HEADER
+             "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk/*/iasiodrv.h")
+        if(_ASIO_HEADER)
+            list(GET _ASIO_HEADER 0 _ASIO_HEADER)
+            get_filename_component(ASIO_SDK_DIR "${_ASIO_HEADER}" DIRECTORY)
+            message(STATUS "ASIO SDK (Vendor/): ${ASIO_SDK_DIR}")
+        endif()
+
+    # --- 3. Auto-download from Steinberg ---
     else()
-        set(ASIO_SDK_DIR "")
-        message(STATUS "ASIO SDK not found in Vendor/asiosdk/common — ASIO disabled (WASAPI/WDM only)")
+        message(STATUS "ASIO SDK not found locally — downloading from Steinberg …")
+        FetchContent_Declare(
+            asiosdk
+            URL      https://download.steinberg.net/sdk_downloads/asiosdk_2.3.3_2019-06-14.zip
+            URL_HASH MD5=86f7e9c1c2c71e1ddc7e78c0febd19b4
+        )
+        FetchContent_MakeAvailable(asiosdk)
+
+        # Locate iasiodrv.h inside the extracted tree
+        file(GLOB_RECURSE _ASIO_HEADER "${asiosdk_SOURCE_DIR}/*/iasiodrv.h")
+        if(_ASIO_HEADER)
+            list(GET _ASIO_HEADER 0 _ASIO_HEADER)
+            get_filename_component(ASIO_SDK_DIR "${_ASIO_HEADER}" DIRECTORY)
+            message(STATUS "ASIO SDK (downloaded): ${ASIO_SDK_DIR}")
+        else()
+            message(WARNING "ASIO SDK downloaded but iasiodrv.h not found — ASIO disabled")
+        endif()
+    endif()
+
+    if(ASIO_SDK_DIR)
+        message(STATUS "ASIO support ENABLED: ${ASIO_SDK_DIR}")
+    else()
+        message(STATUS "ASIO support DISABLED (WASAPI/WDM only)")
     endif()
 endif()
 
@@ -44,7 +83,7 @@ else()
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     1.1.0
+    VERSION                     1.5.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}

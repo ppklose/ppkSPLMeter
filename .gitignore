@@ -14,7 +14,8 @@ xcuserdata/
 Builds/MacOSX/*.xcodeproj/xcuserdata/
 Builds/MacOSX/*.xcodeproj/project.xcworkspace/xcuserdata/
 
-# ASIO SDK (local only — not committed; place headers in Vendor/asiosdk/common/)
+# ASIO SDK — not committed; CMake downloads it automatically on Windows.
+# Optionally place a local copy at Vendor/asiosdk/ to avoid the download.
 Vendor/asiosdk/
 
 # Object files / intermediates
