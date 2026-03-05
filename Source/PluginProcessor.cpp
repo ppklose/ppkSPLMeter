@@ -74,6 +74,11 @@ SPLMeterAudioProcessor::createParameterLayout()
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "graphOverlayEnabled", "Graph Overlay", false));
 
+    for (int i = 0; i < 8; ++i)
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            "channelMute" + juce::String (i),
+            "Mute IN0" + juce::String (i + 1), false));
+
     return { params.begin(), params.end() };
 }
 
@@ -192,6 +197,13 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
+
+    // --- Per-channel muting (applied to live buffer before any processing) ---
+    for (int ch = 0; ch < juce::jmin (numChannels, 8); ++ch)
+    {
+        if (apvts.getRawParameterValue ("channelMute" + juce::String (ch))->load() > 0.5f)
+            buffer.clear (ch, 0, numSamples);
+    }
 
     // --- File mode: pull audio from transport instead of live input ---
     const bool fileMode = fileModeActive.load();

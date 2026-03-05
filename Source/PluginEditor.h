@@ -93,12 +93,15 @@ private:
     LogComponent         log;
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
-    juce::TextButton settingsButton { "Settings" };
-    juce::TextButton resetButton    { "Reset" };
-    juce::TextButton saveButton     { "Save JPG" };
-    juce::TextButton saveCsvButton  { "Save CSV" };
-    juce::TextButton fastButton     { "FAST" };
-    juce::TextButton slowButton     { "SLOW" };
+    juce::TextButton settingsButton  { "Settings" };
+    juce::TextButton resetButton     { "Reset" };
+    juce::TextButton saveButton      { "Save JPG" };
+    juce::TextButton saveCsvButton   { "Save CSV" };
+    juce::TextButton basicModeButton { "Advanced" };
+    juce::TextButton fastButton      { "FAST" };
+    juce::TextButton slowButton      { "SLOW" };
+    bool basicMode_      = false;
+    int  extendedHeight_ = 900;
     MonitorButton    monitorButton;
 
     juce::TextButton realTimeButton { "Real Time" };

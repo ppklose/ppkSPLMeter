@@ -3,6 +3,46 @@
 #include "PluginProcessor.h"
 
 //==============================================================================
+// Custom channel mute button: shows label with red X + strikethrough when muted
+class ChannelMuteButton : public juce::Button
+{
+public:
+    ChannelMuteButton() : juce::Button ("") { setClickingTogglesState (true); }
+
+    void paintButton (juce::Graphics& g, bool isMouseOver, bool /*isButtonDown*/) override
+    {
+        const bool muted = getToggleState();
+        const auto b = getLocalBounds().toFloat();
+
+        // Background
+        g.setColour (isMouseOver ? juce::Colour (0xff4a4a4e) : juce::Colour (0xff3a3a3c));
+        g.fillRoundedRectangle (b, 4.0f);
+
+        // Label text
+        const juce::Colour textCol = muted ? juce::Colour (0xffff453a) : juce::Colours::white;
+        g.setColour (textCol);
+        const juce::Font font (juce::FontOptions().withHeight (13.0f));
+        g.setFont (font);
+        g.drawText (getButtonText(), b.toNearestInt(), juce::Justification::centred, false);
+
+        if (muted)
+        {
+            // Strikethrough across the label text
+            const float textW = font.getStringWidthFloat (getButtonText());
+            const float textX = b.getCentreX() - textW * 0.5f;
+            const float midY  = b.getCentreY();
+            g.setColour (juce::Colour (0xffff453a));
+            g.drawLine (textX, midY, textX + textW, midY, 1.5f);
+
+            // Red X — two diagonals filling the button area (inset a bit)
+            const float m = 4.0f;
+            g.drawLine (b.getX() + m, b.getY() + m, b.getRight() - m, b.getBottom() - m, 1.5f);
+            g.drawLine (b.getRight() - m, b.getY() + m, b.getX() + m, b.getBottom() - m, 1.5f);
+        }
+    }
+};
+
+//==============================================================================
 class SettingsComponent  : public juce::Component,
                            private juce::Timer
 {
@@ -267,6 +307,20 @@ public:
         graphOverlayClearButton.onClick = [this, &p] { p.clearGraphOverlay(); };
         addAndMakeVisible (graphOverlayClearButton);
 
+        // Channel mute checkboxes IN01..IN08
+        const juce::String chNames[8] = { "IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08" };
+        for (int i = 0; i < 8; ++i)
+        {
+            channelMuteButtons[i].setButtonText (chNames[i]);
+            channelMuteButtons[i].setTooltip ("Mute input channel " + juce::String (i + 1));
+            channelMuteButtons[i].onClick = [this, &p, i]
+            {
+                auto* param = p.apvts.getParameter ("channelMute" + juce::String (i));
+                param->setValueNotifyingHost (channelMuteButtons[i].getToggleState() ? 1.0f : 0.0f);
+            };
+            addAndMakeVisible (channelMuteButtons[i]);
+        }
+
         // Full Screen toggle
         fullscreenButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
         fullscreenButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));
@@ -297,6 +351,15 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (16, 16);
+
+        // Channel mute row: IN01..IN08 (very bottom)
+        {
+            auto row = area.removeFromBottom (28);
+            const int btnW = row.getWidth() / 8;
+            for (int i = 0; i < 8; ++i)
+                channelMuteButtons[i].setBounds (row.removeFromLeft (btnW));
+        }
+        area.removeFromBottom (6);
 
         // Full Screen button (bottom)
         fullscreenButton.setBounds (area.removeFromBottom (32).reduced (0, 2));
@@ -543,6 +606,13 @@ private:
             graphOverlayLoadButton.setButtonText (processor.getGraphOverlayFileName());
         else
             graphOverlayLoadButton.setButtonText ("Load Graph Overlay");
+
+        // Sync channel mute checkboxes
+        for (int i = 0; i < 8; ++i)
+        {
+            bool muted = processor.apvts.getRawParameterValue ("channelMute" + juce::String (i))->load() > 0.5f;
+            channelMuteButtons[i].setToggleState (muted, juce::dontSendNotification);
+        }
     }
 
     static void setChoiceParam (SPLMeterAudioProcessor& p, const char* id, int index)
@@ -610,6 +680,9 @@ private:
     juce::TextButton graphOverlayClearButton  { "Clear" };
     std::unique_ptr<juce::FileChooser> graphOverlayFileChooser_;
 
+    // Channel mute checkboxes
+    ChannelMuteButton channelMuteButtons[8];
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SettingsComponent)
 };
 
@@ -628,7 +701,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (620, 510);
+        content->setSize (620, 548);
         setContentOwned (content, true);
         setResizable (false, false);
     }

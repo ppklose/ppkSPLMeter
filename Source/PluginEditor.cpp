@@ -163,6 +163,33 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (monitorButton);
 
+    // Basic / Extended mode toggle
+    basicModeButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xffff453a));  // red when Advanced
+    basicModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));  // blue when Basic
+    basicModeButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+    basicModeButton.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff1c1c1e));
+    basicModeButton.setClickingTogglesState (true);
+    basicModeButton.setTooltip ("Basic: show meter only  /  Extended: show meter + timeline/FFT");
+    basicModeButton.onClick = [this]
+    {
+        basicMode_ = basicModeButton.getToggleState();
+        basicModeButton.setButtonText (basicMode_ ? "Basic" : "Advanced");
+        log.setVisible (!basicMode_);
+        if (basicMode_)
+        {
+            extendedHeight_ = getHeight();
+            const int basicH = 100 + 215 + 24;  // title + meter + build strip
+            setResizeLimits (480, basicH, 3840, 2160);
+            setSize (getWidth(), basicH);
+        }
+        else
+        {
+            setResizeLimits (480, 500, 3840, 2160);
+            setSize (getWidth(), extendedHeight_);
+        }
+    };
+    addAndMakeVisible (basicModeButton);
+
     // Settings button — opens the settings panel window
     settingsButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
@@ -230,10 +257,11 @@ void SPLMeterAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
     auto titleBar = area.removeFromTop (100);
-    settingsButton.setBounds (titleBar.removeFromLeft (160).reduced (10, 22));
-    saveButton.setBounds     (titleBar.removeFromLeft (160).reduced (10, 22));
-    saveCsvButton.setBounds  (titleBar.removeFromLeft (160).reduced (10, 22));
-    resetButton.setBounds (titleBar.removeFromRight (160).reduced (10, 22));
+    settingsButton.setBounds  (titleBar.removeFromLeft (160).reduced (10, 22));
+    basicModeButton.setBounds (titleBar.removeFromLeft (110).reduced (10, 22));
+    saveButton.setBounds      (titleBar.removeFromLeft (160).reduced (10, 22));
+    saveCsvButton.setBounds   (titleBar.removeFromLeft (160).reduced (10, 22));
+    resetButton.setBounds     (titleBar.removeFromRight (160).reduced (10, 22));
 
     // Real Time / File buttons — centred below the title text
     const int modeBtnW = 110;
@@ -258,7 +286,8 @@ void SPLMeterAudioProcessorEditor::resized()
 
     area.removeFromBottom (24);   // reserve strip for build time
 
-    log.setBounds (area);
+    if (!basicMode_)
+        log.setBounds (area);
 }
 
 //==============================================================================
