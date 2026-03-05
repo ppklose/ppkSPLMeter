@@ -117,6 +117,33 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ---
 
+## Changelog
+
+### v1.1.0
+- **Resizable window** — drag to any size between 480×500 and 3840×2160 (default 1400×900)
+- **SPL series visibility toggles** — individual checkboxes for dB, dB(A), and dB(C) series in the log plot
+- **Persistent psychoacoustic readout** — Roughness, Sharpness, Fluctuation, and Loudness values are always shown regardless of the log selector state
+- **Save CSV** — export the full measurement log (timestamps, all SPL and psychoacoustic values) to a CSV file
+- **1/3-octave FFT overlay** — 31-band ISO 266 analysis (20 Hz–20 kHz) displayed as a green semi-transparent overlay in the log plot; toggled via the FFT button
+- **FFT Gain knob** — rotary control to adjust the input level fed into the FFT
+- **MIDI learn** — right-click Calibration, FFT Gain, or Hold Time to assign or clear a MIDI CC mapping; assigned CC numbers are shown in the knob label
+- **Windows ASIO support** — ASIO SDK is fetched automatically via CMake FetchContent from the Steinberg VST3 SDK repository
+- **Spectrogram removed** — replaced by the 1/3-octave FFT overlay in the log plot
+
+### v1.0.0
+- Initial release
+- Broadband SPL measurement in dB, dB(A), dB(C) — peak and RMS
+- IEC 61672 FAST / SLOW time weighting
+- Horizontal bargraph meter (20–130 dB SPL scale)
+- Time-series log plot with configurable history length
+- Real-time psychoacoustic metrics: Roughness, Sharpness, Fluctuation Strength, Loudness
+- Real Time and File input modes
+- Calibration offset and peak hold time controls
+- Save JPG export
+- Standalone, VST3, and AU formats
+
+---
+
 ## License
 
 © Philipp Paul Klose. All rights reserved.
