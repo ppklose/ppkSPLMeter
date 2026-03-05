@@ -16,19 +16,19 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------------------
-# Fetch ASIO SDK (part of VST3 SDK) — Windows only
+# ASIO SDK — Windows only, optional
+# Set -DASIO_SDK_DIR=<path/to/asiosdk/common> to enable ASIO support.
+# The ASIO SDK is not redistributed here; obtain it from Steinberg or via
+# the vst3sdk repository (steinbergmedia/vst3sdk, asiosdk submodule).
 # ---------------------------------------------------------------------------
 if(WIN32)
-    FetchContent_Declare(
-        vst3sdk
-        GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
-        GIT_TAG        master
-        GIT_SHALLOW    TRUE
-        GIT_SUBMODULES "asiosdk"            # asiosdk is a submodule — must be explicitly requested
-        SOURCE_SUBDIR  "do_not_configure"   # prevent CMake from processing its CMakeLists
-    )
-    FetchContent_MakeAvailable(vst3sdk)
-    set(ASIO_SDK_DIR "${vst3sdk_SOURCE_DIR}/asiosdk/common")
+    set(ASIO_SDK_DIR "" CACHE PATH "Path to ASIO SDK common directory (contains iasiodrv.h)")
+    if(ASIO_SDK_DIR AND EXISTS "${ASIO_SDK_DIR}/iasiodrv.h")
+        message(STATUS "ASIO support enabled: ${ASIO_SDK_DIR}")
+    else()
+        message(STATUS "ASIO SDK not found — ASIO support disabled. Pass -DASIO_SDK_DIR=<path> to enable.")
+        set(ASIO_SDK_DIR "")
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ target_sources(SPLMeter PRIVATE
 
 target_include_directories(SPLMeter PRIVATE
     Source
-    $<$<BOOL:${WIN32}>:${ASIO_SDK_DIR}>
+    $<$<BOOL:${ASIO_SDK_DIR}>:${ASIO_SDK_DIR}>
 )
 
 target_compile_definitions(SPLMeter PUBLIC
@@ -76,7 +76,7 @@ target_compile_definitions(SPLMeter PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
-    $<$<BOOL:${WIN32}>:JUCE_ASIO=1>
+    $<$<BOOL:${ASIO_SDK_DIR}>:JUCE_ASIO=1>
 )
 
 target_link_libraries(SPLMeter

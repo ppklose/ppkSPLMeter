@@ -97,12 +97,19 @@ open Builds/MacOSX/build/Release/SPLMeter.app
 
 ### Windows (CMake)
 
-ASIO support is included automatically — the build system fetches the ASIO SDK from the Steinberg VST3 SDK repository via CMake FetchContent.
-
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
+
+**ASIO support (optional):** Obtain the ASIO SDK from Steinberg (or clone `steinbergmedia/vst3sdk` and initialise its `asiosdk` submodule), then pass the path to the `common` directory:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DASIO_SDK_DIR="C:/path/to/asiosdk/common"
+cmake --build build --config Release
+```
+
+Without `-DASIO_SDK_DIR`, the build completes normally with WASAPI/WDM support only.
 
 ### CI
 
