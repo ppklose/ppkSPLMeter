@@ -16,18 +16,19 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------------------
-# ASIO SDK — Windows only, optional
-# Set -DASIO_SDK_DIR=<path/to/asiosdk/common> to enable ASIO support.
-# The ASIO SDK is not redistributed here; obtain it from Steinberg or via
-# the vst3sdk repository (steinbergmedia/vst3sdk, asiosdk submodule).
+# ASIO SDK — Windows only, auto-detected from Vendor/asiosdk/common/
+# To enable ASIO: download the SDK from https://www.steinberg.net/asiosdk
+# and copy the contents of asiosdk_x.x.x/common/ into Vendor/asiosdk/common/
+# The Vendor/asiosdk/ folder is git-ignored; CI builds without it are fine.
 # ---------------------------------------------------------------------------
 if(WIN32)
-    set(ASIO_SDK_DIR "" CACHE PATH "Path to ASIO SDK common directory (contains iasiodrv.h)")
-    if(ASIO_SDK_DIR AND EXISTS "${ASIO_SDK_DIR}/iasiodrv.h")
+    set(_ASIO_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/asiosdk/common")
+    if(EXISTS "${_ASIO_SDK_DIR}/iasiodrv.h")
+        set(ASIO_SDK_DIR "${_ASIO_SDK_DIR}")
         message(STATUS "ASIO support enabled: ${ASIO_SDK_DIR}")
     else()
-        message(STATUS "ASIO SDK not found — ASIO support disabled. Pass -DASIO_SDK_DIR=<path> to enable.")
         set(ASIO_SDK_DIR "")
+        message(STATUS "ASIO SDK not found in Vendor/asiosdk/common — ASIO disabled (WASAPI/WDM only)")
     endif()
 endif()
 

@@ -14,6 +14,9 @@ xcuserdata/
 Builds/MacOSX/*.xcodeproj/xcuserdata/
 Builds/MacOSX/*.xcodeproj/project.xcworkspace/xcuserdata/
 
+# ASIO SDK (local only — not committed; place headers in Vendor/asiosdk/common/)
+Vendor/asiosdk/
+
 # Object files / intermediates
 *.o
 *.a
