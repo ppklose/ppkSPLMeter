@@ -22,7 +22,7 @@ if(WIN32)
     FetchContent_Declare(
         vst3sdk
         GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
-        GIT_TAG        main
+        GIT_TAG        master
         GIT_SHALLOW    TRUE
         SOURCE_SUBDIR  "do_not_configure"   # prevent CMake from processing its CMakeLists
     )
