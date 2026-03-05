@@ -24,7 +24,14 @@ juce::Colour MeterComponent::colourForSPL (float spl) const noexcept
 void MeterComponent::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    g.fillAll (juce::Colour (0xff1c1c1e));
+
+    const juce::Colour bgMain      = lightMode_ ? juce::Colour (0xfff2f2f7) : juce::Colour (0xff1c1c1e);
+    const juce::Colour bgBar       = lightMode_ ? juce::Colour (0xffcecece) : juce::Colour (0xff2c2c2e);
+    const juce::Colour textPrimary = lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white;
+    const juce::Colour textSecond  = lightMode_ ? juce::Colour (0xff6c6c70) : juce::Colour (0xffaeaeb2);
+    const juce::Colour tickColour  = lightMode_ ? juce::Colour (0x99000000) : juce::Colour (0x99ffffff);
+
+    g.fillAll (bgMain);
 
     const float margin   = 20.0f;
     const float barH     = 56.0f;
@@ -38,27 +45,49 @@ void MeterComponent::paint (juce::Graphics& g)
     const float peakReadoutY = margin;
     const float peakY        = peakReadoutY + readoutH + 4.0f;
     {
-        // numeric readout ABOVE the bar
-        g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
-        g.setColour (juce::Colour (0xffaeaeb2));
-        juce::String peakStr = juce::String (peakSPL_, 1) + " dB SPL  |  "
-                             + juce::String (peakDBASPL_, 1) + " dBA SPL  |  "
-                             + juce::String (peakDBCSPL_, 1) + " dBC SPL";
-        g.drawText (peakStr, static_cast<int>(barAreaX), static_cast<int>(peakReadoutY),
-                    static_cast<int>(barAreaW), static_cast<int>(readoutH),
-                    juce::Justification::centredLeft, false);
+        // Three clickable readout segments (dB SPL / dBA SPL / dBC SPL)
+        // Fixed compact width so the values sit close together
+        const int   segW    = 160;
+        const int   sepW    = 24;   // width of "  |  " separator
+        struct { const char* unit; float value; Band band; } segs[3] = {
+            { "dB SPL",  peakSPL_,    Band::SPL },
+            { "dBA SPL", peakDBASPL_, Band::DBA },
+            { "dBC SPL", peakDBCSPL_, Band::DBC },
+        };
+        int curX = static_cast<int> (barAreaX);
+        for (int i = 0; i < 3; ++i)
+        {
+            bool sel = (selectedBand_ == segs[i].band);
+            auto rect = juce::Rectangle<int> (curX, static_cast<int> (peakReadoutY),
+                                              segW,  static_cast<int> (readoutH));
+            readoutRects_[i] = rect;
+
+            auto fo = juce::FontOptions().withHeight (22.0f);
+            if (sel) fo = fo.withStyle ("Bold");
+            g.setFont (juce::Font (fo));
+            g.setColour (sel ? textPrimary : textSecond);
+            g.drawText (juce::String (segs[i].value, 1) + " " + segs[i].unit,
+                        rect, juce::Justification::centredLeft, false);
+
+            curX += segW;
+
+            // separator between segments
+            if (i < 2)
+            {
+                g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+                g.setColour (juce::Colour (0xff48484a));
+                g.drawText ("  |  ", curX, static_cast<int> (peakReadoutY),
+                            sepW, static_cast<int> (readoutH), juce::Justification::centred, false);
+                curX += sepW;
+            }
+        }
 
         // background track
-        g.setColour (juce::Colour (0xff2c2c2e));
+        g.setColour (bgBar);
         g.fillRoundedRectangle (barAreaX, peakY, barAreaW, barH, 4.0f);
 
-        // bar fill — colour zones (all values in dB SPL):
-        //   20– 40 : blue
-        //   40– 80 : green
-        //   80– 96 : yellow
-        //   96–106 : orange
-        //  106–130 : red
-        float fillW = splToX (peakSPL_, barAreaW);
+        // bar fill — driven by selected band
+        float fillW = splToX (selectedValue(), barAreaW);
         if (fillW > 0.0f)
         {
             const float z1 = splToX ( 40.0f, barAreaW);   // blue   → green
@@ -95,8 +124,8 @@ void MeterComponent::paint (juce::Graphics& g)
         }
 
         // ---- Peak hold indicator ----
-        float holdX = barAreaX + splToX (holdSPL_, barAreaW);
-        g.setColour (juce::Colours::white);
+        float holdX = barAreaX + splToX (holdVal_, barAreaW);
+        g.setColour (textPrimary);
         g.fillRect (holdX - 2.0f, peakY, 4.0f, barH);
 
         // ---- dB scale overlaid on bar ----
@@ -105,10 +134,10 @@ void MeterComponent::paint (juce::Graphics& g)
         {
             float x = barAreaX + splToX (db, barAreaW);
             // tick mark
-            g.setColour (juce::Colour (0x99ffffff));
+            g.setColour (tickColour);
             g.drawVerticalLine (static_cast<int>(x), peakY, peakY + barH);
             // label centred on the bar
-            g.setColour (juce::Colours::white);
+            g.setColour (textPrimary);
             g.drawText (juce::String (static_cast<int>(db)),
                         static_cast<int>(x) - 24, static_cast<int>(peakY),
                         48, static_cast<int>(barH),
@@ -135,12 +164,12 @@ void MeterComponent::paint (juce::Graphics& g)
                                const juce::String& value)
     {
         g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f).withStyle ("Bold")));
-        g.setColour (juce::Colours::white);
+        g.setColour (textPrimary);
         g.drawText (label, static_cast<int>(x), static_cast<int>(y),
                     static_cast<int>(boldW), 28, juce::Justification::centredLeft, false);
 
         g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
-        g.setColour (juce::Colour (0xffaeaeb2));
+        g.setColour (textSecond);
         g.drawText (value, static_cast<int>(x + boldW + 8.0f), static_cast<int>(y),
                     static_cast<int>(valW), 28, juce::Justification::centredLeft, false);
     };
@@ -153,6 +182,22 @@ void MeterComponent::paint (juce::Graphics& g)
         drawPsychoRow (col2X,   sharpnessY, "Loudness",    juce::String (sone_,       2) + " sone");
     }
 
+}
+
+//==============================================================================
+void MeterComponent::mouseDown (const juce::MouseEvent& e)
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        if (readoutRects_[i].contains (e.getPosition()))
+        {
+            selectedBand_    = static_cast<Band> (i);
+            holdVal_         = kMin;
+            holdTimestampMs_ = 0.0;
+            repaint();
+            return;
+        }
+    }
 }
 
 //==============================================================================
@@ -169,10 +214,11 @@ void MeterComponent::setValues (float peakSPL, float peakDBASPL, float peakDBCSP
     sone_        = sone;
 
     double now = juce::Time::getMillisecondCounterHiRes();
-    if (peakSPL_ >= holdSPL_ || (now - holdTimestampMs_) > holdDurationMs_)
+    float selVal = selectedValue();
+    if (selVal >= holdVal_ || (now - holdTimestampMs_) > holdDurationMs_)
     {
-        holdSPL_          = peakSPL_;
-        holdTimestampMs_  = now;
+        holdVal_         = selVal;
+        holdTimestampMs_ = now;
     }
 
     repaint();

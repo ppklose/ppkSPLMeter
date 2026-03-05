@@ -3,16 +3,20 @@
 
 //==============================================================================
 /**
-    Draws a horizontal Peak meter bar on a 20–130 dB SPL scale.
-    Both the raw dB SPL and the A-weighted dBA SPL values are shown numerically.
+    Draws a horizontal peak meter bar on a 20–130 dB SPL scale.
+    Clicking one of the three readout labels (dB SPL / dBA SPL / dBC SPL)
+    selects which value drives the bar and hold indicator.
 */
 class MeterComponent  : public juce::Component
 {
 public:
+    enum class Band { SPL = 0, DBA, DBC };
+
     MeterComponent();
 
-    void paint (juce::Graphics&) override;
-    void resized() override {}
+    void paint   (juce::Graphics&) override;
+    void resized () override {}
+    void mouseDown (const juce::MouseEvent&) override;
 
     void setValues (float peakSPL, float peakDBASPL, float peakDBCSPL,
                     float roughness, float fluctuation,
@@ -27,9 +31,16 @@ public:
     {
         peakSPL_ = peakDBASPL_ = peakDBCSPL_ = kMin;
         roughness_ = fluctuation_ = sharpness_ = sone_ = 0.0f;
-        holdSPL_ = kMin;
+        holdVal_ = kMin;
         holdTimestampMs_ = 0.0;
         repaint();
+    }
+
+    void setHoldDuration (double ms) noexcept { holdDurationMs_ = ms; }
+
+    void setLightMode (bool light) noexcept
+    {
+        if (lightMode_ != light) { lightMode_ = light; repaint(); }
     }
 
 private:
@@ -41,18 +52,28 @@ private:
     float sharpness_  = 0.0f;
     float sone_       = 0.0f;
 
-    bool  psychoVisible_      = true;
-    float holdSPL_            = 0.0f;
-    double holdTimestampMs_   = 0.0;
-    double holdDurationMs_    = 2000.0;
+    bool  lightMode_        = false;
+    bool  psychoVisible_    = true;
+    Band  selectedBand_     = Band::SPL;
+    float holdVal_          = 0.0f;
+    double holdTimestampMs_ = 0.0;
+    double holdDurationMs_  = 2000.0;
 
-public:
-    void setHoldDuration (double ms) noexcept { holdDurationMs_ = ms; }
-
-private:
+    // hit-test rects for the three readout labels (set during paint)
+    juce::Rectangle<int> readoutRects_[3];
 
     static constexpr float kMin = 20.0f;
     static constexpr float kMax = 130.0f;
+
+    float selectedValue() const noexcept
+    {
+        switch (selectedBand_)
+        {
+            case Band::DBA: return peakDBASPL_;
+            case Band::DBC: return peakDBCSPL_;
+            default:        return peakSPL_;
+        }
+    }
 
     float splToX (float spl, float totalWidth) const noexcept;
     juce::Colour colourForSPL (float spl) const noexcept;

@@ -36,6 +36,35 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftGain", "FFT Gain (dB)",
         juce::NormalisableRange<float> (-40.0f, 40.0f, 0.5f), 0.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "fftSmoothing", "FFT Smoothing",
+        juce::NormalisableRange<float> (0.0f, 0.95f, 0.01f), 0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "fftPeakHold", "FFT Peak Hold", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "fftDisplayMode", "FFT Display Mode",
+        juce::StringArray { "Bars", "Area", "Bars+Peak" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "fftBandRes", "FFT Band Resolution",
+        juce::StringArray { "1/1 Oct", "1/3 Oct", "1/6 Oct", "1/12 Oct", "1/24 Oct" }, 1));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "fftWindowType", "FFT Window",
+        juce::StringArray { "Hann", "Hamming", "Blackman", "Flat-top", "Rect" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "fftOverlap", "FFT Overlap",
+        juce::StringArray { "0%", "25%", "50%", "75%" }, 2));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "fftRTAMode", "FFT RTA +3dB/oct", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "bandpassEnabled", "20-20k Bandpass", false));
+
     return { params.begin(), params.end() };
 }
 
@@ -72,6 +101,21 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     logIntervalSamples = static_cast<int> (0.125 * sampleRate);
     logSampleCounter = 0;
+
+    // 20-20k bandpass: 8th-order Butterworth Q values for each biquad stage
+    static const double bpQ[kBpStages] = { 0.5098, 0.6013, 0.8999, 2.5629 };
+    for (int st = 0; st < kBpStages; ++st)
+    {
+        auto hpCoeff = juce::IIRCoefficients::makeHighPass (sampleRate, 20.0,    bpQ[st]);
+        auto lpCoeff = juce::IIRCoefficients::makeLowPass  (sampleRate, 20000.0, bpQ[st]);
+        for (int ch = 0; ch < 8; ++ch)
+        {
+            bpHP[ch][st].setCoefficients (hpCoeff);
+            bpHP[ch][st].reset();
+            bpLP[ch][st].setCoefficients (lpCoeff);
+            bpLP[ch][st].reset();
+        }
+    }
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
     fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
@@ -149,6 +193,27 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             transportSource.stop();
             fileModeActive.store (false);
         }
+    }
+
+    // 20Hz–20kHz bandpass (48dB/oct) applied per channel before mono mix
+    if (apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f)
+    {
+        auto applyBP = [this] (juce::AudioBuffer<float>& buf)
+        {
+            const int nCh = std::min (buf.getNumChannels(), 8);
+            const int nSa = buf.getNumSamples();
+            for (int ch = 0; ch < nCh; ++ch)
+            {
+                float* data = buf.getWritePointer (ch);
+                for (int st = 0; st < kBpStages; ++st)
+                {
+                    bpHP[ch][st].processSamples (data, nSa);
+                    bpLP[ch][st].processSamples (data, nSa);
+                }
+            }
+        };
+        if (fileMode) applyBP (fileReadBuffer);
+        else          applyBP (buffer);
     }
 
     const float channelScale = numChannels > 0 ? 1.0f / static_cast<float> (numChannels) : 1.0f;
@@ -231,6 +296,10 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             pruneLog (logDurationS);
         }
     }
+
+    // Mute output if monitoring is disabled
+    if (!monitorEnabled.load())
+        buffer.clear();
 }
 
 //==============================================================================

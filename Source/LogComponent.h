@@ -16,6 +16,7 @@ public:
 
     bool isOff()        const noexcept { return selectedMetric == PsychoMetric::Off; }
     void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
+    void setLightMode  (bool light) noexcept;
 
 private:
     void timerCallback() override;
@@ -32,17 +33,24 @@ private:
     juce::ToggleButton dbaVisButton  { "dBA SPL" };
     juce::ToggleButton dbcVisButton  { "dBC SPL" };
 
-    // 1/3-octave FFT
-    static constexpr int   kFftOrder   = 13;           // 2^13 = 8192
-    static constexpr int   kFftSize    = 1 << kFftOrder;
-    static constexpr int   kNumFftBands = 31;
-    static const float     kFftBandCenters[kNumFftBands];
+    // FFT
+    static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
+    static constexpr int   kFftSize     = 1 << kFftOrder;
+    static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (≈240 bands)
 
-    juce::dsp::FFT                  fft_        { kFftOrder };
-    std::array<float, kFftSize>     hannWindow_ {};
-    std::array<float, kFftSize * 2> fftBuffer_  {};
-    float                           fftBands_[kNumFftBands] {};
+    juce::dsp::FFT                  fft_             { kFftOrder };
+    std::array<float, kFftSize>     windowCoeffs_    {};   // current window function
+    std::array<float, kFftSize>     fftInputHistory_ {};   // overlap history
+    std::array<float, kFftSize * 2> fftBuffer_       {};
+    float                           fftBands_[kMaxFftBands] {};
+    float                           fftBandsSmoothed_[kMaxFftBands] {};
+    float                           fftPeakBands_[kMaxFftBands] {};
+    double                          fftPeakTimestamps_[kMaxFftBands] {};
+    int                             currentNumBands_    = 0;
+    int                             currentBandN_       = -1;
+    int                             currentWindowType_  = -1;
     bool                            fftEnabled_ = false;
+    bool                            lightMode_  = false;
 
     std::vector<LogEntry> rows;
 

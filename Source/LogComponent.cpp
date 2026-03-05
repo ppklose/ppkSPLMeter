@@ -1,10 +1,7 @@
 #include "LogComponent.h"
 
-const float LogComponent::kFftBandCenters[LogComponent::kNumFftBands] = {
-    20.f, 25.f, 31.5f, 40.f, 50.f, 63.f, 80.f, 100.f, 125.f, 160.f,
-    200.f, 250.f, 315.f, 400.f, 500.f, 630.f, 800.f, 1000.f, 1250.f, 1600.f,
-    2000.f, 2500.f, 3150.f, 4000.f, 5000.f, 6300.f, 8000.f, 10000.f, 12500.f, 16000.f, 20000.f
-};
+// Resolution index → subdivisions per octave
+static const int kBandNForRes[5] = { 1, 3, 6, 12, 24 };
 
 // SPL series colours
 const juce::Colour LogComponent::colPeakSPL  { 0xff5ac8fa };  // blue
@@ -15,7 +12,7 @@ const juce::Colour LogComponent::colPeakDBC  { 0xffff2d55 };  // red
 const juce::Colour LogComponent::colRmsDBC   { 0xffffe620 };  // yellow
 
 // Psychoacoustic series colours
-const juce::Colour LogComponent::colRoughness   { 0xff34eba1 };  // mint
+const juce::Colour LogComponent::colRoughness   { 0xffff9500 };  // orange
 const juce::Colour LogComponent::colFluctuation { 0xffeb34b1 };  // pink
 const juce::Colour LogComponent::colSharpness   { 0xffc77dff };  // violet
 const juce::Colour LogComponent::colLoudness    { 0xffffe57f };  // gold
@@ -52,14 +49,33 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupVisBtn (dbaVisButton, colPeakDBA);
     setupVisBtn (dbcVisButton, colPeakDBC);
 
+    // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
-        hannWindow_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
-                                                    * i / (kFftSize - 1)));
+        windowCoeffs_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
+                                                       * i / (kFftSize - 1)));
+    currentWindowType_ = 0;
 
     startTimerHz (8);
 }
 
 LogComponent::~LogComponent() { stopTimer(); }
+
+void LogComponent::setLightMode (bool light) noexcept
+{
+    if (lightMode_ == light) return;
+    lightMode_ = light;
+
+    juce::Colour textPrimary = light ? juce::Colour (0xff1c1c1e) : juce::Colours::white;
+    juce::Colour textSecond  = light ? juce::Colour (0xff6c6c70) : juce::Colour (0xffaeaeb2);
+
+    durationLabel.setColour (juce::Label::textColourId, textSecond);
+    durationSlider.setColour (juce::Slider::textBoxTextColourId, textPrimary);
+    splVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
+    dbaVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
+    dbcVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
+
+    repaint();
+}
 
 //==============================================================================
 void LogComponent::resized()
@@ -130,8 +146,12 @@ void LogComponent::paint (juce::Graphics& g)
         graphArea.getWidth()  - marginL - marginR,
         graphArea.getHeight() - marginT - marginB);
 
+    const juce::Colour bgMain     = lightMode_ ? juce::Colour (0xfff2f2f7) : juce::Colour (0xff1c1c1e);
+    const juce::Colour textSecond = lightMode_ ? juce::Colour (0xff48484a) : juce::Colour (0xff8e8e93);
+    const juce::Colour gridColour = lightMode_ ? juce::Colour (0x25000000) : juce::Colour (0x403a3a3c);
+
     // ---- Background ----
-    g.setColour (juce::Colour (0xff1c1c1e));
+    g.setColour (bgMain);
     g.fillRect (bounds);
 
     if (plot.getWidth() < 2.0f || plot.getHeight() < 2.0f)
@@ -180,9 +200,9 @@ void LogComponent::paint (juce::Graphics& g)
     for (float db = kYMin; db <= kYMax; db += 10.0f)
     {
         float y = splToY (db);
-        g.setColour (juce::Colour (0x403a3a3c));
+        g.setColour (gridColour);
         g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
-        g.setColour (juce::Colour (0xff8e8e93));
+        g.setColour (textSecond);
         g.drawText (juce::String (static_cast<int>(db)),
                     static_cast<int>(graphArea.getX()), static_cast<int>(y) - 14,
                     static_cast<int>(marginL) - 6, 28,
@@ -193,7 +213,7 @@ void LogComponent::paint (juce::Graphics& g)
     {
         juce::Graphics::ScopedSaveState ss (g);
         g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f).withStyle ("Bold")));
-        g.setColour (juce::Colour (0xff8e8e93));
+        g.setColour (textSecond);
         g.addTransform (juce::AffineTransform::rotation (
             -juce::MathConstants<float>::halfPi,
             graphArea.getX() + 18.0f, plot.getCentreY()));
@@ -211,7 +231,7 @@ void LogComponent::paint (juce::Graphics& g)
         {
             float val = rightMin + (rightMax - rightMin) * i / numTicks;
             float y   = rightToY (val);
-            g.setColour (juce::Colour (0x403a3a3c));
+            g.setColour (gridColour);
             g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
             g.setColour (psychoColour.withAlpha (0.8f));
             juce::String label = (rightUnit == "acum")
@@ -285,7 +305,7 @@ void LogComponent::paint (juce::Graphics& g)
 
     if (rows.empty())
     {
-        g.setColour (juce::Colour (0xff8e8e93));
+        g.setColour (textSecond);
         g.setFont (juce::Font (juce::FontOptions().withHeight (24.0f)));
         g.drawText ("No data yet", plot.toNearestInt(), juce::Justification::centred, false);
         return;
@@ -305,7 +325,7 @@ void LogComponent::paint (juce::Graphics& g)
     // ---- X-axis labels ----
     {
         g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
-        g.setColour (juce::Colour (0xff8e8e93));
+        g.setColour (textSecond);
         const int numXTicks = 5;
         for (int i = 0; i <= numXTicks; ++i)
         {
@@ -370,44 +390,146 @@ void LogComponent::paint (juce::Graphics& g)
 //==============================================================================
 void LogComponent::computeFftBands()
 {
-    processor.copyFftWindow (fftBuffer_.data(), kFftSize);
-
-    const float fftGainDB   = processor.apvts.getRawParameterValue ("fftGain")->load();
-    const float gainLinear  = std::pow (10.0f, fftGainDB / 20.0f);
-    const float calOffset   = processor.apvts.getRawParameterValue ("calOffset")->load();
+    const float  fftGainDB  = processor.apvts.getRawParameterValue ("fftGain")->load();
+    const float  gainLinear = std::pow (10.0f, fftGainDB / 20.0f);
+    const float  calOffset  = processor.apvts.getRawParameterValue ("calOffset")->load();
     const double sampleRate = processor.getSampleRate();
 
-    // Apply Hann window + gain; zero imaginary half
+    // ---- Window function (rebuild if changed) ----
+    const int wType = static_cast<int> (processor.apvts.getRawParameterValue ("fftWindowType")->load());
+    if (wType != currentWindowType_)
+    {
+        currentWindowType_ = wType;
+        const float tp = juce::MathConstants<float>::twoPi;
+        for (int i = 0; i < kFftSize; ++i)
+        {
+            const float c1 = std::cos (tp * i / (kFftSize - 1));
+            const float c2 = std::cos (2.0f * tp * i / (kFftSize - 1));
+            const float c3 = std::cos (3.0f * tp * i / (kFftSize - 1));
+            const float c4 = std::cos (4.0f * tp * i / (kFftSize - 1));
+            switch (wType)
+            {
+                case 1:  windowCoeffs_[i] = 0.54f - 0.46f * c1; break;                              // Hamming
+                case 2:  windowCoeffs_[i] = 0.42f - 0.5f * c1 + 0.08f * c2; break;                 // Blackman
+                case 3:  windowCoeffs_[i] = 0.2156f - 0.4160f*c1 + 0.2781f*c2
+                                          - 0.0836f*c3 + 0.0069f*c4; break;                         // Flat-top
+                case 4:  windowCoeffs_[i] = 1.0f; break;                                            // Rectangular
+                default: windowCoeffs_[i] = 0.5f * (1.0f - c1); break;                              // Hann
+            }
+        }
+    }
+
+    // ---- Overlap: maintain fftInputHistory_ ----
+    const int overlapIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftOverlap")->load());
+    static constexpr int kOverlapPct[4] = { 0, 25, 50, 75 };
+    const int overlap  = kOverlapPct[juce::jlimit (0, 3, overlapIdx)];
+    const int hopSize  = kFftSize * (100 - overlap) / 100;  // new samples this frame
+    const int keepSize = kFftSize - hopSize;
+
+    // Get a fresh full window from the processor into a temp buffer
+    std::array<float, kFftSize> tempBuf {};
+    processor.copyFftWindow (tempBuf.data(), kFftSize);
+
+    if (overlap > 0 && keepSize > 0)
+    {
+        // Shift history left by hopSize, fill right portion with newest samples
+        std::memmove (fftInputHistory_.data(),
+                      fftInputHistory_.data() + hopSize,
+                      keepSize * sizeof (float));
+        std::memcpy  (fftInputHistory_.data() + keepSize,
+                      tempBuf.data() + keepSize,
+                      hopSize * sizeof (float));
+    }
+    else
+    {
+        fftInputHistory_ = tempBuf;
+    }
+
+    // Apply window function + gain; zero imaginary half
     for (int i = 0; i < kFftSize; ++i)
-        fftBuffer_[i] = fftBuffer_[i] * hannWindow_[i] * gainLinear;
+        fftBuffer_[i] = fftInputHistory_[i] * windowCoeffs_[i] * gainLinear;
     std::fill (fftBuffer_.begin() + kFftSize, fftBuffer_.end(), 0.0f);
 
     fft_.performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
     // fftBuffer_[0..kFftSize/2] now holds magnitudes
 
-    const float bandFactor = std::pow (2.0f, 1.0f / 6.0f);  // 2^(1/6)
-    const float normFactor = static_cast<float> (kFftSize); // matches JUCE SimpleFFT convention
+    const float normFactor = static_cast<float> (kFftSize);
 
-    for (int b = 0; b < kNumFftBands; ++b)
+    // Determine resolution (N = subdivisions per octave)
+    const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
+    const int N      = kBandNForRes[juce::jlimit (0, 4, resIdx)];
+
+    // Reset smoothed/peak arrays when resolution changes
+    if (N != currentBandN_)
     {
-        float fc   = kFftBandCenters[b];
-        int binLo  = std::max (1,            static_cast<int> (fc / bandFactor * kFftSize / sampleRate));
-        int binHi  = std::min (kFftSize / 2, static_cast<int> (fc * bandFactor * kFftSize / sampleRate) + 1);
+        std::fill (fftBandsSmoothed_,   fftBandsSmoothed_   + kMaxFftBands, kYMin);
+        std::fill (fftPeakBands_,       fftPeakBands_       + kMaxFftBands, kYMin);
+        std::fill (fftPeakTimestamps_,  fftPeakTimestamps_  + kMaxFftBands, 0.0);
+        currentBandN_ = N;
+    }
+
+    // Compute band energies dynamically
+    const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (N));
+    const float halfBandFactor = std::sqrt (stepFactor);  // = 2^(1/(2N))
+
+    const bool rtaMode = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
+
+    currentNumBands_ = 0;
+    for (float fc = 20.0f; fc <= 20000.0f && currentNumBands_ < kMaxFftBands; fc *= stepFactor)
+    {
+        const int b    = currentNumBands_++;
+        const int binLo = std::max (1,            static_cast<int> (fc / halfBandFactor * kFftSize / sampleRate));
+        const int binHi = std::min (kFftSize / 2, static_cast<int> (fc * halfBandFactor * kFftSize / sampleRate) + 1);
 
         float peak = 0.0f;
         for (int k = binLo; k < binHi; ++k)
             peak = std::max (peak, fftBuffer_[k]);
 
         float dbSPL = 20.0f * std::log10 (peak / normFactor + 1e-10f) + calOffset;
+        if (rtaMode)
+            dbSPL += 3.0f * std::log2 (fc / 20.0f);   // +3 dB/oct relative to 20 Hz
         fftBands_[b] = juce::jlimit (kYMin, kYMax, dbSPL);
+    }
+
+    // Smoothing + peak hold
+    const float  alpha      = processor.apvts.getRawParameterValue ("fftSmoothing")->load();
+    const bool   peakHoldOn = processor.apvts.getRawParameterValue ("fftPeakHold")->load() > 0.5f;
+    const float  holdSecs   = processor.apvts.getRawParameterValue ("peakHoldTime")->load();
+    const double nowMs      = juce::Time::getMillisecondCounterHiRes();
+
+    for (int b = 0; b < currentNumBands_; ++b)
+    {
+        fftBandsSmoothed_[b] = alpha * fftBandsSmoothed_[b] + (1.0f - alpha) * fftBands_[b];
+
+        if (peakHoldOn)
+        {
+            if (fftBandsSmoothed_[b] >= fftPeakBands_[b]
+                || (nowMs - fftPeakTimestamps_[b]) > holdSecs * 1000.0)
+            {
+                fftPeakBands_[b]      = fftBandsSmoothed_[b];
+                fftPeakTimestamps_[b] = nowMs;
+            }
+        }
+        else
+        {
+            fftPeakBands_[b] = kYMin;
+        }
     }
 }
 
 void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<float>& plot)
 {
-    const float bandFactor = std::pow (2.0f, 1.0f / 6.0f);
-    const float fMin = kFftBandCenters[0]              / bandFactor;
-    const float fMax = kFftBandCenters[kNumFftBands-1] * bandFactor;
+    if (currentNumBands_ < 1) return;
+
+    const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
+    const int N      = kBandNForRes[juce::jlimit (0, 4, resIdx)];
+
+    const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (N));
+    const float halfBandFactor = std::sqrt (stepFactor);
+
+    // Fixed 20–20 kHz log-scale X mapping
+    const float fMin = 20.0f;
+    const float fMax = 20000.0f;
 
     auto freqToX = [&] (float freq) -> float
     {
@@ -421,23 +543,62 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         return plot.getBottom() - juce::jlimit (0.0f, 1.0f, t) * plot.getHeight();
     };
 
-    for (int b = 0; b < kNumFftBands; ++b)
+    const int  displayMode = static_cast<int> (processor.apvts.getRawParameterValue ("fftDisplayMode")->load());
+    const bool peakHoldOn  = processor.apvts.getRawParameterValue ("fftPeakHold")->load() > 0.5f;
+    const int  numBands    = currentNumBands_;
+
+    const juce::Colour colFill    { 0xaa34c759 };
+    const juce::Colour colSolid   { 0xff34c759 };
+    const juce::Colour colPeak    { 0xffffcc00 };  // amber peak line
+
+    // Iterate bands: fc = 20 * stepFactor^b
+    float fc0 = 20.0f;
+
+    if (displayMode == 1)  // ---- Area ----
     {
-        float fc  = kFftBandCenters[b];
-        float x1   = freqToX (fc / bandFactor);
-        float x2   = freqToX (fc * bandFactor);
-        float yBot = plot.getBottom();
-        float yTop = std::min (splToY (fftBands_[b]), yBot - 3.0f);   // min 3 px bar
+        juce::Path area;
+        float fc = fc0;
+        for (int b = 0; b < numBands; ++b, fc *= stepFactor)
+        {
+            float x = freqToX (fc);
+            float y = splToY (fftBandsSmoothed_[b]);
+            if (b == 0) area.startNewSubPath (x, y);
+            else        area.lineTo (x, y);
+        }
+        float fcLast = fc0 * std::pow (stepFactor, static_cast<float> (numBands - 1));
+        area.lineTo (freqToX (fcLast * halfBandFactor), plot.getBottom());
+        area.lineTo (freqToX (fc0    / halfBandFactor), plot.getBottom());
+        area.closeSubPath();
 
-        if (x2 - x1 < 1.0f) continue;
+        g.setColour (colFill);
+        g.fillPath (area);
+        g.setColour (colSolid);
+        g.strokePath (area, juce::PathStrokeType (2.0f));
+    }
+    else  // ---- Bars  /  Bars+Peak ----
+    {
+        float fc = fc0;
+        for (int b = 0; b < numBands; ++b, fc *= stepFactor)
+        {
+            float x1   = freqToX (fc / halfBandFactor);
+            float x2   = freqToX (fc * halfBandFactor);
+            float yBot = plot.getBottom();
+            float yTop = std::min (splToY (fftBandsSmoothed_[b]), yBot - 3.0f);
 
-        // Bar fill
-        g.setColour (juce::Colour (0xaa34c759));   // 67% opaque green
-        g.fillRect (x1, yTop, x2 - x1 - 1.0f, yBot - yTop);
+            if (x2 - x1 < 1.0f) continue;
 
-        // Top highlight line
-        g.setColour (juce::Colour (0xff34c759));   // fully opaque highlight
-        g.fillRect (x1, yTop, x2 - x1 - 1.0f, 2.0f);
+            g.setColour (colFill);
+            g.fillRect (x1, yTop, x2 - x1 - 1.0f, yBot - yTop);
+            g.setColour (colSolid);
+            g.fillRect (x1, yTop, x2 - x1 - 1.0f, 2.0f);
+
+            if (displayMode == 2 && peakHoldOn)
+            {
+                float yPeak = splToY (fftPeakBands_[b]);
+                g.setColour (colPeak);
+                g.fillRect (x1, yPeak, x2 - x1 - 1.0f, 2.0f);
+            }
+        }
     }
 }
 

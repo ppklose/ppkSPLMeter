@@ -7,14 +7,6 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     addAndMakeVisible (meter);
     addAndMakeVisible (log);
 
-    fftButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
-    fftButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff34c759));
-    fftButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
-    fftButton.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
-    fftButton.setClickingTogglesState (true);
-    fftButton.onClick = [this] { log.setFftEnabled (fftButton.getToggleState()); };
-    addAndMakeVisible (fftButton);
-
     resetButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
     resetButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
     resetButton.onClick = [this]
@@ -164,73 +156,37 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     setupTimeBtn (slowButton, 1);
     updateTimeWeightButtons();
 
-    // Calibration rotary
-    calSlider.setSliderStyle (juce::Slider::Rotary);
-    calSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 22);
-    calSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                                   juce::MathConstants<float>::pi * 2.75f,
-                                   true);
-    calSlider.setColour (juce::Slider::rotarySliderFillColourId,   juce::Colour (0xff5ac8fa));
-    calSlider.setColour (juce::Slider::textBoxTextColourId,        juce::Colours::white);
-    calSlider.setColour (juce::Slider::textBoxOutlineColourId,     juce::Colours::transparentBlack);
-    calSlider.setColour (juce::Slider::textBoxHighlightColourId,   juce::Colour (0xff5ac8fa));
-    addAndMakeVisible (calSlider);
+    // Monitor (mute) button — default OFF (muted)
+    monitorButton.onClick = [this]
+    {
+        audioProcessor.setMonitorEnabled (monitorButton.getToggleState());
+    };
+    addAndMakeVisible (monitorButton);
 
-    calLabel.setText ("Calibration", juce::dontSendNotification);
-    calLabel.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
-    calLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-    calLabel.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (calLabel);
+    // Settings button — opens the settings panel window
+    settingsButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    settingsButton.onClick = [this]
+    {
+        if (settingsWindow == nullptr)
+            settingsWindow = std::make_unique<SettingsWindow> (audioProcessor, *this,
+                [this] (bool e)     { log.setFftEnabled (e); },
+                [this] (bool light) { applyTheme (light); });
 
-    calAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        audioProcessor.apvts, "calOffset", calSlider);
-
-    // Peak hold rotary
-    holdSlider.setSliderStyle (juce::Slider::Rotary);
-    holdSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 22);
-    holdSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                                    juce::MathConstants<float>::pi * 2.75f,
-                                    true);
-    holdSlider.setColour (juce::Slider::rotarySliderFillColourId,   juce::Colour (0xff5ac8fa));
-    holdSlider.setColour (juce::Slider::textBoxTextColourId,        juce::Colours::white);
-    holdSlider.setColour (juce::Slider::textBoxOutlineColourId,     juce::Colours::transparentBlack);
-    holdSlider.setColour (juce::Slider::textBoxHighlightColourId,   juce::Colour (0xff5ac8fa));
-    addAndMakeVisible (holdSlider);
-
-    holdLabel.setText ("Hold Time", juce::dontSendNotification);
-    holdLabel.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
-    holdLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-    holdLabel.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (holdLabel);
-
-    holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        audioProcessor.apvts, "peakHoldTime", holdSlider);
-    holdSlider.setTooltip ("Hold time in seconds");
-
-    // FFT Gain rotary
-    fftGainSlider.setSliderStyle (juce::Slider::Rotary);
-    fftGainSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 22);
-    fftGainSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                                       juce::MathConstants<float>::pi * 2.75f,
-                                       true);
-    fftGainSlider.setColour (juce::Slider::rotarySliderFillColourId,  juce::Colour (0xff5ac8fa));
-    fftGainSlider.setColour (juce::Slider::textBoxTextColourId,       juce::Colours::white);
-    fftGainSlider.setColour (juce::Slider::textBoxOutlineColourId,    juce::Colours::transparentBlack);
-    fftGainSlider.setColour (juce::Slider::textBoxHighlightColourId,  juce::Colour (0xff5ac8fa));
-    addAndMakeVisible (fftGainSlider);
-
-    fftGainLabel.setText ("FFT Gain", juce::dontSendNotification);
-    fftGainLabel.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
-    fftGainLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-    fftGainLabel.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (fftGainLabel);
-
-    fftGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        audioProcessor.apvts, "fftGain", fftGainSlider);
-
-    calSlider.addMouseListener     (this, false);
-    holdSlider.addMouseListener    (this, false);
-    fftGainSlider.addMouseListener (this, false);
+        if (settingsWindow->isVisible())
+        {
+            settingsWindow->setVisible (false);
+        }
+        else
+        {
+            // Position below the settings button
+            auto pos = localPointToGlobal (settingsButton.getBounds().getBottomLeft());
+            settingsWindow->setTopLeftPosition (pos);
+            settingsWindow->setVisible (true);
+            settingsWindow->toFront (true);
+        }
+    };
+    addAndMakeVisible (settingsButton);
 
     setResizable (true, true);
     setResizeLimits (480, 500, 3840, 2160);
@@ -246,23 +202,27 @@ SPLMeterAudioProcessorEditor::~SPLMeterAudioProcessorEditor()
 //==============================================================================
 void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff1c1c1e));
+    const juce::Colour bgMain  = lightMode_ ? juce::Colour (0xfff2f2f7) : juce::Colour (0xff1c1c1e);
+    const juce::Colour bgBar   = lightMode_ ? juce::Colour (0xffe5e5ea) : juce::Colour (0xff2c2c2e);
+    const juce::Colour textPri = lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white;
+    const juce::Colour textFnt = lightMode_ ? juce::Colour (0xff8e8e93) : juce::Colour (0xff555558);
+
+    g.fillAll (bgMain);
 
     // Title bar
-    g.setColour (juce::Colour (0xff2c2c2e));
+    g.setColour (bgBar);
     g.fillRect (0, 0, getWidth(), 100);
 
     g.setFont (juce::Font (juce::FontOptions().withHeight (28.0f).withStyle ("Bold")));
-    g.setColour (juce::Colours::white);
+    g.setColour (textPri);
     g.drawText ("SPLMeter", 0, 0, getWidth(), 52, juce::Justification::centred, false);
 
-    // Build info strip at the bottom (not covered by any child)
+    // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
-    g.setColour (juce::Colour (0xff555558));
+    g.setColour (textFnt);
     g.drawText (juce::String (JucePlugin_VersionString) + "   Build: " + __DATE__ + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
-
 }
 
 
@@ -270,25 +230,10 @@ void SPLMeterAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
     auto titleBar = area.removeFromTop (100);
-    saveButton.setBounds    (titleBar.removeFromLeft (160).reduced (10, 22));
-    saveCsvButton.setBounds (titleBar.removeFromLeft (160).reduced (10, 22));
+    settingsButton.setBounds (titleBar.removeFromLeft (160).reduced (10, 22));
+    saveButton.setBounds     (titleBar.removeFromLeft (160).reduced (10, 22));
+    saveCsvButton.setBounds  (titleBar.removeFromLeft (160).reduced (10, 22));
     resetButton.setBounds (titleBar.removeFromRight (160).reduced (10, 22));
-    fftButton.setBounds   (titleBar.removeFromRight (160).reduced (10, 22));
-
-    // Hold Time section — right side, immediately left of Reset
-    auto holdSection = titleBar.removeFromRight (160);
-    holdLabel.setBounds  (holdSection.removeFromTop (22));
-    holdSlider.setBounds (holdSection.withSizeKeepingCentre (80, 76));
-
-    // FFT Gain section — left of Hold Time
-    auto fftGainSection = titleBar.removeFromRight (160);
-    fftGainLabel.setBounds  (fftGainSection.removeFromTop (22));
-    fftGainSlider.setBounds (fftGainSection.withSizeKeepingCentre (80, 76));
-
-    // Calibration section in title bar — left of centre
-    auto calSection = titleBar.removeFromLeft (240);
-    calLabel.setBounds  (calSection.removeFromTop (22));
-    calSlider.setBounds (calSection.withSizeKeepingCentre (80, 76));
 
     // Real Time / File buttons — centred below the title text
     const int modeBtnW = 110;
@@ -296,6 +241,7 @@ void SPLMeterAudioProcessorEditor::resized()
     const int modeY    = 57;
     realTimeButton.setBounds (getWidth() / 2 - modeBtnW - 2, modeY, modeBtnW, modeBtnH);
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
+    monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
 
     const int meterHeight = 215;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -329,6 +275,31 @@ void SPLMeterAudioProcessorEditor::updateTimeWeightButtons()
     slowButton.setToggleState (idx == 1, juce::dontSendNotification);
 }
 
+void SPLMeterAudioProcessorEditor::applyTheme (bool light)
+{
+    lightMode_ = light;
+
+    const juce::Colour bgBtn   = light ? juce::Colour (0xffd1d1d6) : juce::Colour (0xff3a3a3c);
+    const juce::Colour textOff = light ? juce::Colour (0xff1c1c1e) : juce::Colours::white;
+
+    auto styleBtn = [&] (juce::TextButton& btn)
+    {
+        btn.setColour (juce::TextButton::buttonColourId,  bgBtn);
+        btn.setColour (juce::TextButton::textColourOffId, textOff);
+    };
+    for (auto* b : { &settingsButton, &resetButton, &saveButton, &saveCsvButton })
+        styleBtn (*b);
+
+    // Mode + time-weight buttons keep their "on" accent colours; only restyle their off state
+    for (auto* b : { &realTimeButton, &fileButton, &fastButton, &slowButton })
+        styleBtn (*b);
+
+    meter.setLightMode (light);
+    log.setLightMode   (light);
+
+    repaint();
+}
+
 void SPLMeterAudioProcessorEditor::timerCallback()
 {
     meter.setValues (audioProcessor.getPeakSPL(),
@@ -338,15 +309,10 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getFluctuation(),
                      audioProcessor.getSharpness(),
                      audioProcessor.getLoudnessSone());
-    float calOffset = audioProcessor.apvts.getRawParameterValue ("calOffset")->load();
-    float dbfs = 94.0f - calOffset;
-    calSlider.setTooltip ("94 dB SPL = " + juce::String (dbfs, 1) + " dBFS");
-
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
 
     updateTimeWeightButtons();
-    updateMidiLabels();
 
     // Auto-return to Real Time when file playback finishes
     if (fileMode && !audioProcessor.isFileModeActive())
@@ -356,45 +322,3 @@ void SPLMeterAudioProcessorEditor::timerCallback()
     }
 }
 
-//==============================================================================
-void SPLMeterAudioProcessorEditor::updateMidiLabels()
-{
-    // param index: 0=calOffset, 1=peakHoldTime, 2=fftGain
-    struct { juce::Label* label; const char* baseName; int idx; } entries[] = {
-        { &calLabel,     "Calibration", 0 },
-        { &holdLabel,    "Hold Time",   1 },
-        { &fftGainLabel, "FFT Gain",    2 },
-    };
-    for (auto& e : entries)
-    {
-        if (audioProcessor.isMidiLearning (e.idx))
-            e.label->setText (juce::String (e.baseName) + " [Learning...]", juce::dontSendNotification);
-        else if (int cc = audioProcessor.getMidiCC (e.idx); cc >= 0)
-            e.label->setText (juce::String (e.baseName) + " [CC " + juce::String (cc) + "]", juce::dontSendNotification);
-        else
-            e.label->setText (e.baseName, juce::dontSendNotification);
-    }
-}
-
-void SPLMeterAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
-{
-    if (!e.mods.isRightButtonDown()) return;
-
-    int paramIdx = -1;
-    if      (e.eventComponent == &calSlider)     paramIdx = 0;
-    else if (e.eventComponent == &holdSlider)    paramIdx = 1;
-    else if (e.eventComponent == &fftGainSlider) paramIdx = 2;
-    else return;
-
-    juce::PopupMenu menu;
-    menu.addItem (1, "MIDI Learn");
-    int cc = audioProcessor.getMidiCC (paramIdx);
-    menu.addItem (2, cc >= 0 ? "Clear MIDI Mapping (CC " + juce::String (cc) + ")" : "Clear MIDI Mapping", cc >= 0);
-
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (e.eventComponent),
-        [this, paramIdx] (int result)
-        {
-            if      (result == 1) audioProcessor.startMidiLearn (paramIdx);
-            else if (result == 2) audioProcessor.clearMidiCC (paramIdx);
-        });
-}

@@ -116,6 +116,11 @@ public:
     double getSampleRate() const noexcept { return currentSampleRate; }
 
     //==========================================================================
+    // Monitor (pass-through)
+    void setMonitorEnabled (bool e) noexcept { monitorEnabled.store (e); }
+    bool isMonitorEnabled  ()       noexcept { return monitorEnabled.load(); }
+
+    //==========================================================================
     // File mode
     void loadFile   (const juce::File& file);
     void setFileMode (bool active);
@@ -143,6 +148,11 @@ private:
     //==========================================================================
     AWeightingFilter  aWeightL;
     CWeightingFilter  cWeightL;
+
+    // 20Hz–20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
+    static constexpr int kBpStages = 4;
+    juce::IIRFilter bpHP[8][kBpStages];
+    juce::IIRFilter bpLP[8][kBpStages];
     RoughnessEstimator roughnessEst;
     SharpnessEstimator          sharpnessEst;
     FluctuationStrengthEstimator fluctuationEst;
@@ -187,7 +197,8 @@ private:
     juce::AudioFormatManager                         formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource>   readerSource;
     juce::AudioTransportSource                       transportSource;
-    std::atomic<bool>                                fileModeActive { false };
+    std::atomic<bool>                                fileModeActive  { false };
+    std::atomic<bool>                                monitorEnabled  { false };
     juce::AudioBuffer<float>                         fileReadBuffer;
 
     void pushLogEntry (float rawPeak, float aPeak, float cPeak,
