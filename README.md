@@ -117,6 +117,28 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ---
 
+## Third-Party References
+
+### Frameworks & SDKs
+
+| Library | Version | License | URL |
+|---|---|---|---|
+| **JUCE** | 8.0.7 | ISC / GPL-3.0 | https://github.com/juce-framework/JUCE |
+| **Steinberg VST3 SDK** (incl. ASIO SDK) | latest | Steinberg VST3 License | https://github.com/steinbergmedia/vst3sdk |
+
+JUCE is used for the entire audio and UI framework (AudioProcessor, AudioProcessorValueTreeState, DSP module, Graphics, etc.).
+The ASIO SDK (part of the Steinberg VST3 SDK) is fetched automatically on Windows builds to enable low-latency ASIO driver support.
+
+### Standards & Psychoacoustic Models
+
+| Reference | Description |
+|---|---|
+| **IEC 61672-1:2013** | Electroacoustics — Sound level meters. Defines FAST (125 ms) and SLOW (1 s) time weighting and A/C frequency weighting curves. |
+| **ISO 266:1997** | Preferred frequencies — defines the 31 standard 1/3-octave band centre frequencies (20 Hz – 20 kHz) used for the FFT overlay. |
+| **Zwicker & Fastl, *Psychoacoustics: Facts and Models* (3rd ed., Springer, 2007)** | Theoretical basis for the Roughness, Sharpness (Zwicker/Aures model), Fluctuation Strength, and Loudness (sone) estimators implemented in this plugin. |
+
+---
+
 ## Changelog
 
 ### v1.1.0
