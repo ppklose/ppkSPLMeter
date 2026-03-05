@@ -60,6 +60,20 @@ public:
         };
         addAndMakeVisible (fftEnableButton);
 
+        // 94 dB reference line toggle
+        line94Button.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        line94Button.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffff453a));
+        line94Button.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        line94Button.setColour (juce::TextButton::textColourOnId,   juce::Colours::white);
+        line94Button.setClickingTogglesState (true);
+        line94Button.setTooltip ("Draw a dashed red reference line at 94 dB SPL across the plot");
+        line94Button.onClick = [this, &p]
+        {
+            auto* param = p.apvts.getParameter ("line94Enabled");
+            param->setValueNotifyingHost (line94Button.getToggleState() ? 1.0f : 0.0f);
+        };
+        addAndMakeVisible (line94Button);
+
         // 20-20k Bandpass toggle
         bandpassButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
         bandpassButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffff9f0a));
@@ -179,6 +193,80 @@ public:
         };
         addAndMakeVisible (fftRTAButton);
 
+        // Correction filter row
+        correctionEnableButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        correctionEnableButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff34c759));
+        correctionEnableButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        correctionEnableButton.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+        correctionEnableButton.setClickingTogglesState (true);
+        correctionEnableButton.setTooltip ("Enable / disable the loaded correction filter");
+        correctionEnableButton.onClick = [this, &p]
+        {
+            auto* param = p.apvts.getParameter ("correctionEnabled");
+            param->setValueNotifyingHost (correctionEnableButton.getToggleState() ? 1.0f : 0.0f);
+        };
+        addAndMakeVisible (correctionEnableButton);
+
+        correctionLoadButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        correctionLoadButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        correctionLoadButton.setTooltip ("Load a correction filter (.txt: frequency Hz, SPL dB)");
+        correctionLoadButton.onClick = [this, &p]
+        {
+            corrFileChooser_ = std::make_unique<juce::FileChooser> (
+                "Load correction filter", juce::File{}, "*.txt;*.csv");
+            corrFileChooser_->launchAsync (
+                juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [&p] (const juce::FileChooser& fc)
+                {
+                    auto file = fc.getResult();
+                    if (file != juce::File{})
+                        p.loadCorrectionFilter (file);
+                });
+        };
+        addAndMakeVisible (correctionLoadButton);
+
+        correctionClearButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        correctionClearButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
+        correctionClearButton.onClick = [this, &p] { p.clearCorrectionFilter(); };
+        addAndMakeVisible (correctionClearButton);
+
+        // Graph overlay row
+        graphOverlayEnableButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        graphOverlayEnableButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));
+        graphOverlayEnableButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        graphOverlayEnableButton.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff1c1c1e));
+        graphOverlayEnableButton.setClickingTogglesState (true);
+        graphOverlayEnableButton.setTooltip ("Enable / disable the loaded graph overlay");
+        graphOverlayEnableButton.onClick = [this, &p]
+        {
+            auto* param = p.apvts.getParameter ("graphOverlayEnabled");
+            param->setValueNotifyingHost (graphOverlayEnableButton.getToggleState() ? 1.0f : 0.0f);
+        };
+        addAndMakeVisible (graphOverlayEnableButton);
+
+        graphOverlayLoadButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        graphOverlayLoadButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        graphOverlayLoadButton.setTooltip ("Load a graph overlay (.txt: frequency Hz, SPL dB) — plotted as dashed blue line in FFT view");
+        graphOverlayLoadButton.onClick = [this, &p]
+        {
+            graphOverlayFileChooser_ = std::make_unique<juce::FileChooser> (
+                "Load graph overlay", juce::File{}, "*.txt;*.csv");
+            graphOverlayFileChooser_->launchAsync (
+                juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [&p] (const juce::FileChooser& fc)
+                {
+                    auto file = fc.getResult();
+                    if (file != juce::File{})
+                        p.loadGraphOverlay (file);
+                });
+        };
+        addAndMakeVisible (graphOverlayLoadButton);
+
+        graphOverlayClearButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        graphOverlayClearButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
+        graphOverlayClearButton.onClick = [this, &p] { p.clearGraphOverlay(); };
+        addAndMakeVisible (graphOverlayClearButton);
+
         // Full Screen toggle
         fullscreenButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
         fullscreenButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));
@@ -214,11 +302,30 @@ public:
         fullscreenButton.setBounds (area.removeFromBottom (32).reduced (0, 2));
         area.removeFromBottom (6);
 
-        // Light Mode | 20-20k BP | FFT enable
+        // Graph overlay row
         {
             auto row = area.removeFromBottom (32);
-            const int bw = row.getWidth() / 3;
+            graphOverlayEnableButton.setBounds (row.removeFromLeft (80).reduced (2, 0));
+            graphOverlayClearButton.setBounds  (row.removeFromRight (60).reduced (2, 0));
+            graphOverlayLoadButton.setBounds   (row.reduced (2, 0));
+        }
+        area.removeFromBottom (6);
+
+        // Correction filter row
+        {
+            auto row = area.removeFromBottom (32);
+            correctionEnableButton.setBounds (row.removeFromLeft (80).reduced (2, 0));
+            correctionClearButton.setBounds  (row.removeFromRight (60).reduced (2, 0));
+            correctionLoadButton.setBounds   (row.reduced (2, 0));
+        }
+        area.removeFromBottom (6);
+
+        // Light Mode | 94dB Line | 20-20k BP | FFT enable
+        {
+            auto row = area.removeFromBottom (32);
+            const int bw = row.getWidth() / 4;
             lightModeButton.setBounds (row.removeFromLeft (bw).reduced (2, 0));
+            line94Button.setBounds    (row.removeFromLeft (bw).reduced (2, 0));
             bandpassButton.setBounds  (row.removeFromLeft (bw).reduced (2, 0));
             fftEnableButton.setBounds (row.reduced (2, 0));
         }
@@ -345,6 +452,15 @@ private:
         styleBtn (fftPeakHoldButton, juce::Colour (0xffffcc00));
         styleBtn (fftRTAButton,      juce::Colour (0xffff6b35));
         styleBtn (bandpassButton,    juce::Colour (0xffff9f0a));
+        styleBtn (line94Button,           juce::Colour (0xffff453a));
+        styleBtn (correctionEnableButton,   juce::Colour (0xff34c759));
+        correctionLoadButton.setColour  (juce::TextButton::buttonColourId,  bgBtn);
+        correctionLoadButton.setColour  (juce::TextButton::textColourOffId, textOff);
+        correctionClearButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
+        styleBtn (graphOverlayEnableButton, juce::Colour (0xff5ac8fa));
+        graphOverlayLoadButton.setColour  (juce::TextButton::buttonColourId,  bgBtn);
+        graphOverlayLoadButton.setColour  (juce::TextButton::textColourOffId, textOff);
+        graphOverlayClearButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
 
         for (auto* label : { &calLabel, &holdLabel, &fftGainLabel, &fftSmoothLabel })
             label->setColour (juce::Label::textColourId, textLbl);
@@ -407,6 +523,26 @@ private:
 
         bool bpOn = processor.apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f;
         bandpassButton.setToggleState (bpOn, juce::dontSendNotification);
+
+        bool l94On = processor.apvts.getRawParameterValue ("line94Enabled")->load() > 0.5f;
+        line94Button.setToggleState (l94On, juce::dontSendNotification);
+
+        bool corrOn = processor.apvts.getRawParameterValue ("correctionEnabled")->load() > 0.5f;
+        correctionEnableButton.setToggleState (corrOn, juce::dontSendNotification);
+
+        // Update load button text with filename (or prompt if none loaded)
+        if (processor.isCorrectionLoaded())
+            correctionLoadButton.setButtonText (processor.getCorrectionFileName());
+        else
+            correctionLoadButton.setButtonText ("Load Correction Filter");
+
+        bool graphOn = processor.apvts.getRawParameterValue ("graphOverlayEnabled")->load() > 0.5f;
+        graphOverlayEnableButton.setToggleState (graphOn, juce::dontSendNotification);
+
+        if (processor.isGraphOverlayLoaded())
+            graphOverlayLoadButton.setButtonText (processor.getGraphOverlayFileName());
+        else
+            graphOverlayLoadButton.setButtonText ("Load Graph Overlay");
     }
 
     static void setChoiceParam (SPLMeterAudioProcessor& p, const char* id, int index)
@@ -459,7 +595,20 @@ private:
     juce::TextButton fftEnableButton  { "FFT" };
     juce::TextButton lightModeButton  { "Light Mode" };
     juce::TextButton bandpassButton   { "20-20k BP" };
+    juce::TextButton line94Button     { "94 dB Line" };
     juce::TextButton fullscreenButton { "Full Screen" };
+
+    // Correction filter
+    juce::TextButton correctionEnableButton { "Enable" };
+    juce::TextButton correctionLoadButton   { "Load Correction Filter" };
+    juce::TextButton correctionClearButton  { "Clear" };
+    std::unique_ptr<juce::FileChooser> corrFileChooser_;
+
+    // Graph overlay
+    juce::TextButton graphOverlayEnableButton { "Enable" };
+    juce::TextButton graphOverlayLoadButton   { "Load Graph Overlay" };
+    juce::TextButton graphOverlayClearButton  { "Clear" };
+    std::unique_ptr<juce::FileChooser> graphOverlayFileChooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SettingsComponent)
 };
@@ -479,7 +628,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (620, 430);
+        content->setSize (620, 510);
         setContentOwned (content, true);
         setResizable (false, false);
     }

@@ -129,6 +129,21 @@ public:
     double getFileLength()   const { return transportSource.getLengthInSeconds(); }
 
     //==========================================================================
+    // Correction filter
+    void loadCorrectionFilter (const juce::File& file);
+    void clearCorrectionFilter();
+    bool isCorrectionLoaded()       const noexcept { return correctionLoaded_.load(); }
+    juce::String getCorrectionFileName() const     { return correctionFileName_; }
+
+    //==========================================================================
+    // Graph overlay (visual only — no audio processing)
+    void loadGraphOverlay  (const juce::File& file);
+    void clearGraphOverlay ();
+    bool isGraphOverlayLoaded()         const noexcept { return graphOverlayLoaded_.load(); }
+    juce::String getGraphOverlayFileName() const       { return graphOverlayFileName_; }
+    const std::vector<std::pair<float,float>>& getGraphOverlayPoints() const { return graphOverlayPoints_; }
+
+    //==========================================================================
     // MIDI Learn — param indices: 0=calOffset, 1=peakHoldTime, 2=fftGain
     static constexpr int kNumMidiParams = 3;
     static const char* const kMidiParamIds[kNumMidiParams];
@@ -207,6 +222,18 @@ private:
                        float roughness, float fluctuation,
                        float sharpness, float loudnessSone);
     void pruneLog (float logDurationSeconds);
+
+    // Correction filter
+    juce::dsp::Convolution                  correctionConv_;
+    std::atomic<bool>                       correctionLoaded_ { false };
+    juce::String                            correctionFileName_;
+    std::vector<std::pair<float,float>>     correctionPoints_; // (freq, spl)
+    void rebuildCorrectionFIR();
+
+    // Graph overlay
+    std::atomic<bool>                       graphOverlayLoaded_ { false };
+    juce::String                            graphOverlayFileName_;
+    std::vector<std::pair<float,float>>     graphOverlayPoints_; // (freq, spl)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessor)
 };

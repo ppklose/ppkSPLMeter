@@ -385,6 +385,30 @@ void LogComponent::paint (juce::Graphics& g)
         g.setColour (psychoColour);
         g.strokePath (path, juce::PathStrokeType (2.5f));
     }
+
+    // ---- 94 dB reference line ----
+    if (processor.apvts.getRawParameterValue ("line94Enabled")->load() > 0.5f)
+    {
+        const float y94 = splToY (94.0f);
+        const juce::Colour refRed (0xffff453a);
+        g.setColour (refRed);
+        // Dashed line
+        float dashLen = 10.0f, gapLen = 6.0f, x = plot.getX();
+        while (x < plot.getRight())
+        {
+            float segEnd = std::min (x + dashLen, plot.getRight());
+            g.drawLine (x, y94, segEnd, y94, 1.5f);
+            x += dashLen + gapLen;
+        }
+        // Label on the left
+        g.setFont (juce::Font (juce::FontOptions().withHeight (17.0f).withStyle ("Bold")));
+        g.setColour (refRed);
+        g.drawText ("94 dB",
+                    static_cast<int> (graphArea.getX()),
+                    static_cast<int> (y94) - 12,
+                    static_cast<int> (marginL) - 4, 22,
+                    juce::Justification::centredRight, false);
+    }
 }
 
 //==============================================================================
@@ -597,6 +621,50 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
                 float yPeak = splToY (fftPeakBands_[b]);
                 g.setColour (colPeak);
                 g.fillRect (x1, yPeak, x2 - x1 - 1.0f, 2.0f);
+            }
+        }
+    }
+
+    // ---- Graph Overlay: dashed blue frequency-response curve ----
+    if (processor.apvts.getRawParameterValue ("graphOverlayEnabled")->load() > 0.5f
+        && processor.isGraphOverlayLoaded())
+    {
+        const auto& pts = processor.getGraphOverlayPoints();
+        if (pts.size() >= 2)
+        {
+            auto interpSPL = [&] (float freq) -> float
+            {
+                if (freq <= pts.front().first) return pts.front().second;
+                if (freq >= pts.back().first)  return pts.back().second;
+                for (size_t i = 0; i + 1 < pts.size(); ++i)
+                {
+                    const float f0 = pts[i].first, f1 = pts[i + 1].first;
+                    if (freq >= f0 && freq <= f1)
+                    {
+                        const float t = (f1 > f0)
+                            ? std::log (freq / f0) / std::log (f1 / f0) : 0.0f;
+                        return pts[i].second + t * (pts[i + 1].second - pts[i].second);
+                    }
+                }
+                return 0.0f;
+            };
+
+            auto xToFreq = [&] (float px) -> float
+            {
+                float frac = (px - plot.getX()) / plot.getWidth();
+                return fMin * std::pow (fMax / fMin, frac);
+            };
+
+            g.setColour (juce::Colour (0xff5ac8fa));  // blue
+            const float dashLen = 10.0f, gapLen = 6.0f;
+            float x = plot.getX();
+            while (x < plot.getRight())
+            {
+                float dashEnd = std::min (x + dashLen, plot.getRight());
+                float y0 = splToY (interpSPL (xToFreq (x)));
+                float y1 = splToY (interpSPL (xToFreq (dashEnd)));
+                g.drawLine (x, y0, dashEnd, y1, 2.0f);
+                x += dashLen + gapLen;
             }
         }
     }

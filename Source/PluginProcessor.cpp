@@ -65,6 +65,15 @@ SPLMeterAudioProcessor::createParameterLayout()
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "bandpassEnabled", "20-20k Bandpass", false));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "line94Enabled", "94 dB Reference Line", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "correctionEnabled", "Correction Filter", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "graphOverlayEnabled", "Graph Overlay", false));
+
     return { params.begin(), params.end() };
 }
 
@@ -116,6 +125,12 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
             bpLP[ch][st].reset();
         }
     }
+
+    // Correction filter convolution engine
+    correctionConv_.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 8 });
+    correctionConv_.reset();
+    if (!correctionPoints_.empty())
+        rebuildCorrectionFIR();
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
     fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
@@ -214,6 +229,15 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         };
         if (fileMode) applyBP (fileReadBuffer);
         else          applyBP (buffer);
+    }
+
+    // Correction filter (applied after bandpass, before metering)
+    if (correctionLoaded_.load() && apvts.getRawParameterValue ("correctionEnabled")->load() > 0.5f)
+    {
+        auto& src = fileMode ? fileReadBuffer : buffer;
+        juce::dsp::AudioBlock<float> block (src);
+        juce::dsp::ProcessContextReplacing<float> ctx (block);
+        correctionConv_.process (ctx);
     }
 
     const float channelScale = numChannels > 0 ? 1.0f / static_cast<float> (numChannels) : 1.0f;
@@ -403,6 +427,168 @@ void SPLMeterAudioProcessor::setFileMode (bool active)
     }
 }
 
+//==============================================================================
+void SPLMeterAudioProcessor::loadCorrectionFilter (const juce::File& file)
+{
+    correctionPoints_.clear();
+
+    juce::StringArray lines;
+    lines.addLines (file.loadFileAsString());
+
+    for (const auto& line : lines)
+    {
+        const auto trimmed = line.trim();
+        if (trimmed.isEmpty()
+            || trimmed.startsWith ("*")
+            || trimmed.startsWith ("#")
+            || trimmed.startsWith (";")
+            || trimmed.startsWithChar ('/'))
+            continue;
+
+        juce::StringArray tokens;
+        tokens.addTokens (trimmed, " \t,", "\"");
+        tokens.removeEmptyStrings();
+
+        if (tokens.size() >= 2)
+        {
+            const float freq = tokens[0].getFloatValue();
+            const float spl  = tokens[1].getFloatValue();
+            if (freq > 0.0f)
+                correctionPoints_.push_back ({ freq, spl });
+        }
+    }
+
+    if (correctionPoints_.empty())
+        return;
+
+    std::sort (correctionPoints_.begin(), correctionPoints_.end(),
+               [] (auto& a, auto& b) { return a.first < b.first; });
+
+    correctionFileName_ = file.getFileNameWithoutExtension();
+    rebuildCorrectionFIR();
+}
+
+void SPLMeterAudioProcessor::clearCorrectionFilter()
+{
+    correctionPoints_.clear();
+    correctionFileName_ = {};
+    correctionLoaded_.store (false);
+    correctionConv_.reset();
+}
+
+void SPLMeterAudioProcessor::rebuildCorrectionFIR()
+{
+    if (correctionPoints_.empty() || currentSampleRate < 1.0) return;
+
+    // Log-linear interpolation of the measured SPL at a given frequency
+    auto interpolateSPL = [this] (float freq) -> float
+    {
+        const auto& pts = correctionPoints_;
+        if (freq <= pts.front().first) return pts.front().second;
+        if (freq >= pts.back().first)  return pts.back().second;
+
+        for (size_t i = 0; i + 1 < pts.size(); ++i)
+        {
+            const float f0 = pts[i].first, f1 = pts[i + 1].first;
+            if (freq >= f0 && freq <= f1)
+            {
+                const float t = (f1 > f0) ? std::log (freq / f0) / std::log (f1 / f0) : 0.0f;
+                return pts[i].second + t * (pts[i + 1].second - pts[i].second);
+            }
+        }
+        return 0.0f;
+    };
+
+    // Build the desired (correction) half-spectrum: invert the measured SPL
+    // so that the filter cancels the measurement's frequency-response deviation.
+    static constexpr int kFirOrder = 12;          // 4096 taps
+    static constexpr int kFirSize  = 1 << kFirOrder;
+
+    std::vector<float> spec (kFirSize * 2, 0.0f); // interleaved Re/Im
+
+    for (int k = 0; k <= kFirSize / 2; ++k)
+    {
+        const float freq     = (float) k * (float) currentSampleRate / kFirSize;
+        const float corrDB   = (freq >= 20.0f && freq <= 20000.0f)
+                               ? -interpolateSPL (freq) : 0.0f;
+        const float gain     = std::pow (10.0f, corrDB / 20.0f);
+        spec[k * 2]     = gain;
+        spec[k * 2 + 1] = 0.0f;
+    }
+
+    // IFFT: fills conjugate mirror, performs inverse, scales by 1/N
+    juce::dsp::FFT fft (kFirOrder);
+    fft.performRealOnlyInverseTransform (spec.data());
+
+    // Circular shift by kFirSize/2 → linear-phase FIR; apply Hann window
+    juce::AudioBuffer<float> ir (1, kFirSize);
+    float* irData = ir.getWritePointer (0);
+
+    for (int n = 0; n < kFirSize; ++n)
+    {
+        const int   src = (n + kFirSize / 2) % kFirSize;
+        const float win = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
+                                                    * n / (kFirSize - 1)));
+        irData[n] = spec[src * 2] * win;   // real part of IFFT output
+    }
+
+    correctionConv_.loadImpulseResponse (std::move (ir),
+                                         currentSampleRate,
+                                         juce::dsp::Convolution::Stereo::no,
+                                         juce::dsp::Convolution::Trim::no,
+                                         juce::dsp::Convolution::Normalise::no);
+    correctionLoaded_.store (true);
+}
+
+//==============================================================================
+void SPLMeterAudioProcessor::loadGraphOverlay (const juce::File& file)
+{
+    graphOverlayPoints_.clear();
+
+    juce::StringArray lines;
+    lines.addLines (file.loadFileAsString());
+
+    for (const auto& line : lines)
+    {
+        const auto trimmed = line.trim();
+        if (trimmed.isEmpty()
+            || trimmed.startsWith ("*")
+            || trimmed.startsWith ("#")
+            || trimmed.startsWith (";")
+            || trimmed.startsWithChar ('/'))
+            continue;
+
+        juce::StringArray tokens;
+        tokens.addTokens (trimmed, " \t,", "\"");
+        tokens.removeEmptyStrings();
+
+        if (tokens.size() >= 2)
+        {
+            const float freq = tokens[0].getFloatValue();
+            const float spl  = tokens[1].getFloatValue();
+            if (freq > 0.0f)
+                graphOverlayPoints_.push_back ({ freq, spl });
+        }
+    }
+
+    if (graphOverlayPoints_.empty())
+        return;
+
+    std::sort (graphOverlayPoints_.begin(), graphOverlayPoints_.end(),
+               [] (auto& a, auto& b) { return a.first < b.first; });
+
+    graphOverlayFileName_ = file.getFileNameWithoutExtension();
+    graphOverlayLoaded_.store (true);
+}
+
+void SPLMeterAudioProcessor::clearGraphOverlay()
+{
+    graphOverlayPoints_.clear();
+    graphOverlayFileName_ = {};
+    graphOverlayLoaded_.store (false);
+}
+
+//==============================================================================
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new SPLMeterAudioProcessor();
