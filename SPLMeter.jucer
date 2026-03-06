@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="a3f8b2c1" name="SPLMeter" projectType="audioplug" version="1.1.0"
+<JUCERPROJECT id="a3f8b2c1" name="SPLMeter" projectType="audioplug" version="2.0.0"
               jucePath="/Applications/JUCE" displaySplashScreen="0" reportAppUsage="0"
               splashScreenColour="Dark" projectLineFeed="&#10;" companyName="Philipp Paul Klose Audio Engineering"
               companyCopyright="2025 Philipp Paul Klose Audio Engineering"
               companyWebsite="" companyEmail="" pluginFormats="buildAU,buildVST3,buildStandalone"
               pluginName="SPLMeter" pluginDesc="SPL Meter Plugin" pluginManufacturer="Philipp Paul Klose Audio Engineering"
-              pluginManufacturerCode="Manu" pluginCode="Splm" pluginChannelConfigs="{1, 1}, {2, 2}"
+              pluginManufacturerCode="Manu" pluginCode="Splm" pluginChannelConfigs="{1, 1}, {2, 2}, {32, 32}"
               pluginCharacteristics="pluginWantsMidiIn" pluginIsSynth="0" pluginWantsMidiInput="0"
               pluginProducesMidiOut="0" pluginIsMidiEffectPlugin="0" pluginEditorRequiresKeys="0"
               pluginAUExportPrefix="SPLMeterAU" aaxIdentifier="com.philipppaulklose.splmeter"

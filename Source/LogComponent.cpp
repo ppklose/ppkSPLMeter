@@ -12,7 +12,7 @@ const juce::Colour LogComponent::colPeakDBC  { 0xffff2d55 };  // red
 const juce::Colour LogComponent::colRmsDBC   { 0xffffe620 };  // yellow
 
 // Psychoacoustic series colours
-const juce::Colour LogComponent::colRoughness   { 0xffff9500 };  // orange
+const juce::Colour LogComponent::colRoughness   { 0xff00c7be };  // teal
 const juce::Colour LogComponent::colFluctuation { 0xffeb34b1 };  // pink
 const juce::Colour LogComponent::colSharpness   { 0xffc77dff };  // violet
 const juce::Colour LogComponent::colLoudness    { 0xffffe57f };  // gold
@@ -49,6 +49,38 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupVisBtn (dbaVisButton, colPeakDBA);
     setupVisBtn (dbcVisButton, colPeakDBC);
 
+    // Psychoacoustic visibility checkboxes (radio-button behaviour)
+    auto setupPsychoBtn = [this] (juce::ToggleButton& btn, juce::Colour colour,
+                                   PsychoMetric metric)
+    {
+        btn.setColour (juce::ToggleButton::textColourId,         juce::Colours::white);
+        btn.setColour (juce::ToggleButton::tickColourId,         colour);
+        btn.setColour (juce::ToggleButton::tickDisabledColourId, colour.darker (0.5f));
+        btn.onClick = [this, &btn, metric]
+        {
+            if (btn.getToggleState())
+            {
+                // Deselect the other three
+                for (auto* b : { &roughnessVisButton, &fluctuationVisButton,
+                                 &sharpnessVisButton, &loudnessVisButton })
+                    if (b != &btn)
+                        b->setToggleState (false, juce::dontSendNotification);
+                selectedMetric = metric;
+            }
+            else
+            {
+                selectedMetric = PsychoMetric::Off;
+            }
+            repaint();
+        };
+        addAndMakeVisible (btn);
+    };
+    roughnessVisButton.setToggleState   (true, juce::dontSendNotification);  // default on
+    setupPsychoBtn (roughnessVisButton,   colRoughness,   PsychoMetric::Roughness);
+    setupPsychoBtn (fluctuationVisButton, colFluctuation, PsychoMetric::Fluctuation);
+    setupPsychoBtn (sharpnessVisButton,   colSharpness,   PsychoMetric::Sharpness);
+    setupPsychoBtn (loudnessVisButton,    colLoudness,    PsychoMetric::Loudness);
+
     // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
         windowCoeffs_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
@@ -70,9 +102,10 @@ void LogComponent::setLightMode (bool light) noexcept
 
     durationLabel.setColour (juce::Label::textColourId, textSecond);
     durationSlider.setColour (juce::Slider::textBoxTextColourId, textPrimary);
-    splVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
-    dbaVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
-    dbcVisButton.setColour (juce::ToggleButton::textColourId, textPrimary);
+    for (auto* b : { &splVisButton, &dbaVisButton, &dbcVisButton,
+                     &roughnessVisButton, &fluctuationVisButton,
+                     &sharpnessVisButton, &loudnessVisButton })
+        b->setColour (juce::ToggleButton::textColourId, textPrimary);
 
     repaint();
 }
@@ -99,6 +132,14 @@ void LogComponent::resized()
     splVisButton.setBounds (juce::Rectangle<float> (plotX,           btnY, btnW, btnH).toNearestInt());
     dbaVisButton.setBounds (juce::Rectangle<float> (plotX + btnW,    btnY, btnW, btnH).toNearestInt());
     dbcVisButton.setBounds (juce::Rectangle<float> (plotX + btnW*2,  btnY, btnW, btnH).toNearestInt());
+
+    // Psychoacoustic checkbox row (row 2)
+    const float psychoBtnY = btnY + btnH + 4.0f;
+    const float psychoBtnW = plotW / 4.0f;
+    roughnessVisButton.setBounds   (juce::Rectangle<float> (plotX,                  psychoBtnY, psychoBtnW, btnH).toNearestInt());
+    fluctuationVisButton.setBounds (juce::Rectangle<float> (plotX + psychoBtnW,     psychoBtnY, psychoBtnW, btnH).toNearestInt());
+    sharpnessVisButton.setBounds   (juce::Rectangle<float> (plotX + psychoBtnW*2,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
+    loudnessVisButton.setBounds    (juce::Rectangle<float> (plotX + psychoBtnW*3,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
 }
 
 void LogComponent::timerCallback()
@@ -107,22 +148,6 @@ void LogComponent::timerCallback()
         computeFftBands();
     rows = processor.copyLog();
     repaint();
-}
-
-void LogComponent::mouseDown (const juce::MouseEvent& e)
-{
-    for (int i = 0; i < 5; ++i)
-    {
-        if (metricSelectRects[i].contains (e.position))
-        {
-            PsychoMetric next = static_cast<PsychoMetric> (i);
-            if (next == PsychoMetric::Off)
-                processor.clearLog();
-            selectedMetric = next;
-            repaint();
-            return;
-        }
-    }
 }
 
 //==============================================================================
@@ -137,7 +162,7 @@ void LogComponent::paint (juce::Graphics& g)
 
     const float marginL = 80.0f;
     const float marginR = 75.0f;   // right axis labels
-    const float marginT = 80.0f;   // two legend rows
+    const float marginT = 120.0f;  // two checkbox rows
     const float marginB = 50.0f;
 
     const juce::Rectangle<float> plot (
@@ -258,50 +283,25 @@ void LogComponent::paint (juce::Graphics& g)
         }
     }
 
-    // Legend strip row 1 is rendered by the ToggleButton children (splVisButton etc.)
-
-    // ---- Legend strip row 2: psychoacoustic metric selectors ----
+    // Legend strip axis labels (drawn in left margin, aligned with checkbox rows)
     {
-        const float rowY = graphArea.getY() + 42.0f;
-        const float rowH = 32.0f;
+        const float row1Y = graphArea.getY();
+        const float row2Y = graphArea.getY() + 36.0f + 4.0f;
+        const float labelX = graphArea.getX();
+        const float labelW = marginL - 6.0f;
+        const float rowH   = 36.0f;
 
-        struct MetricInfo { PsychoMetric metric; juce::Colour colour; const char* name; };
-        const MetricInfo metrics[] = {
-            { PsychoMetric::Roughness,   colRoughness,           "Roughness"   },
-            { PsychoMetric::Fluctuation, colFluctuation,         "Fluctuation" },
-            { PsychoMetric::Sharpness,   colSharpness,           "Sharpness"   },
-            { PsychoMetric::Loudness,    colLoudness,            "Loudness"    },
-            { PsychoMetric::Off,         juce::Colour(0xffff453a), "OFF"       },
-        };
-
-        const float slotW = plot.getWidth() / 5.0f;
-        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f).withStyle ("Bold")));
-
-        for (int i = 0; i < 5; ++i)
-        {
-            float x = plot.getX() + i * slotW;
-            metricSelectRects[i] = { x, rowY, slotW, rowH };
-
-            bool selected = (selectedMetric == metrics[i].metric);
-            juce::Colour textCol = selected ? juce::Colour (0xffffd60a) : juce::Colour (0xff8e8e93);
-
-            g.setColour (textCol);
-            g.drawText (metrics[i].name,
-                        static_cast<int>(x), static_cast<int>(rowY),
-                        static_cast<int>(slotW), static_cast<int>(rowH),
-                        juce::Justification::centred, false);
-
-            if (selected)
-            {
-                // Underline: draw a line under the text
-                float textW = g.getCurrentFont().getStringWidthFloat (metrics[i].name);
-                float underX = x + (slotW - textW) * 0.5f;
-                float underY = rowY + rowH - 3.0f;
-                g.setColour (juce::Colour (0xffffd60a));
-                g.fillRect (underX, underY, textW, 2.0f);
-            }
-        }
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setColour (textSecond);
+        g.drawText ("Left y axis:",  static_cast<int>(labelX), static_cast<int>(row1Y),
+                    static_cast<int>(labelW), static_cast<int>(rowH),
+                    juce::Justification::centredRight, false);
+        g.drawText ("Right y axis:", static_cast<int>(labelX), static_cast<int>(row2Y),
+                    static_cast<int>(labelW), static_cast<int>(rowH),
+                    juce::Justification::centredRight, false);
     }
+
+    // Checkbox rows are rendered by the ToggleButton children
 
     if (rows.empty())
     {
@@ -335,8 +335,8 @@ void LogComponent::paint (juce::Graphics& g)
             juce::String label = juce::Time (ts).toString (false, true, true, false);
             g.drawHorizontalLine (static_cast<int>(plot.getBottom()), x - 1.0f, x + 1.0f);
             g.drawText (label, static_cast<int>(x) - 70,
-                        static_cast<int>(plot.getBottom()) + 4,
-                        140, 28, juce::Justification::centred, false);
+                        static_cast<int>(plot.getBottom()) + 26,
+                        140, 22, juce::Justification::centred, false);
         }
     }
 
@@ -668,5 +668,44 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
             }
         }
     }
+
+    // ---- Frequency axis: grid lines + labels ----
+    {
+        const juce::Colour gridCol  = lightMode_ ? juce::Colour (0x25000000) : juce::Colour (0x403a3a3c);
+        const juce::Colour labelCol = lightMode_ ? juce::Colour (0xff48484a) : juce::Colour (0xff8e8e93);
+
+        const float labelFreqs[] = { 20.f, 50.f, 100.f, 200.f, 500.f,
+                                     1000.f, 2000.f, 5000.f, 10000.f, 20000.f };
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (15.0f)));
+
+        for (float freq : labelFreqs)
+        {
+            float x = freqToX (freq);
+
+            // Vertical grid line across the plot
+            g.setColour (gridCol);
+            g.drawVerticalLine (static_cast<int> (x), plot.getY(), plot.getBottom());
+
+            // Tick mark + label below plot
+            g.setColour (labelCol);
+            g.drawVerticalLine (static_cast<int> (x), plot.getBottom(), plot.getBottom() + 5.0f);
+
+            juce::String label = freq < 1000.f
+                                 ? juce::String (static_cast<int> (freq))
+                                 : juce::String (static_cast<int> (freq / 1000.f)) + "k";
+            g.drawText (label,
+                        static_cast<int> (x) - 20, static_cast<int> (plot.getBottom()) + 6,
+                        40, 20, juce::Justification::centred, false);
+        }
+
+        // "Hz" axis unit at the far right
+        g.setColour (labelCol);
+        g.drawText ("Hz",
+                    static_cast<int> (plot.getRight()) + 4,
+                    static_cast<int> (plot.getBottom()) + 6,
+                    36, 20, juce::Justification::centredLeft, false);
+    }
 }
+
 

@@ -8,7 +8,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     addAndMakeVisible (log);
 
     resetButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
-    resetButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+    resetButton.setColour (juce::TextButton::textColourOffId,  juce::Colour (0xffff453a));
     resetButton.onClick = [this]
     {
         audioProcessor.resetPeak();
@@ -169,12 +169,16 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     basicModeButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
     basicModeButton.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff1c1c1e));
     basicModeButton.setClickingTogglesState (true);
-    basicModeButton.setTooltip ("Basic: show meter only  /  Extended: show meter + timeline/FFT");
+    basicModeButton.setTooltip ("You are currently in basic mode, click to go advanced mode.");
     basicModeButton.onClick = [this]
     {
         basicMode_ = basicModeButton.getToggleState();
-        basicModeButton.setButtonText (basicMode_ ? "Basic" : "Advanced");
+        basicModeButton.setButtonText (basicMode_ ? "Basic Mode" : "Advanced Mode");
+        basicModeButton.setTooltip (basicMode_
+            ? "You are currently in basic mode, click to go advanced mode."
+            : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
+        meter.setPsychoVisible (!basicMode_);
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
@@ -215,9 +219,35 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (settingsButton);
 
+    // Clock label (line 1 — auto-updates every second)
+    clockLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (11.0f)));
+    clockLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff2c2c2e));
+    clockLabel.setColour (juce::Label::textColourId,       juce::Colour (0xffaeaeb2));
+    clockLabel.setText (juce::Time::getCurrentTime().toString (true, true, true, false),
+                        juce::dontSendNotification);
+    addAndMakeVisible (clockLabel);
+
+    // Note field (lines 2–4 — free text)
+    noteField.setMultiLine (true, false);
+    noteField.setReturnKeyStartsNewLine (true);
+    noteField.setScrollbarsShown (false);
+    noteField.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (11.0f)));
+    noteField.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff2c2c2e));
+    noteField.setColour (juce::TextEditor::textColourId,       juce::Colours::white);
+    noteField.setColour (juce::TextEditor::outlineColourId,    juce::Colour (0xff48484a));
+    noteField.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff5ac8fa));
+    addAndMakeVisible (noteField);
+
     setResizable (true, true);
-    setResizeLimits (480, 500, 3840, 2160);
-    setSize (1400, 900);
+    // Start in basic mode
+    basicModeButton.setToggleState (true, juce::dontSendNotification);
+    basicModeButton.setButtonText ("Basic Mode");
+    log.setVisible (false);
+    meter.setPsychoVisible (false);
+    const int basicH = 100 + 215 + 24;
+    setResizeLimits (480, basicH, 3840, 2160);
+    setSize (1500, basicH);
+    extendedHeight_ = 900;
     startTimerHz (30);
 }
 
@@ -258,10 +288,15 @@ void SPLMeterAudioProcessorEditor::resized()
     auto area = getLocalBounds();
     auto titleBar = area.removeFromTop (100);
     settingsButton.setBounds  (titleBar.removeFromLeft (160).reduced (10, 22));
-    basicModeButton.setBounds (titleBar.removeFromLeft (110).reduced (10, 22));
+    basicModeButton.setBounds (titleBar.removeFromLeft (140).reduced (10, 22));
     saveButton.setBounds      (titleBar.removeFromLeft (160).reduced (10, 22));
     saveCsvButton.setBounds   (titleBar.removeFromLeft (160).reduced (10, 22));
     resetButton.setBounds     (titleBar.removeFromRight (160).reduced (10, 22));
+    {
+        auto noteCol = titleBar.removeFromRight (160).reduced (4, 4);
+        clockLabel.setBounds (noteCol.removeFromTop (20));
+        noteField.setBounds  (noteCol);
+    }
 
     // Real Time / File buttons — centred below the title text
     const int modeBtnW = 110;
@@ -316,8 +351,11 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
         btn.setColour (juce::TextButton::buttonColourId,  bgBtn);
         btn.setColour (juce::TextButton::textColourOffId, textOff);
     };
-    for (auto* b : { &settingsButton, &resetButton, &saveButton, &saveCsvButton })
+    for (auto* b : { &settingsButton, &saveButton, &saveCsvButton })
         styleBtn (*b);
+    // Reset button keeps red text regardless of theme
+    resetButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
+    resetButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
 
     // Mode + time-weight buttons keep their "on" accent colours; only restyle their off state
     for (auto* b : { &realTimeButton, &fileButton, &fastButton, &slowButton })
@@ -340,6 +378,17 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getLoudnessSone());
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
+
+    // Update clock label once per second
+    {
+        auto now = juce::Time::getCurrentTime();
+        if (now.getSeconds() != lastClockSecond_)
+        {
+            lastClockSecond_ = now.getSeconds();
+            clockLabel.setText (now.toString (true, true, true, false),
+                                juce::dontSendNotification);
+        }
+    }
 
     updateTimeWeightButtons();
 

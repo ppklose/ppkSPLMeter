@@ -97,10 +97,10 @@ private:
     juce::TextButton resetButton     { "Reset" };
     juce::TextButton saveButton      { "Save JPG" };
     juce::TextButton saveCsvButton   { "Save CSV" };
-    juce::TextButton basicModeButton { "Advanced" };
+    juce::TextButton basicModeButton { "Advanced Mode" };
     juce::TextButton fastButton      { "FAST" };
     juce::TextButton slowButton      { "SLOW" };
-    bool basicMode_      = false;
+    bool basicMode_      = true;
     int  extendedHeight_ = 900;
     MonitorButton    monitorButton;
 
@@ -114,6 +114,9 @@ private:
     void applyTheme (bool light);
 
     bool lightMode_ = false;
+    juce::Label       clockLabel;
+    int               lastClockSecond_ = -1;
+    juce::TextEditor  noteField;
     std::unique_ptr<SettingsWindow> settingsWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessorEditor)

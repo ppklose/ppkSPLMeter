@@ -57,11 +57,10 @@ public:
     {
         auto setupKnob = [] (juce::Slider& s, juce::Label& l, const juce::String& text)
         {
-            s.setSliderStyle (juce::Slider::Rotary);
-            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 22);
-            s.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                                   juce::MathConstants<float>::pi * 2.75f, true);
-            s.setColour (juce::Slider::rotarySliderFillColourId,  juce::Colour (0xff5ac8fa));
+            s.setSliderStyle (juce::Slider::LinearVertical);
+            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 18);
+            s.setColour (juce::Slider::trackColourId,             juce::Colour (0xff5ac8fa));
+            s.setColour (juce::Slider::thumbColourId,             juce::Colour (0xff5ac8fa));
             s.setColour (juce::Slider::textBoxTextColourId,       juce::Colours::white);
             s.setColour (juce::Slider::textBoxOutlineColourId,    juce::Colours::transparentBlack);
             s.setColour (juce::Slider::textBoxHighlightColourId,  juce::Colour (0xff5ac8fa));
@@ -307,11 +306,10 @@ public:
         graphOverlayClearButton.onClick = [this, &p] { p.clearGraphOverlay(); };
         addAndMakeVisible (graphOverlayClearButton);
 
-        // Channel mute checkboxes IN01..IN08
-        const juce::String chNames[8] = { "IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08" };
-        for (int i = 0; i < 8; ++i)
+        // Channel mute checkboxes IN01..IN32
+        for (int i = 0; i < 32; ++i)
         {
-            channelMuteButtons[i].setButtonText (chNames[i]);
+            channelMuteButtons[i].setButtonText ("IN" + juce::String (i + 1).paddedLeft ('0', 2));
             channelMuteButtons[i].setTooltip ("Mute input channel " + juce::String (i + 1));
             channelMuteButtons[i].onClick = [this, &p, i]
             {
@@ -352,12 +350,14 @@ public:
     {
         auto area = getLocalBounds().reduced (16, 16);
 
-        // Channel mute row: IN01..IN08 (very bottom)
+        // Channel mute rows: IN01..IN32 (4 rows of 8, very bottom)
+        for (int row = 3; row >= 0; --row)
         {
-            auto row = area.removeFromBottom (28);
-            const int btnW = row.getWidth() / 8;
+            auto rowBounds = area.removeFromBottom (28);
+            const int btnW = rowBounds.getWidth() / 8;
             for (int i = 0; i < 8; ++i)
-                channelMuteButtons[i].setBounds (row.removeFromLeft (btnW));
+                channelMuteButtons[row * 8 + i].setBounds (rowBounds.removeFromLeft (btnW));
+            area.removeFromBottom (2);
         }
         area.removeFromBottom (6);
 
@@ -441,7 +441,7 @@ public:
         }
         area.removeFromBottom (6);
 
-        // Four knobs: Calibration | Hold Time | FFT Gain | FFT Smooth
+        // Four short faders: Calibration | Hold Time | FFT Gain | FFT Smooth
         const int sectionW = area.getWidth() / 4;
         struct { juce::Slider* s; juce::Label* l; } knobs[] = {
             { &calSlider, &calLabel }, { &holdSlider, &holdLabel },
@@ -451,7 +451,7 @@ public:
         {
             auto section = area.removeFromLeft (sectionW);
             k.l->setBounds (section.removeFromTop (22));
-            k.s->setBounds (section.withSizeKeepingCentre (80, 90));
+            k.s->setBounds (section);
         }
     }
 
@@ -529,7 +529,11 @@ private:
             label->setColour (juce::Label::textColourId, textLbl);
 
         for (auto* s : { &calSlider, &holdSlider, &fftGainSlider, &fftSmoothSlider })
+        {
             s->setColour (juce::Slider::textBoxTextColourId, textOff);
+            s->setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
+            s->setColour (juce::Slider::thumbColourId,       juce::Colour (0xff5ac8fa));
+        }
 
         repaint();
     }
@@ -608,7 +612,7 @@ private:
             graphOverlayLoadButton.setButtonText ("Load Graph Overlay");
 
         // Sync channel mute checkboxes
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 32; ++i)
         {
             bool muted = processor.apvts.getRawParameterValue ("channelMute" + juce::String (i))->load() > 0.5f;
             channelMuteButtons[i].setToggleState (muted, juce::dontSendNotification);
@@ -681,7 +685,7 @@ private:
     std::unique_ptr<juce::FileChooser> graphOverlayFileChooser_;
 
     // Channel mute checkboxes
-    ChannelMuteButton channelMuteButtons[8];
+    ChannelMuteButton channelMuteButtons[32];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SettingsComponent)
 };
@@ -701,7 +705,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (620, 548);
+        content->setSize (620, 638);
         setContentOwned (content, true);
         setResizable (false, false);
     }

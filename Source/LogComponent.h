@@ -12,7 +12,6 @@ public:
 
     void paint   (juce::Graphics&) override;
     void resized () override;
-    void mouseDown (const juce::MouseEvent&) override;
 
     bool isOff()        const noexcept { return selectedMetric == PsychoMetric::Off; }
     void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
@@ -29,9 +28,13 @@ private:
     juce::Slider durationSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttachment;
 
-    juce::ToggleButton splVisButton  { "dB SPL"  };
-    juce::ToggleButton dbaVisButton  { "dBA SPL" };
-    juce::ToggleButton dbcVisButton  { "dBC SPL" };
+    juce::ToggleButton splVisButton          { "dB SPL"     };
+    juce::ToggleButton dbaVisButton          { "dBA SPL"    };
+    juce::ToggleButton dbcVisButton          { "dBC SPL"    };
+    juce::ToggleButton roughnessVisButton    { "Roughness"  };
+    juce::ToggleButton fluctuationVisButton  { "Fluctuation" };
+    juce::ToggleButton sharpnessVisButton    { "Sharpness"  };
+    juce::ToggleButton loudnessVisButton     { "Loudness"   };
 
     // FFT
     static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
@@ -58,9 +61,6 @@ private:
     enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Off };
     PsychoMetric selectedMetric = PsychoMetric::Roughness;
 
-
-    // Hit-test rects for metric selectors (set during paint, read in mouseDown)
-    juce::Rectangle<float> metricSelectRects[5];
 
     // Graph constants
     static constexpr float kYMin = 20.0f;

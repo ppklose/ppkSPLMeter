@@ -166,8 +166,8 @@ private:
 
     // 20Hz–20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
     static constexpr int kBpStages = 4;
-    juce::IIRFilter bpHP[8][kBpStages];
-    juce::IIRFilter bpLP[8][kBpStages];
+    juce::IIRFilter bpHP[32][kBpStages];
+    juce::IIRFilter bpLP[32][kBpStages];
     RoughnessEstimator roughnessEst;
     SharpnessEstimator          sharpnessEst;
     FluctuationStrengthEstimator fluctuationEst;

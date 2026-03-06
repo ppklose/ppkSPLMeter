@@ -74,10 +74,10 @@ SPLMeterAudioProcessor::createParameterLayout()
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "graphOverlayEnabled", "Graph Overlay", false));
 
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 32; ++i)
         params.push_back (std::make_unique<juce::AudioParameterBool> (
             "channelMute" + juce::String (i),
-            "Mute IN0" + juce::String (i + 1), false));
+            "Mute IN" + juce::String (i + 1).paddedLeft ('0', 2), false));
 
     return { params.begin(), params.end() };
 }
@@ -85,8 +85,8 @@ SPLMeterAudioProcessor::createParameterLayout()
 //==============================================================================
 SPLMeterAudioProcessor::SPLMeterAudioProcessor()
     : AudioProcessor (BusesProperties()
-                      .withInput  ("Input",  juce::AudioChannelSet::discreteChannels (8), true)
-                      .withOutput ("Output", juce::AudioChannelSet::discreteChannels (8), true)),
+                      .withInput  ("Input",  juce::AudioChannelSet::discreteChannels (32), true)
+                      .withOutput ("Output", juce::AudioChannelSet::discreteChannels (32), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     formatManager.registerBasicFormats();
@@ -122,7 +122,7 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     {
         auto hpCoeff = juce::IIRCoefficients::makeHighPass (sampleRate, 20.0,    bpQ[st]);
         auto lpCoeff = juce::IIRCoefficients::makeLowPass  (sampleRate, 20000.0, bpQ[st]);
-        for (int ch = 0; ch < 8; ++ch)
+        for (int ch = 0; ch < 32; ++ch)
         {
             bpHP[ch][st].setCoefficients (hpCoeff);
             bpHP[ch][st].reset();
@@ -199,7 +199,7 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numChannels = buffer.getNumChannels();
 
     // --- Per-channel muting (applied to live buffer before any processing) ---
-    for (int ch = 0; ch < juce::jmin (numChannels, 8); ++ch)
+    for (int ch = 0; ch < juce::jmin (numChannels, 32); ++ch)
     {
         if (apvts.getRawParameterValue ("channelMute" + juce::String (ch))->load() > 0.5f)
             buffer.clear (ch, 0, numSamples);
