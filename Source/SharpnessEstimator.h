@@ -12,8 +12,8 @@
     where z_i = critical band rate (Bark), E_i = band energy,
     g(z) = 1 for z ≤ 16, g(z) = 0.066 * exp(0.171 * z) for z > 16  (von Bismarck weight).
 
-    Unit: acum (approximate). 1 acum ≈ narrow-band noise at 1 kHz, 60 dB SPL, 1 Bark wide.
-    Typical range: ~0.5 acum (low sounds) – 5 acum (very sharp/bright sounds).
+    Unit: acum (approximate). 1 acum ~ narrow-band noise at 1 kHz, 60 dB SPL, 1 Bark wide.
+    Typical range: ~0.5 acum (low sounds) - 5 acum (very sharp/bright sounds).
 */
 class SharpnessEstimator
 {

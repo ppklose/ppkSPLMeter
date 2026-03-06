@@ -86,7 +86,7 @@ void MeterComponent::paint (juce::Graphics& g)
         g.setColour (bgBar);
         g.fillRoundedRectangle (barAreaX, peakY, barAreaW, barH, 4.0f);
 
-        // bar fill — driven by selected band
+        // bar fill - driven by selected band
         float fillW = splToX (selectedValue(), barAreaW);
         if (fillW > 0.0f)
         {
@@ -176,8 +176,8 @@ void MeterComponent::paint (juce::Graphics& g)
 
     if (psychoVisible_)
     {
-        drawPsychoRow (margin,  roughnessY, "Roughness",   juce::String (roughness_,  1) + " %  (15\xe2\x80\x93" "300 Hz)");
-        drawPsychoRow (col2X,   roughnessY, "Fluctuation", juce::String (fluctuation_, 1) + " %  (0.5\xe2\x80\x93" "20 Hz)");
+        drawPsychoRow (margin,  roughnessY, "Roughness",   juce::String (roughness_,  1) + " %  (15-300 Hz)");
+        drawPsychoRow (col2X,   roughnessY, "Fluctuation", juce::String (fluctuation_, 1) + " %  (0.5-20 Hz)");
         drawPsychoRow (margin,  sharpnessY, "Sharpness",   juce::String (sharpness_,  2) + " acum (approx.)");
         drawPsychoRow (col2X,   sharpnessY, "Loudness",    juce::String (sone_,       2) + " sone");
     }

@@ -65,6 +65,27 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (saveCsvButton);
 
+    saveWavButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    saveWavButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    saveWavButton.setTooltip ("Save the last 'Keep Last' seconds of Input 01 and 02 as a stereo WAV file.");
+    saveWavButton.onClick = [this]
+    {
+        fileChooser = std::make_unique<juce::FileChooser> (
+            "Save recording as WAV",
+            juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
+                .getChildFile ("SPLMeter.wav"),
+            "*.wav");
+        fileChooser->launchAsync (
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+            [this] (const juce::FileChooser& fc)
+            {
+                auto file = fc.getResult();
+                if (file == juce::File{}) return;
+                audioProcessor.saveWavToFile (file);
+            });
+    };
+    addAndMakeVisible (saveWavButton);
+
     saveButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     saveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     saveButton.onClick = [this]
@@ -156,7 +177,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     setupTimeBtn (slowButton, 1);
     updateTimeWeightButtons();
 
-    // Monitor (mute) button — default OFF (muted)
+    // Monitor (mute) button - default OFF (muted)
     monitorButton.onClick = [this]
     {
         audioProcessor.setMonitorEnabled (monitorButton.getToggleState());
@@ -194,7 +215,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (basicModeButton);
 
-    // Settings button — opens the settings panel window
+    // Settings button - opens the settings panel window
     settingsButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
     settingsButton.onClick = [this]
@@ -219,7 +240,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (settingsButton);
 
-    // Clock label (line 1 — auto-updates every second)
+    // Clock label (line 1 - auto-updates every second)
     clockLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (11.0f)));
     clockLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff2c2c2e));
     clockLabel.setColour (juce::Label::textColourId,       juce::Colour (0xffaeaeb2));
@@ -227,7 +248,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                         juce::dontSendNotification);
     addAndMakeVisible (clockLabel);
 
-    // Note field (lines 2–4 — free text)
+    // Note field (lines 2-4 - free text)
     noteField.setMultiLine (true, false);
     noteField.setReturnKeyStartsNewLine (true);
     noteField.setScrollbarsShown (false);
@@ -292,13 +313,14 @@ void SPLMeterAudioProcessorEditor::resized()
     saveButton.setBounds      (titleBar.removeFromLeft (160).reduced (10, 22));
     saveCsvButton.setBounds   (titleBar.removeFromLeft (160).reduced (10, 22));
     resetButton.setBounds     (titleBar.removeFromRight (160).reduced (10, 22));
+    saveWavButton.setBounds   (titleBar.removeFromRight (160).reduced (10, 22));
     {
         auto noteCol = titleBar.removeFromRight (160).reduced (4, 4);
         clockLabel.setBounds (noteCol.removeFromTop (20));
         noteField.setBounds  (noteCol);
     }
 
-    // Real Time / File buttons — centred below the title text
+    // Real Time / File buttons - centred below the title text
     const int modeBtnW = 110;
     const int modeBtnH = 30;
     const int modeY    = 57;
@@ -351,7 +373,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
         btn.setColour (juce::TextButton::buttonColourId,  bgBtn);
         btn.setColour (juce::TextButton::textColourOffId, textOff);
     };
-    for (auto* b : { &settingsButton, &saveButton, &saveCsvButton })
+    for (auto* b : { &settingsButton, &saveButton, &saveCsvButton, &saveWavButton })
         styleBtn (*b);
     // Reset button keeps red text regardless of theme
     resetButton.setColour (juce::TextButton::buttonColourId,  bgBtn);

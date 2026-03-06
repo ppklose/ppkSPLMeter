@@ -551,7 +551,7 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
     const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (N));
     const float halfBandFactor = std::sqrt (stepFactor);
 
-    // Fixed 20–20 kHz log-scale X mapping
+    // Fixed 20-20 kHz log-scale X mapping
     const float fMin = 20.0f;
     const float fMax = 20000.0f;
 

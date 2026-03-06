@@ -39,7 +39,7 @@ private:
     // FFT
     static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
     static constexpr int   kFftSize     = 1 << kFftOrder;
-    static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (≈240 bands)
+    static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (~240 bands)
 
     juce::dsp::FFT                  fft_             { kFftOrder };
     std::array<float, kFftSize>     windowCoeffs_    {};   // current window function
@@ -66,7 +66,7 @@ private:
     static constexpr float kYMin = 20.0f;
     static constexpr float kYMax = 130.0f;
 
-    // Colours — SPL series
+    // Colours - SPL series
     static const juce::Colour colPeakSPL;
     static const juce::Colour colRmsSPL;
     static const juce::Colour colPeakDBA;
@@ -74,7 +74,7 @@ private:
     static const juce::Colour colPeakDBC;
     static const juce::Colour colRmsDBC;
 
-    // Colours — psychoacoustic series
+    // Colours - psychoacoustic series
     static const juce::Colour colRoughness;
     static const juce::Colour colFluctuation;
     static const juce::Colour colSharpness;

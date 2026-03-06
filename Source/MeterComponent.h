@@ -3,7 +3,7 @@
 
 //==============================================================================
 /**
-    Draws a horizontal peak meter bar on a 20–130 dB SPL scale.
+    Draws a horizontal peak meter bar on a 20-130 dB SPL scale.
     Clicking one of the three readout labels (dB SPL / dBA SPL / dBC SPL)
     selects which value drives the bar and hold indicator.
 */

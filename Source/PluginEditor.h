@@ -6,7 +6,7 @@
 #include "SettingsComponent.h"
 
 //==============================================================================
-// Stylised speaker button — toggle OFF = muted (red X), toggle ON = monitoring (waves)
+// Stylised speaker button - toggle OFF = muted (red X), toggle ON = monitoring (waves)
 class MonitorButton : public juce::Button
 {
 public:
@@ -97,6 +97,7 @@ private:
     juce::TextButton resetButton     { "Reset" };
     juce::TextButton saveButton      { "Save JPG" };
     juce::TextButton saveCsvButton   { "Save CSV" };
+    juce::TextButton saveWavButton   { "Save WAV" };
     juce::TextButton basicModeButton { "Advanced Mode" };
     juce::TextButton fastButton      { "FAST" };
     juce::TextButton slowButton      { "SLOW" };

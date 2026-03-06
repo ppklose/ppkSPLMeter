@@ -116,6 +116,15 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     logIntervalSamples = static_cast<int> (0.125 * sampleRate);
     logSampleCounter = 0;
 
+    // WAV circular buffer: sized to current logDuration
+    {
+        const float logDurS = apvts.getRawParameterValue ("logDuration")->load();
+        wavBufSize_ = static_cast<int> (logDurS * sampleRate);
+        wavCircBuf_[0].assign (wavBufSize_, 0.0f);
+        wavCircBuf_[1].assign (wavBufSize_, 0.0f);
+        wavWritePos_.store (0, std::memory_order_relaxed);
+    }
+
     // 20-20k bandpass: 8th-order Butterworth Q values for each biquad stage
     static const double bpQ[kBpStages] = { 0.5098, 0.6013, 0.8999, 2.5629 };
     for (int st = 0; st < kBpStages; ++st)
@@ -222,7 +231,24 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // 20Hz–20kHz bandpass (48dB/oct) applied per channel before mono mix
+    // Push Ch0 + Ch1 to WAV circular buffer (before bandpass/correction)
+    if (wavBufSize_ > 0)
+    {
+        const juce::AudioBuffer<float>& wavSrc = fileMode ? fileReadBuffer : buffer;
+        const int nSrc = wavSrc.getNumChannels();
+        const float* ch0 = nSrc > 0 ? wavSrc.getReadPointer (0) : nullptr;
+        const float* ch1 = nSrc > 1 ? wavSrc.getReadPointer (1) : ch0;
+        int pos = wavWritePos_.load (std::memory_order_relaxed);
+        for (int s = 0; s < numSamples; ++s)
+        {
+            wavCircBuf_[0][pos] = ch0 ? ch0[s] : 0.0f;
+            wavCircBuf_[1][pos] = ch1 ? ch1[s] : 0.0f;
+            if (++pos >= wavBufSize_) pos = 0;
+        }
+        wavWritePos_.store (pos, std::memory_order_release);
+    }
+
+    // 20Hz-20kHz bandpass (48dB/oct) applied per channel before mono mix
     if (apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f)
     {
         auto applyBP = [this] (juce::AudioBuffer<float>& buf)
@@ -598,6 +624,45 @@ void SPLMeterAudioProcessor::clearGraphOverlay()
     graphOverlayPoints_.clear();
     graphOverlayFileName_ = {};
     graphOverlayLoaded_.store (false);
+}
+
+//==============================================================================
+bool SPLMeterAudioProcessor::saveWavToFile (const juce::File& destFile)
+{
+    if (wavBufSize_ <= 0 || currentSampleRate < 1.0) return false;
+
+    const float logDurS        = apvts.getRawParameterValue ("logDuration")->load();
+    const int   numSamplesToSave = juce::jmin (wavBufSize_,
+                                               static_cast<int> (logDurS * currentSampleRate));
+    if (numSamplesToSave <= 0) return false;
+
+    // Snapshot: copy the most recent numSamplesToSave samples from the circular buffer.
+    // Reading across the audio-thread write is a benign race for audio data.
+    const int writePos = wavWritePos_.load (std::memory_order_acquire);
+
+    juce::AudioBuffer<float> snapBuf (2, numSamplesToSave);
+    float* out0 = snapBuf.getWritePointer (0);
+    float* out1 = snapBuf.getWritePointer (1);
+
+    for (int s = 0; s < numSamplesToSave; ++s)
+    {
+        const int readPos = (writePos - numSamplesToSave + s + wavBufSize_) % wavBufSize_;
+        out0[s] = wavCircBuf_[0][readPos];
+        out1[s] = wavCircBuf_[1][readPos];
+    }
+
+    // Write stereo 24-bit WAV
+    juce::WavAudioFormat wavFmt;
+    auto stream = std::make_unique<juce::FileOutputStream> (destFile);
+    if (!stream->openedOk()) return false;
+    stream->setPosition (0);
+    stream->truncate();
+
+    auto* writer = wavFmt.createWriterFor (stream.release(), currentSampleRate, 2, 24, {}, 0);
+    if (writer == nullptr) return false;
+
+    std::unique_ptr<juce::AudioFormatWriter> writerOwner (writer);
+    return writerOwner->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
 }
 
 //==============================================================================

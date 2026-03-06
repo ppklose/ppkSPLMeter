@@ -5,10 +5,10 @@
 /**
     Simplified real-time roughness estimator.
 
-    Roughness is caused by amplitude modulations in the 15–300 Hz range
-    (perceptual peak ≈ 70 Hz). This estimator computes:
+    Roughness is caused by amplitude modulations in the 15-300 Hz range
+    (perceptual peak ~ 70 Hz). This estimator computes:
 
-        Roughness (%) = RMS(envelope AC, 15–300 Hz) / envelope DC  × 100
+        Roughness (%) = RMS(envelope AC, 15-300 Hz) / envelope DC  × 100
 
     0 % = no modulation; 100 % = fully AM-modulated signal in the roughness band.
     Values are gated to 0 when the input level is below ~-80 dBFS to avoid

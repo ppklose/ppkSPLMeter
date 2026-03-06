@@ -90,7 +90,7 @@ public:
         peakHoldCounterRaw = peakHoldCounterA = peakHoldCounterC = 0;
     }
 
-    // Called when the FAST/SLOW mode is switched — resets meter + log
+    // Called when the FAST/SLOW mode is switched - resets meter + log
     void resetForModeSwitch() noexcept
     {
         resetPeak();
@@ -136,7 +136,7 @@ public:
     juce::String getCorrectionFileName() const     { return correctionFileName_; }
 
     //==========================================================================
-    // Graph overlay (visual only — no audio processing)
+    // Graph overlay (visual only - no audio processing)
     void loadGraphOverlay  (const juce::File& file);
     void clearGraphOverlay ();
     bool isGraphOverlayLoaded()         const noexcept { return graphOverlayLoaded_.load(); }
@@ -144,7 +144,11 @@ public:
     const std::vector<std::pair<float,float>>& getGraphOverlayPoints() const { return graphOverlayPoints_; }
 
     //==========================================================================
-    // MIDI Learn — param indices: 0=calOffset, 1=peakHoldTime, 2=fftGain
+    // WAV recorder
+    bool saveWavToFile (const juce::File& destFile);
+
+    //==========================================================================
+    // MIDI Learn - param indices: 0=calOffset, 1=peakHoldTime, 2=fftGain
     static constexpr int kNumMidiParams = 3;
     static const char* const kMidiParamIds[kNumMidiParams];
 
@@ -164,7 +168,7 @@ private:
     AWeightingFilter  aWeightL;
     CWeightingFilter  cWeightL;
 
-    // 20Hz–20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
+    // 20Hz-20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
     static constexpr int kBpStages = 4;
     juce::IIRFilter bpHP[32][kBpStages];
     juce::IIRFilter bpLP[32][kBpStages];
@@ -234,6 +238,11 @@ private:
     std::atomic<bool>                       graphOverlayLoaded_ { false };
     juce::String                            graphOverlayFileName_;
     std::vector<std::pair<float,float>>     graphOverlayPoints_; // (freq, spl)
+
+    // WAV circular buffer: stereo (Ch0 + Ch1), sized to logDuration at prepareToPlay
+    std::vector<float>  wavCircBuf_[2];
+    std::atomic<int>    wavWritePos_ { 0 };
+    int                 wavBufSize_  { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessor)
 };

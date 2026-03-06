@@ -5,11 +5,11 @@
 /**
     Simplified real-time fluctuation strength estimator.
 
-    Fluctuation strength is caused by amplitude modulations in the 0.5–20 Hz range
-    (perceptual peak ≈ 4 Hz). Complementary to roughness (15–300 Hz).
+    Fluctuation strength is caused by amplitude modulations in the 0.5-20 Hz range
+    (perceptual peak ~ 4 Hz). Complementary to roughness (15-300 Hz).
 
     This estimator computes:
-        F (%) = RMS(envelope AC, 0.5–20 Hz) / envelope DC  × 100
+        F (%) = RMS(envelope AC, 0.5-20 Hz) / envelope DC  × 100
 
     0 % = no modulation; 100 % = fully AM-modulated signal in the fluctuation band.
     Integration window: 1 second (fluctuations are slow).
@@ -21,13 +21,13 @@ public:
     {
         fs = sampleRate;
 
-        // Envelope LPF at 20 Hz — captures AM up to 20 Hz
+        // Envelope LPF at 20 Hz - captures AM up to 20 Hz
         alpha_lp = 1.0 - std::exp (-2.0 * pi * 20.0 / fs);
 
         // Slow DC tracker at 0.5 Hz
         alpha_dc = 1.0 - std::exp (-2.0 * pi * 0.5 / fs);
 
-        // 1st-order HP at 0.5 Hz — removes DC from envelope
+        // 1st-order HP at 0.5 Hz - removes DC from envelope
         coeff_hp = std::exp (-2.0 * pi * 0.5 / fs);
 
         // RMS window: 1 second
