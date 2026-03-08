@@ -130,6 +130,11 @@ target_link_libraries(SPLMeter
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        # ViSQOL static library — macOS only (not iOS, not Windows)
+        $<$<AND:$<PLATFORM_ID:Darwin>,$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},iOS>>>:${CMAKE_CURRENT_SOURCE_DIR}/Vendor/visqol/lib/libvisqol_ffi.a>
+        $<$<AND:$<PLATFORM_ID:Darwin>,$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},iOS>>>:-framework CoreFoundation>
+        $<$<AND:$<PLATFORM_ID:Darwin>,$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},iOS>>>:-framework Security>
+        $<$<AND:$<PLATFORM_ID:Darwin>,$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},iOS>>>:-framework SystemConfiguration>
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags

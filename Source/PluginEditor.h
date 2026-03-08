@@ -4,7 +4,7 @@
 #include "MeterComponent.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
-#if !JUCE_IOS
+#if JUCE_MAC
  #include "VisqolComponent.h"
 #endif
 
@@ -124,7 +124,7 @@ private:
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
     std::unique_ptr<SettingsWindow> settingsWindow;
-#if !JUCE_IOS
+#if JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;
     juce::TextButton visqolButton { "ViSQOL" };
 #endif

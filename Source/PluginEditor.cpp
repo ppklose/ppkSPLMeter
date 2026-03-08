@@ -214,7 +214,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
-#if !JUCE_IOS
+#if JUCE_MAC
         visqolButton.setVisible (!basicMode_);
 #endif
         if (basicMode_)
@@ -257,7 +257,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (settingsButton);
 
-#if !JUCE_IOS
+#if JUCE_MAC
     // ViSQOL quality analysis button
     visqolButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     visqolButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
@@ -306,7 +306,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     basicModeButton.setToggleState (true, juce::dontSendNotification);
     basicModeButton.setButtonText ("Basic Mode");
     log.setVisible (false);
-#if !JUCE_IOS
+#if JUCE_MAC
     visqolButton.setVisible (false);
 #endif
     meter.setPsychoVisible (false);
@@ -364,7 +364,7 @@ void SPLMeterAudioProcessorEditor::resized()
     saveWavButton.setBounds   (tbL (140));
     saveButton.setBounds      (tbL (160));
     saveCsvButton.setBounds   (tbL (160));
-#if !JUCE_IOS
+#if JUCE_MAC
     visqolButton.setBounds    (tbL (160));
 #endif
     resetButton.setBounds     (tbR (160));
@@ -431,7 +431,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     };
     for (auto* b : { &settingsButton, &saveButton, &saveCsvButton, &saveWavButton })
         styleBtn (*b);
-#if !JUCE_IOS
+#if JUCE_MAC
     styleBtn (visqolButton);
 #endif
 
@@ -450,7 +450,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     meter.setLightMode (light);
     log.setLightMode   (light);
 
-#if !JUCE_IOS
+#if JUCE_MAC
     if (visqolWindow != nullptr)
         visqolWindow->setLightMode (light);
 #endif
