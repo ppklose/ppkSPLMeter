@@ -184,6 +184,20 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (monitorButton);
 
+    // Monitor gain fader (volume, dB) - same style as calibration fader
+    monitorGainSlider.setSliderStyle (juce::Slider::LinearVertical);
+    monitorGainSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 52, 16);
+    monitorGainSlider.setTextValueSuffix (" dB");
+    monitorGainSlider.setColour (juce::Slider::trackColourId,            juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::thumbColourId,            juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId,      juce::Colours::white);
+    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId,   juce::Colours::transparentBlack);
+    monitorGainSlider.setColour (juce::Slider::textBoxHighlightColourId, juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setTooltip ("Monitor output volume");
+    addAndMakeVisible (monitorGainSlider);
+    monitorGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        audioProcessor.apvts, "monitorGain", monitorGainSlider);
+
     // Basic / Extended mode toggle
     basicModeButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xffff453a));  // red when Advanced
     basicModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));  // blue when Basic
@@ -200,6 +214,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
+#if !JUCE_IOS
+        visqolButton.setVisible (!basicMode_);
+#endif
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
@@ -240,6 +257,31 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (settingsButton);
 
+#if !JUCE_IOS
+    // ViSQOL quality analysis button
+    visqolButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    visqolButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    visqolButton.setTooltip ("Open ViSQOL perceptual quality analyser");
+    visqolButton.onClick = [this]
+    {
+        if (visqolWindow == nullptr)
+            visqolWindow = std::make_unique<VisqolWindow>();
+
+        if (visqolWindow->isVisible())
+        {
+            visqolWindow->setVisible (false);
+        }
+        else
+        {
+            auto pos = localPointToGlobal (visqolButton.getBounds().getBottomLeft());
+            visqolWindow->setTopLeftPosition (pos);
+            visqolWindow->setVisible (true);
+            visqolWindow->toFront (true);
+        }
+    };
+    addAndMakeVisible (visqolButton);
+#endif
+
     // Clock label (line 1 - auto-updates every second)
     clockLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (11.0f)));
     clockLabel.setColour (juce::Label::backgroundColourId, juce::Colour (0xff2c2c2e));
@@ -264,10 +306,13 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     basicModeButton.setToggleState (true, juce::dontSendNotification);
     basicModeButton.setButtonText ("Basic Mode");
     log.setVisible (false);
+#if !JUCE_IOS
+    visqolButton.setVisible (false);
+#endif
     meter.setPsychoVisible (false);
     const int basicH = 100 + 215 + 24;
     setResizeLimits (480, basicH, 3840, 2160);
-    setSize (1500, basicH);
+    setSize (1800, basicH);
     extendedHeight_ = 900;
     startTimerHz (30);
 }
@@ -298,7 +343,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText (juce::String (JucePlugin_VersionString) + "   Build: " + __DATE__ + "  " + __TIME__,
+    g.drawText ("v2.1   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -308,25 +353,36 @@ void SPLMeterAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
     auto titleBar = area.removeFromTop (100);
-    settingsButton.setBounds  (titleBar.removeFromLeft (160).reduced (10, 22));
-    basicModeButton.setBounds (titleBar.removeFromLeft (140).reduced (10, 22));
-    saveButton.setBounds      (titleBar.removeFromLeft (160).reduced (10, 22));
-    saveCsvButton.setBounds   (titleBar.removeFromLeft (160).reduced (10, 22));
-    resetButton.setBounds     (titleBar.removeFromRight (160).reduced (10, 22));
-    saveWavButton.setBounds   (titleBar.removeFromRight (160).reduced (10, 22));
+
+    // Scale title-bar button widths proportionally so the layout fits on iPad
+    // (reference width: 1800 px; minimum scale: 0.55 for 1024 pt iPad mini)
+    const float ts = juce::jlimit (0.55f, 1.0f, (float) getWidth() / 1800.0f);
+    auto tbL = [&] (int w) { return titleBar.removeFromLeft  (juce::roundToInt (w * ts)).reduced (10, 22); };
+    auto tbR = [&] (int w) { return titleBar.removeFromRight (juce::roundToInt (w * ts)).reduced (10, 22); };
+
+    settingsButton.setBounds  (tbL (160));
+    saveWavButton.setBounds   (tbL (140));
+    saveButton.setBounds      (tbL (160));
+    saveCsvButton.setBounds   (tbL (160));
+#if !JUCE_IOS
+    visqolButton.setBounds    (tbL (160));
+#endif
+    resetButton.setBounds     (tbR (160));
+    basicModeButton.setBounds (tbR (160));
     {
-        auto noteCol = titleBar.removeFromRight (160).reduced (4, 4);
+        auto noteCol = titleBar.removeFromRight (juce::roundToInt (160 * ts)).reduced (4, 4);
         clockLabel.setBounds (noteCol.removeFromTop (20));
         noteField.setBounds  (noteCol);
     }
 
-    // Real Time / File buttons - centred below the title text
-    const int modeBtnW = 110;
+    // Real Time / File / Monitor buttons — centred below the title text
+    const int modeBtnW = juce::roundToInt (110 * ts);
     const int modeBtnH = 30;
     const int modeY    = 57;
     realTimeButton.setBounds (getWidth() / 2 - modeBtnW - 2, modeY, modeBtnW, modeBtnH);
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
+    monitorGainSlider.setBounds (monitorButton.getRight() + 4, 2, 52, 96);
 
     const int meterHeight = 215;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -375,6 +431,14 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     };
     for (auto* b : { &settingsButton, &saveButton, &saveCsvButton, &saveWavButton })
         styleBtn (*b);
+#if !JUCE_IOS
+    styleBtn (visqolButton);
+#endif
+
+    monitorGainSlider.setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::thumbColourId,       juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId, textOff);
+    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     // Reset button keeps red text regardless of theme
     resetButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
     resetButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
@@ -385,6 +449,11 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 
     meter.setLightMode (light);
     log.setLightMode   (light);
+
+#if !JUCE_IOS
+    if (visqolWindow != nullptr)
+        visqolWindow->setLightMode (light);
+#endif
 
     repaint();
 }

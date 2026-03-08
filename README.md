@@ -108,6 +108,123 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 
 ---
 
+## Real-Time Audio Signal Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ppkSPLmeter v2.1 — Real-Time Audio Signal Flow           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────┐     ┌──────────────────────┐
+  │  DAW / Host  │     │  File Transport       │
+  │  Input Bus   │     │  AudioTransportSource │
+  │  (≤32 ch)    │     │  (file playback mode) │
+  └──────┬───────┘     └──────────┬───────────┘
+         │                        │
+         └──────────┬─────────────┘
+                    │  source selection
+                    ▼
+          ┌──────────────────┐
+          │  Channel Muting  │  (per-channel on/off, up to 32 ch)
+          └────────┬─────────┘
+                   │
+                   ├──────────────────────────────────────────────────────────┐
+                   │                                                           │
+                   ▼                                                    WAV Capture
+        ┌──────────────────────┐                                        (pre-EQ)│
+        │  WAV Circular Buffer │ ◄── Ch0 + Ch1, pre-filter                     │
+        │  (lock-free ring buf)│                                               │
+        │  → Save WAV feature  │                                               │
+        └──────────────────────┘                                               │
+                   │                                                           │
+                   ▼                                                           │
+        ┌──────────────────────────────────────┐                              │
+        │  Bandpass Filter (optional)           │                              │
+        │  8th-order Butterworth 20Hz – 20kHz  │                              │
+        │  4× cascaded biquad (HP + LP stages) │                              │
+        │  per active channel                  │                              │
+        └──────────────────┬───────────────────┘                              │
+                           │                                                   │
+                           ▼                                                   │
+        ┌──────────────────────────────────────┐                              │
+        │  FIR Correction Filter (optional)     │                              │
+        │  4096-tap linear-phase               │                              │
+        │  juce::dsp::Convolution              │                              │
+        │  (inverted measured SPL curve)       │                              │
+        └──────────────────┬───────────────────┘                              │
+                           │                                                   │
+                           ▼                                                   │
+                 ┌─────────────────┐                                           │
+                 │   Mono Mix      │  Σ(all active ch) / N                    │
+                 └────────┬────────┘                                           │
+                          │                                                    │
+          ┌───────────────┼─────────────────────────────────────┐             │
+          │               │                 │                   │             │
+          ▼               ▼                 ▼                   ▼             │
+  ┌──────────────┐ ┌─────────────┐  ┌───────────────┐  ┌────────────────┐   │
+  │  A-Weighting │ │ C-Weighting │  │  FFT Circular │  │ Psychoacoustic │   │
+  │  IIR filter  │ │  IIR filter │  │  Buffer       │  │  Estimators    │   │
+  │  (IEC 61672) │ │  (IEC 61672)│  │  8192 samples │  │                │   │
+  └──────┬───────┘ └──────┬──────┘  │  lock-free    │  │  • Roughness   │   │
+         │                │         │  atomic write │  │    (AM 15-300Hz│   │
+         │                │         └───────┬───────┘  │  • Sharpness   │   │
+         │                │                 │           │    (Zwicker/   │   │
+         │                │                 │           │     Aures 8-bd)│   │
+         │                │                 │           │  • Fluctuation │   │
+         │                │                 │           │    (0.5-20 Hz) │   │
+         │                │                 │           └───────┬────────┘   │
+         │                │                 │                   │             │
+         └───────┬─────── ┘                 │                   │             │
+                 │                          │                   │             │
+                 ▼                          ▼                   ▼             │
+        ┌─────────────────────┐    ┌────────────────┐  ┌───────────────────┐ │
+        │  Peak Tracking      │    │  FFT spectrum  │  │  Psychoacoustic   │ │
+        │  with Hold          │    │  → GUI display │  │  readouts         │ │
+        │  (raw, A, C)        │    │  (30 Hz poll)  │  │  → GUI atomics    │ │
+        │  configurable hold  │    └────────────────┘  └───────────────────┘ │
+        └──────────┬──────────┘                                               │
+                   │                                                           │
+                   ▼                                                           │
+        ┌──────────────────────────────────────┐                              │
+        │  Exponential RMS Smoothing            │                              │
+        │  IEC 61672 time weighting            │                              │
+        │  FAST  τ = 125 ms                    │                              │
+        │  SLOW  τ = 1000 ms                   │                              │
+        │  (raw, A-weighted, C-weighted)       │                              │
+        └──────────────────┬───────────────────┘                              │
+                           │                                                   │
+                           ▼                                                   │
+        ┌──────────────────────────────────────┐                              │
+        │  Atomic Readout Update (every 125ms)  │ ◄── also pushes LogEntry   │
+        │  • SPL raw/A/C (fast+slow)           │     to deque               │
+        │  • Peak raw/A/C                      │     (pruned to logDuration) │
+        │  • Psychoacoustic values             │                              │
+        └──────────────────┬───────────────────┘                              │
+                           │                                                   │
+                           ▼                                                   │
+                  ┌─────────────────┐                                          │
+                  │  Monitor Mute   │  buffer.clear() if monitor off           │
+                  └────────┬────────┘                                          │
+                           │                                                   │
+                           ▼                                                   │
+                  ┌─────────────────┐                                          │
+                  │  DAW / Host     │                                          │
+                  │  Output Bus     │                                          │
+                  └─────────────────┘                                          │
+                                                                               │
+  ┌────────────────────────────────────────────────────────────────────────────┘
+  │  GUI Timer (30 Hz)
+  │  ┌──────────────────────────────────────────┐
+  └─►│  timerCallback()                         │
+     │  • reads atomics → MeterComponent        │
+     │  • reads FFT ring buf → spectrum display │
+     │  • updates Log / CSV export              │
+     │  • MIDI CC learn / apply                 │
+     └──────────────────────────────────────────┘
+```
+
+---
+
 ## Building
 
 ### macOS (Xcode)
@@ -177,6 +294,12 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 ---
 
 ## Changelog
+
+### v2.1.0
+- **ViSQOL integration** — perceptual audio quality analysis (MOS-LQO + per-band NSIM) available as a floating panel via the ViSQOL button (Advanced mode only)
+- **Automatic audio conversion** — WAV files are automatically resampled, converted to 16-bit, and mixed to mono before ViSQOL analysis (GPL-compatible, JUCE-only pipeline); conversion details shown in the result panel
+- **Default window width** increased to 1800 px
+- **Real-time signal flow diagram** added to documentation
 
 ### v2.0.0
 - **Basic / Advanced mode** — new mode toggle in the header; app starts in Basic mode (compact SPL meter only); Advanced mode adds the full log plot and psychoacoustic overlay

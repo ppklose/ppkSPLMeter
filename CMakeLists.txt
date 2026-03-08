@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.0.0)
+project(SPLMeter VERSION 2.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -75,15 +75,17 @@ endif()
 # ---------------------------------------------------------------------------
 # Plugin target
 # ---------------------------------------------------------------------------
-# AU is macOS-only
-if(APPLE)
+# Format selection: iOS → Standalone only; macOS → Standalone + VST3 + AU; Windows → Standalone + VST3
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SPLMETER_FORMATS Standalone)
+elseif(APPLE)
     set(SPLMETER_FORMATS Standalone VST3 AU)
 else()
     set(SPLMETER_FORMATS Standalone VST3)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     2.0.0
+    VERSION                     2.1.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
@@ -97,6 +99,9 @@ juce_add_plugin(SPLMeter
     IS_MIDI_EFFECT              FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     FALSE
+    # iOS microphone access
+    NEEDS_MICROPHONE_INPUT      TRUE
+    MICROPHONE_PERMISSION_TEXT  "SPLMeter needs microphone access for real-time SPL measurement."
 )
 
 juce_generate_juce_header(SPLMeter)

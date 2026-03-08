@@ -40,6 +40,10 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftSmoothing", "FFT Smoothing",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.01f), 0.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "monitorGain", "Monitor Gain (dB)",
+        juce::NormalisableRange<float> (-60.0f, 0.0f, 0.5f), 0.0f));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftPeakHold", "FFT Peak Hold", false));
 
@@ -359,9 +363,17 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Mute output if monitoring is disabled
-    if (!monitorEnabled.load())
+    // Apply monitor gain or mute output
+    if (monitorEnabled.load())
+    {
+        const float gainDB  = apvts.getRawParameterValue ("monitorGain")->load();
+        const float gainLin = juce::Decibels::decibelsToGain (gainDB, -60.0f);
+        buffer.applyGain (gainLin);
+    }
+    else
+    {
         buffer.clear();
+    }
 }
 
 //==============================================================================

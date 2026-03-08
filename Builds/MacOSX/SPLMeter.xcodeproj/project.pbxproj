@@ -867,8 +867,8 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=0",
@@ -913,8 +913,8 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=0",
@@ -936,7 +936,7 @@
 				INFOPLIST_PREPROCESS = NO;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				MTL_HEADER_SEARCH_PATHS = "/Applications/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Applications/JUCE/modules /Applications/JUCE/modules/juce_audio_plugin_client/AU";
-				OTHER_LDFLAGS = "-lSPLMeter";
+				OTHER_LDFLAGS = ("-lSPLMeter", "-L$(SRCROOT)/../../Vendor/visqol/lib", "-lvisqol_ffi", "-framework", "CoreFoundation", "-framework", "Security", "-framework", "SystemConfiguration");
 				PRODUCT_BUNDLE_IDENTIFIER = com.PhilippPaulKloseAudioEngineering.SPLMeter;
 				PRODUCT_NAME = "SPLMeter";
 				USE_HEADERMAP = NO;
@@ -960,8 +960,8 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=0",
@@ -984,7 +984,7 @@
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				MTL_HEADER_SEARCH_PATHS = "/Applications/JUCE/modules/juce_audio_processors/format_types/VST3_SDK $(SRCROOT)/../../JuceLibraryCode /Applications/JUCE/modules /Applications/JUCE/modules/juce_audio_plugin_client/AU";
-				OTHER_LDFLAGS = "-lSPLMeter";
+				OTHER_LDFLAGS = ("-lSPLMeter", "-L$(SRCROOT)/../../Vendor/visqol/lib", "-lvisqol_ffi", "-framework", "CoreFoundation", "-framework", "Security", "-framework", "SystemConfiguration");
 				PRODUCT_BUNDLE_IDENTIFIER = com.PhilippPaulKloseAudioEngineering.SPLMeter;
 				PRODUCT_NAME = "SPLMeter";
 				USE_HEADERMAP = NO;
@@ -1016,8 +1016,8 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
 					"JucePlugin_Build_AU=0",
@@ -1067,8 +1067,8 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=0",
@@ -1162,8 +1162,8 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
 					"JucePlugin_Build_AU=1",
@@ -1209,8 +1209,8 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=1",
@@ -1262,8 +1262,8 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
 					"JucePlugin_Build_AU=0",
@@ -1314,8 +1314,8 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
 					"JucePlugin_Build_AU=1",
@@ -1366,8 +1366,8 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=1.6.0",
-					"JUCE_APP_VERSION_HEX=0x10600",
+					"JUCE_APP_VERSION=2.1.0",
+					"JUCE_APP_VERSION_HEX=0x20100",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
 					"JucePlugin_Build_AU=1",

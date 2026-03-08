@@ -4,6 +4,9 @@
 #include "MeterComponent.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
+#if !JUCE_IOS
+ #include "VisqolComponent.h"
+#endif
 
 //==============================================================================
 // Stylised speaker button - toggle OFF = muted (red X), toggle ON = monitoring (waves)
@@ -104,6 +107,8 @@ private:
     bool basicMode_      = true;
     int  extendedHeight_ = 900;
     MonitorButton    monitorButton;
+    juce::Slider     monitorGainSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> monitorGainAttachment;
 
     juce::TextButton realTimeButton { "Real Time" };
     juce::TextButton fileButton     { "File" };
@@ -119,6 +124,10 @@ private:
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
     std::unique_ptr<SettingsWindow> settingsWindow;
+#if !JUCE_IOS
+    std::unique_ptr<VisqolWindow>   visqolWindow;
+    juce::TextButton visqolButton { "ViSQOL" };
+#endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessorEditor)
 };
