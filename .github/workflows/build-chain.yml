@@ -71,6 +71,22 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Sign Windows binaries (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id:              ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id:              ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret:          ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint:                     ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name:     ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder:                 build/SPLMeter_artefacts/Release
+          files-folder-filter:          exe,dll,vst3
+          files-folder-recursive:       true
+          file-digest:                  SHA256
+          timestamp-rfc3161:            http://timestamp.acs.microsoft.com
+          timestamp-digest:             SHA256
+
       - name: Upload Standalone
         uses: actions/upload-artifact@v4
         with:
