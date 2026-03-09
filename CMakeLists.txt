@@ -102,6 +102,7 @@ juce_add_plugin(SPLMeter
     # iOS microphone access
     NEEDS_MICROPHONE_INPUT      TRUE
     MICROPHONE_PERMISSION_TEXT  "SPLMeter needs microphone access for real-time SPL measurement."
+    PLIST_TO_MERGE              "<plist><dict><key>NSMicrophoneUsageDescription</key><string>SPLMeter needs microphone access for real-time SPL measurement.</string><key>UIBackgroundModes</key><array><string>audio</string></array></dict></plist>"
 )
 
 juce_generate_juce_header(SPLMeter)
@@ -134,6 +135,17 @@ target_link_libraries(SPLMeter
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
 )
+
+# Strip iCloud resource forks before Xcode codesigns the app bundle.
+# This is needed because the project lives in iCloud Drive and CloudDocs
+# adds resource forks to files, which codesign rejects.
+if(APPLE AND TARGET SPLMeter_Standalone)
+    add_custom_command(TARGET SPLMeter_Standalone POST_BUILD
+        COMMAND find "$<TARGET_BUNDLE_DIR:SPLMeter_Standalone>" -exec xattr -c {} ";" 2>/dev/null || true
+        COMMENT "Strip iCloud resource forks before codesign"
+        VERBATIM
+    )
+endif()
 
 # ViSQOL static library + required Apple frameworks — macOS desktop only
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")

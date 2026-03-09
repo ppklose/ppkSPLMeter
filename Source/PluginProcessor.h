@@ -136,12 +136,19 @@ public:
     juce::String getCorrectionFileName() const     { return correctionFileName_; }
 
     //==========================================================================
-    // Graph overlay (visual only - no audio processing)
+    // Graph overlay 1 (visual only - no audio processing)
     void loadGraphOverlay  (const juce::File& file);
     void clearGraphOverlay ();
     bool isGraphOverlayLoaded()         const noexcept { return graphOverlayLoaded_.load(); }
     juce::String getGraphOverlayFileName() const       { return graphOverlayFileName_; }
     const std::vector<std::pair<float,float>>& getGraphOverlayPoints() const { return graphOverlayPoints_; }
+
+    // Graph overlay 2 (visual only - no audio processing)
+    void loadGraphOverlay2  (const juce::File& file);
+    void clearGraphOverlay2 ();
+    bool isGraphOverlay2Loaded()          const noexcept { return graphOverlay2Loaded_.load(); }
+    juce::String getGraphOverlay2FileName() const        { return graphOverlay2FileName_; }
+    const std::vector<std::pair<float,float>>& getGraphOverlay2Points() const { return graphOverlay2Points_; }
 
     //==========================================================================
     // WAV recorder
@@ -234,10 +241,15 @@ private:
     std::vector<std::pair<float,float>>     correctionPoints_; // (freq, spl)
     void rebuildCorrectionFIR();
 
-    // Graph overlay
+    // Graph overlay 1
     std::atomic<bool>                       graphOverlayLoaded_ { false };
     juce::String                            graphOverlayFileName_;
     std::vector<std::pair<float,float>>     graphOverlayPoints_; // (freq, spl)
+
+    // Graph overlay 2
+    std::atomic<bool>                       graphOverlay2Loaded_ { false };
+    juce::String                            graphOverlay2FileName_;
+    std::vector<std::pair<float,float>>     graphOverlay2Points_; // (freq, spl)
 
     // WAV circular buffer: stereo (Ch0 + Ch1), sized to logDuration at prepareToPlay
     std::vector<float>  wavCircBuf_[2];

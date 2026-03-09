@@ -669,6 +669,50 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         }
     }
 
+    // ---- Graph Overlay 2: dashed orange frequency-response curve ----
+    if (processor.apvts.getRawParameterValue ("graphOverlay2Enabled")->load() > 0.5f
+        && processor.isGraphOverlay2Loaded())
+    {
+        const auto& pts = processor.getGraphOverlay2Points();
+        if (pts.size() >= 2)
+        {
+            auto interpSPL = [&] (float freq) -> float
+            {
+                if (freq <= pts.front().first) return pts.front().second;
+                if (freq >= pts.back().first)  return pts.back().second;
+                for (size_t i = 0; i + 1 < pts.size(); ++i)
+                {
+                    const float f0 = pts[i].first, f1 = pts[i + 1].first;
+                    if (freq >= f0 && freq <= f1)
+                    {
+                        const float t = (f1 > f0)
+                            ? std::log (freq / f0) / std::log (f1 / f0) : 0.0f;
+                        return pts[i].second + t * (pts[i + 1].second - pts[i].second);
+                    }
+                }
+                return 0.0f;
+            };
+
+            auto xToFreq = [&] (float px) -> float
+            {
+                float frac = (px - plot.getX()) / plot.getWidth();
+                return fMin * std::pow (fMax / fMin, frac);
+            };
+
+            g.setColour (juce::Colour (0xffff9f0a));  // orange
+            const float dashLen = 10.0f, gapLen = 6.0f;
+            float x = plot.getX();
+            while (x < plot.getRight())
+            {
+                float dashEnd = std::min (x + dashLen, plot.getRight());
+                float y0 = splToY (interpSPL (xToFreq (x)));
+                float y1 = splToY (interpSPL (xToFreq (dashEnd)));
+                g.drawLine (x, y0, dashEnd, y1, 2.0f);
+                x += dashLen + gapLen;
+            }
+        }
+    }
+
     // ---- Frequency axis: grid lines + labels ----
     {
         const juce::Colour gridCol  = lightMode_ ? juce::Colour (0x25000000) : juce::Colour (0x403a3a3c);

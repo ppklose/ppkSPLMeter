@@ -275,7 +275,7 @@ public:
         graphOverlayEnableButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
         graphOverlayEnableButton.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff1c1c1e));
         graphOverlayEnableButton.setClickingTogglesState (true);
-        graphOverlayEnableButton.setTooltip ("Enable / disable the loaded graph overlay");
+        graphOverlayEnableButton.setTooltip ("Enable / disable Graph Overlay 1");
         graphOverlayEnableButton.onClick = [this, &p]
         {
             auto* param = p.apvts.getParameter ("graphOverlayEnabled");
@@ -285,11 +285,11 @@ public:
 
         graphOverlayLoadButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
         graphOverlayLoadButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-        graphOverlayLoadButton.setTooltip ("Load a graph overlay (.txt: frequency Hz, SPL dB) - plotted as dashed blue line in FFT view");
+        graphOverlayLoadButton.setTooltip ("Load Graph Overlay 1 (.txt: frequency Hz, SPL dB) - plotted as dashed blue line in FFT view");
         graphOverlayLoadButton.onClick = [this, &p]
         {
             graphOverlayFileChooser_ = std::make_unique<juce::FileChooser> (
-                "Load graph overlay", juce::File{}, "*.txt;*.csv");
+                "Load Graph Overlay 1", juce::File{}, "*.txt;*.csv");
             graphOverlayFileChooser_->launchAsync (
                 juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [&p] (const juce::FileChooser& fc)
@@ -305,6 +305,43 @@ public:
         graphOverlayClearButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
         graphOverlayClearButton.onClick = [this, &p] { p.clearGraphOverlay(); };
         addAndMakeVisible (graphOverlayClearButton);
+
+        // Graph overlay 2
+        graphOverlay2EnableButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        graphOverlay2EnableButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffff9f0a));
+        graphOverlay2EnableButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        graphOverlay2EnableButton.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff1c1c1e));
+        graphOverlay2EnableButton.setClickingTogglesState (true);
+        graphOverlay2EnableButton.setTooltip ("Enable / disable Graph Overlay 2");
+        graphOverlay2EnableButton.onClick = [this, &p]
+        {
+            auto* param = p.apvts.getParameter ("graphOverlay2Enabled");
+            param->setValueNotifyingHost (graphOverlay2EnableButton.getToggleState() ? 1.0f : 0.0f);
+        };
+        addAndMakeVisible (graphOverlay2EnableButton);
+
+        graphOverlay2LoadButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        graphOverlay2LoadButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        graphOverlay2LoadButton.setTooltip ("Load Graph Overlay 2 (.txt: frequency Hz, SPL dB) - plotted as dashed orange line in FFT view");
+        graphOverlay2LoadButton.onClick = [this, &p]
+        {
+            graphOverlay2FileChooser_ = std::make_unique<juce::FileChooser> (
+                "Load Graph Overlay 2", juce::File{}, "*.txt;*.csv");
+            graphOverlay2FileChooser_->launchAsync (
+                juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [&p] (const juce::FileChooser& fc)
+                {
+                    auto file = fc.getResult();
+                    if (file != juce::File{})
+                        p.loadGraphOverlay2 (file);
+                });
+        };
+        addAndMakeVisible (graphOverlay2LoadButton);
+
+        graphOverlay2ClearButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        graphOverlay2ClearButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
+        graphOverlay2ClearButton.onClick = [this, &p] { p.clearGraphOverlay2(); };
+        addAndMakeVisible (graphOverlay2ClearButton);
 
         // Channel mute checkboxes IN01..IN32
         for (int i = 0; i < 32; ++i)
@@ -391,10 +428,8 @@ public:
         }
         {
             auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 4;
+            const int bw = r.getWidth() / 2;
             lightModeButton.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            line94Button.setBounds     (r.removeFromLeft (bw).reduced (2, 0));
-            bandpassButton.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
             fullscreenButton.setBounds (r.reduced (2, 0));
         }
 
@@ -404,7 +439,9 @@ public:
         sectionFftLabel.setBounds (row (16)); gap (5);
         {
             auto r = row (28); gap (5);
-            fftEnableButton.setBounds (r.removeFromLeft (r.getWidth() / 2).reduced (2, 0));
+            const int bw = r.getWidth() / 2;
+            fftEnableButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
+            bandpassButton.setBounds  (r.reduced (2, 0));
         }
         {
             auto faderRow = row (95); gap (5);
@@ -457,6 +494,10 @@ public:
         sectionAnalysisLabel.setBounds (row (16)); gap (5);
         {
             auto r = row (28); gap (5);
+            line94Button.setBounds (r.removeFromLeft (r.getWidth() / 2).reduced (2, 0));
+        }
+        {
+            auto r = row (28); gap (5);
             correctionEnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
             correctionClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
             correctionLoadButton.setBounds   (r.reduced (2, 0));
@@ -466,6 +507,12 @@ public:
             graphOverlayEnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
             graphOverlayClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
             graphOverlayLoadButton.setBounds   (r.reduced (2, 0));
+        }
+        {
+            auto r = row (28); gap (5);
+            graphOverlay2EnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
+            graphOverlay2ClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
+            graphOverlay2LoadButton.setBounds   (r.reduced (2, 0));
         }
 
         gap (10); // section gap
@@ -551,6 +598,10 @@ private:
         graphOverlayLoadButton.setColour  (juce::TextButton::buttonColourId,  bgBtn);
         graphOverlayLoadButton.setColour  (juce::TextButton::textColourOffId, textOff);
         graphOverlayClearButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
+        styleBtn (graphOverlay2EnableButton, juce::Colour (0xffff9f0a));
+        graphOverlay2LoadButton.setColour  (juce::TextButton::buttonColourId,  bgBtn);
+        graphOverlay2LoadButton.setColour  (juce::TextButton::textColourOffId, textOff);
+        graphOverlay2ClearButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
 
         for (auto* label : { &calLabel, &holdLabel, &fftGainLabel, &fftSmoothLabel })
             label->setColour (juce::Label::textColourId, textLbl);
@@ -640,7 +691,15 @@ private:
         if (processor.isGraphOverlayLoaded())
             graphOverlayLoadButton.setButtonText (processor.getGraphOverlayFileName());
         else
-            graphOverlayLoadButton.setButtonText ("Load Graph Overlay");
+            graphOverlayLoadButton.setButtonText ("Load Graph Overlay 1");
+
+        bool graph2On = processor.apvts.getRawParameterValue ("graphOverlay2Enabled")->load() > 0.5f;
+        graphOverlay2EnableButton.setToggleState (graph2On, juce::dontSendNotification);
+
+        if (processor.isGraphOverlay2Loaded())
+            graphOverlay2LoadButton.setButtonText (processor.getGraphOverlay2FileName());
+        else
+            graphOverlay2LoadButton.setButtonText ("Load Graph Overlay 2");
 
         // Sync channel mute checkboxes
         for (int i = 0; i < 32; ++i)
@@ -709,11 +768,17 @@ private:
     juce::TextButton correctionClearButton  { "Clear" };
     std::unique_ptr<juce::FileChooser> corrFileChooser_;
 
-    // Graph overlay
+    // Graph overlay 1
     juce::TextButton graphOverlayEnableButton { "Enable" };
-    juce::TextButton graphOverlayLoadButton   { "Load Graph Overlay" };
+    juce::TextButton graphOverlayLoadButton   { "Load Graph Overlay 1" };
     juce::TextButton graphOverlayClearButton  { "Clear" };
     std::unique_ptr<juce::FileChooser> graphOverlayFileChooser_;
+
+    // Graph overlay 2
+    juce::TextButton graphOverlay2EnableButton { "Enable" };
+    juce::TextButton graphOverlay2LoadButton   { "Load Graph Overlay 2" };
+    juce::TextButton graphOverlay2ClearButton  { "Clear" };
+    std::unique_ptr<juce::FileChooser> graphOverlay2FileChooser_;
 
     // Section header labels
     juce::Label sectionGeneralLabel, sectionFftLabel, sectionAnalysisLabel, sectionChannelsLabel;
@@ -739,7 +804,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (620, 730);
+        content->setSize (620, 796);
         setContentOwned (content, true);
         setResizable (false, false);
     }

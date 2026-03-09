@@ -30,7 +30,7 @@ SPLMeterAudioProcessor::createParameterLayout()
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "calOffset", "Calibration Offset (dB)",
-        juce::NormalisableRange<float> (80.0f, 140.0f, 0.1f), 127.0f));
+        juce::NormalisableRange<float> (80.0f, 180.0f, 0.1f), 127.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fftGain", "FFT Gain (dB)",
@@ -42,7 +42,7 @@ SPLMeterAudioProcessor::createParameterLayout()
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "monitorGain", "Monitor Gain (dB)",
-        juce::NormalisableRange<float> (-60.0f, 0.0f, 0.5f), 0.0f));
+        juce::NormalisableRange<float> (-60.0f, 12.0f, 0.5f), 0.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftPeakHold", "FFT Peak Hold", false));
@@ -76,7 +76,10 @@ SPLMeterAudioProcessor::createParameterLayout()
         "correctionEnabled", "Correction Filter", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "graphOverlayEnabled", "Graph Overlay", false));
+        "graphOverlayEnabled", "Graph Overlay 1", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "graphOverlay2Enabled", "Graph Overlay 2", false));
 
     for (int i = 0; i < 32; ++i)
         params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -636,6 +639,54 @@ void SPLMeterAudioProcessor::clearGraphOverlay()
     graphOverlayPoints_.clear();
     graphOverlayFileName_ = {};
     graphOverlayLoaded_.store (false);
+}
+
+//==============================================================================
+void SPLMeterAudioProcessor::loadGraphOverlay2 (const juce::File& file)
+{
+    graphOverlay2Points_.clear();
+
+    juce::StringArray lines;
+    lines.addLines (file.loadFileAsString());
+
+    for (const auto& line : lines)
+    {
+        const auto trimmed = line.trim();
+        if (trimmed.isEmpty()
+            || trimmed.startsWith ("*")
+            || trimmed.startsWith ("#")
+            || trimmed.startsWith (";")
+            || trimmed.startsWithChar ('/'))
+            continue;
+
+        juce::StringArray tokens;
+        tokens.addTokens (trimmed, " \t,", "\"");
+        tokens.removeEmptyStrings();
+
+        if (tokens.size() >= 2)
+        {
+            const float freq = tokens[0].getFloatValue();
+            const float spl  = tokens[1].getFloatValue();
+            if (freq > 0.0f)
+                graphOverlay2Points_.push_back ({ freq, spl });
+        }
+    }
+
+    if (graphOverlay2Points_.empty())
+        return;
+
+    std::sort (graphOverlay2Points_.begin(), graphOverlay2Points_.end(),
+               [] (auto& a, auto& b) { return a.first < b.first; });
+
+    graphOverlay2FileName_ = file.getFileNameWithoutExtension();
+    graphOverlay2Loaded_.store (true);
+}
+
+void SPLMeterAudioProcessor::clearGraphOverlay2()
+{
+    graphOverlay2Points_.clear();
+    graphOverlay2FileName_ = {};
+    graphOverlay2Loaded_.store (false);
 }
 
 //==============================================================================
