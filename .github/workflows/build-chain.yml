@@ -161,7 +161,7 @@ jobs:
           certificate-profile-name:     ${{ secrets.AZURE_SIGNING_PROFILE }}
           files-folder:                 build/SPLMeter_artefacts/Release
           files-folder-filter:          exe,dll,vst3
-          files-folder-recursive:       true
+          files-folder-recurse:         true
           file-digest:                  SHA256
           timestamp-rfc3161:            http://timestamp.acs.microsoft.com
           timestamp-digest:             SHA256
