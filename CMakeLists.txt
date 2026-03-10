@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.1.0)
+project(SPLMeter VERSION 2.2.2)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -75,7 +75,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Plugin target
 # ---------------------------------------------------------------------------
-# Format selection: iOS → Standalone only; macOS → Standalone + VST3 + AU; Windows → Standalone + VST3
+# Format selection: iOS → Standalone only; macOS → Standalone + VST3 + AU; Windows/Linux → Standalone + VST3
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(SPLMETER_FORMATS Standalone)
 elseif(APPLE)
@@ -84,8 +84,21 @@ else()
     set(SPLMETER_FORMATS Standalone VST3)
 endif()
 
+# ---------------------------------------------------------------------------
+# Linux system dependencies required by JUCE
+# ---------------------------------------------------------------------------
+if(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(ALSA       REQUIRED IMPORTED_TARGET alsa)
+    pkg_check_modules(FREETYPE   REQUIRED IMPORTED_TARGET freetype2)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    pkg_check_modules(X11        REQUIRED IMPORTED_TARGET x11)
+    pkg_check_modules(GTK3       REQUIRED IMPORTED_TARGET gtk+-3.0)
+    pkg_check_modules(GL         REQUIRED IMPORTED_TARGET gl)
+endif()
+
 juce_add_plugin(SPLMeter
-    VERSION                     2.1.0
+    VERSION                     2.2.2
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
