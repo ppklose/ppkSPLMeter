@@ -1,5 +1,14 @@
 #include "PluginEditor.h"
 
+static juce::PropertiesFile::Options splmeterPropsOptions()
+{
+    juce::PropertiesFile::Options o;
+    o.applicationName     = "SPLMeter";
+    o.filenameSuffix      = "settings";
+    o.osxLibrarySubFolder = "Application Support";
+    return o;
+}
+
 //==============================================================================
 SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p), log (p)
@@ -229,6 +238,10 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             setResizeLimits (480, 500, 3840, 2160);
             setSize (getWidth(), extendedHeight_);
         }
+
+        juce::PropertiesFile prefs (splmeterPropsOptions());
+        prefs.setValue ("basicMode", basicMode_);
+        prefs.save();
     };
     addAndMakeVisible (basicModeButton);
 
@@ -302,18 +315,32 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     addAndMakeVisible (noteField);
 
     setResizable (true, true);
-    // Start in basic mode
-    basicModeButton.setToggleState (true, juce::dontSendNotification);
-    basicModeButton.setButtonText ("Basic Mode");
-    log.setVisible (false);
+    // Restore saved mode (defaults to basic on first launch)
+    {
+        juce::PropertiesFile prefs (splmeterPropsOptions());
+        basicMode_ = prefs.getBoolValue ("basicMode", true);
+    }
+    basicModeButton.setToggleState (basicMode_, juce::dontSendNotification);
+    basicModeButton.setButtonText (basicMode_ ? "Basic Mode" : "Advanced Mode");
+    basicModeButton.setTooltip (basicMode_
+        ? "You are currently in basic mode, click to go advanced mode."
+        : "You are currently in advanced mode, click to go to basic mode.");
+    log.setVisible (!basicMode_);
 #if JUCE_MAC
-    visqolButton.setVisible (false);
+    visqolButton.setVisible (!basicMode_);
 #endif
-    meter.setPsychoVisible (false);
+    meter.setPsychoVisible (!basicMode_);
     const int basicH = 100 + 215 + 24;
-    setResizeLimits (480, basicH, 3840, 2160);
-    setSize (1800, basicH);
-    extendedHeight_ = 900;
+    if (basicMode_)
+    {
+        setResizeLimits (480, basicH, 3840, 2160);
+        setSize (1800, basicH);
+    }
+    else
+    {
+        setResizeLimits (480, 500, 3840, 2160);
+        setSize (1800, extendedHeight_);
+    }
     startTimerHz (30);
 }
 
