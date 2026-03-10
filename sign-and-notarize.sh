@@ -97,3 +97,13 @@ xcrun stapler staple "$APP"
 echo ""
 echo "Done! Final Gatekeeper check:"
 spctl --assess --type execute --verbose "$APP"
+
+# ---------------------------------------------------------------------------
+# Package DMG
+# ---------------------------------------------------------------------------
+DMG="${BUILD_DIR}/SPLMeter-macOS.dmg"
+echo ""
+echo "==> Creating DMG..."
+hdiutil create -volname "SPLMeter" -srcfolder "$APP" \
+  -ov -format UDZO "$DMG"
+echo "DMG ready: ${DMG}"

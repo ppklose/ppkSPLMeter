@@ -109,11 +109,19 @@ jobs:
 
           rm /tmp/notarization_key.p8
 
-      - name: Upload Standalone
+      - name: Package DMG
+        run: |
+          APP="build/SPLMeter_artefacts/Release/Standalone/SPLMeter.app"
+          DMG="/tmp/SPLMeter-macOS.dmg"
+          # Create a writable image, add the app, convert to compressed read-only DMG
+          hdiutil create -volname "SPLMeter" -srcfolder "$APP" \
+            -ov -format UDZO "$DMG"
+
+      - name: Upload Standalone (DMG)
         uses: actions/upload-artifact@v4
         with:
           name: SPLMeter-macOS-Standalone
-          path: build/SPLMeter_artefacts/Release/Standalone/SPLMeter.app
+          path: /tmp/SPLMeter-macOS.dmg
 
       - name: Upload VST3
         uses: actions/upload-artifact@v4
