@@ -295,6 +295,13 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### v2.2.2
+- **Developer ID codesigning** — macOS builds are signed with a Developer ID Application certificate and notarized with the Apple Notary Service; Gatekeeper passes without warnings on all Macs
+- **macOS distribution as DMG** — the Standalone app is packaged as a `.dmg` so the notarization ticket is preserved through download and the bundle structure is intact
+- **Windows codesigning** — Azure Trusted Signing integrated into CI; `.exe` and `.vst3` are signed with a Microsoft-trusted certificate via the `azure/trusted-signing-action`
+- **Linux support** — new CI job builds Standalone + VST3 on Ubuntu; required JUCE system dependencies (ALSA, X11, GL, Freetype, GTK3) resolved via `pkg_check_modules`
+- **Persistent Basic / Advanced mode** — the app remembers the last used mode across launches; first launch defaults to Basic mode
+
 ### v2.1.0
 - **ViSQOL integration** — perceptual audio quality analysis (MOS-LQO + per-band NSIM) available as a floating panel via the ViSQOL button (Advanced mode only)
 - **Automatic audio conversion** — WAV files are automatically resampled, converted to 16-bit, and mixed to mono before ViSQOL analysis (GPL-compatible, JUCE-only pipeline); conversion details shown in the result panel
