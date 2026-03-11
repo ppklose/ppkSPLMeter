@@ -22,6 +22,8 @@
 	<string>1.6.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SPLMeter needs microphone access for real-time SPL measurement.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>2025 Philipp Paul Klose Audio Engineering</string>
 </dict>

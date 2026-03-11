@@ -142,6 +142,10 @@ jobs:
     name: Windows (Standalone · VST3 · ASIO)
     runs-on: windows-latest
 
+    permissions:
+      id-token: write      # required for GitHub OIDC token (attestation)
+      attestations: write  # required to publish build provenance
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -158,33 +162,31 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Sign Windows binaries (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v0.5.0
-        with:
-          azure-tenant-id:              ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id:              ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret:          ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint:                     ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name:     ${{ secrets.AZURE_SIGNING_PROFILE }}
-          files-folder:                 build/SPLMeter_artefacts/Release
-          files-folder-filter:          exe,dll,vst3
-          files-folder-recurse:         true
-          file-digest:                  SHA256
-          timestamp-rfc3161:            http://timestamp.acs.microsoft.com
-          timestamp-digest:             SHA256
-
       - name: Upload Standalone
+        id: upload-standalone
         uses: actions/upload-artifact@v4
         with:
           name: SPLMeter-Windows-Standalone
           path: build/SPLMeter_artefacts/Release/Standalone/SPLMeter.exe
 
+      - name: Attest Standalone provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: SPLMeter.exe
+          subject-digest: ${{ steps.upload-standalone.outputs.artifact-digest }}
+
       - name: Upload VST3
+        id: upload-vst3
         uses: actions/upload-artifact@v4
         with:
           name: SPLMeter-Windows-VST3
           path: build/SPLMeter_artefacts/Release/VST3/SPLMeter.vst3
+
+      - name: Attest VST3 provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: SPLMeter.vst3
+          subject-digest: ${{ steps.upload-vst3.outputs.artifact-digest }}
 
   # ---------------------------------------------------------------------------
   # Linux — Standalone, VST3

@@ -488,6 +488,45 @@ void SPLMeterAudioProcessor::loadCorrectionFilter (const juce::File& file)
     juce::StringArray lines;
     lines.addLines (file.loadFileAsString());
 
+    // Check first non-empty line for instrument metadata header:
+    // "Sens Factor =-11.2dB, AGain =18dB, SERNO: 8102010"
+    for (const auto& line : lines)
+    {
+        const auto trimmed = line.trim();
+        if (trimmed.isEmpty()) continue;
+
+        // Look for both key markers
+        const int sensIdx  = trimmed.indexOfIgnoreCase ("Sens Factor");
+        const int sernoIdx = trimmed.indexOfIgnoreCase ("SERNO:");
+        if (sensIdx >= 0 && sernoIdx >= 0)
+        {
+            // Parse Sens Factor value: find '=' then read float (may include '-')
+            const int eqIdx = trimmed.indexOfChar (sensIdx, '=');
+            if (eqIdx >= 0)
+            {
+                const float sensVal = trimmed.substring (eqIdx + 1).getFloatValue();
+                correctionCalibration_ = 94.0f + std::abs (sensVal);
+
+                // Clamp to parameter range [80, 180]
+                correctionCalibration_ = juce::jlimit (80.0f, 180.0f, correctionCalibration_);
+
+                auto* param = apvts.getParameter ("calOffset");
+                const float norm = param->convertTo0to1 (correctionCalibration_);
+                param->setValueNotifyingHost (norm);
+            }
+
+            // Parse SERNO value: text after "SERNO:" up to end or next comma
+            const int afterSerno = sernoIdx + 6; // length of "SERNO:"
+            juce::String sernoStr = trimmed.substring (afterSerno).trim();
+            const int commaIdx = sernoStr.indexOfChar (',');
+            if (commaIdx >= 0) sernoStr = sernoStr.substring (0, commaIdx).trim();
+            correctionSerno_ = sernoStr;
+
+            correctionMetaReady_.store (true);
+        }
+        break; // only inspect first non-empty line
+    }
+
     for (const auto& line : lines)
     {
         const auto trimmed = line.trim();
@@ -519,6 +558,9 @@ void SPLMeterAudioProcessor::loadCorrectionFilter (const juce::File& file)
 
     correctionFileName_ = file.getFileNameWithoutExtension();
     rebuildCorrectionFIR();
+
+    auto* param = apvts.getParameter ("correctionEnabled");
+    param->setValueNotifyingHost (1.0f);
 }
 
 void SPLMeterAudioProcessor::clearCorrectionFilter()
@@ -527,6 +569,9 @@ void SPLMeterAudioProcessor::clearCorrectionFilter()
     correctionFileName_ = {};
     correctionLoaded_.store (false);
     correctionConv_.reset();
+    correctionSerno_ = {};
+    correctionCalibration_ = 0.0f;
+    correctionMetaReady_.store (false);
 }
 
 void SPLMeterAudioProcessor::rebuildCorrectionFIR()

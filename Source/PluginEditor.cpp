@@ -9,6 +9,28 @@ static juce::PropertiesFile::Options splmeterPropsOptions()
     return o;
 }
 
+void SPLMeterAudioProcessorEditor::saveSettings()
+{
+    juce::PropertiesFile prefs (splmeterPropsOptions());
+    prefs.setValue ("basicMode", basicMode_);
+    prefs.setValue ("lightMode", lightMode_);
+    auto state = audioProcessor.apvts.copyState();
+    if (auto xml = state.createXml())
+        prefs.setValue ("apvtsState", xml->toString());
+}
+
+void SPLMeterAudioProcessorEditor::loadSettings()
+{
+    juce::PropertiesFile prefs (splmeterPropsOptions());
+    basicMode_ = prefs.getBoolValue ("basicMode", true);
+    lightMode_ = prefs.getBoolValue ("lightMode", false);
+
+    auto xmlStr = prefs.getValue ("apvtsState");
+    if (xmlStr.isNotEmpty())
+        if (auto xml = juce::XmlDocument::parse (xmlStr))
+            audioProcessor.apvts.replaceState (juce::ValueTree::fromXml (*xml));
+}
+
 //==============================================================================
 SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p), log (p)
@@ -239,9 +261,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             setSize (getWidth(), extendedHeight_);
         }
 
-        juce::PropertiesFile prefs (splmeterPropsOptions());
-        prefs.setValue ("basicMode", basicMode_);
-        prefs.save();
+        saveSettings();
     };
     addAndMakeVisible (basicModeButton);
 
@@ -315,11 +335,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     addAndMakeVisible (noteField);
 
     setResizable (true, true);
-    // Restore saved mode (defaults to basic on first launch)
-    {
-        juce::PropertiesFile prefs (splmeterPropsOptions());
-        basicMode_ = prefs.getBoolValue ("basicMode", true);
-    }
+    // Restore all persisted settings
+    loadSettings();
+
     basicModeButton.setToggleState (basicMode_, juce::dontSendNotification);
     basicModeButton.setButtonText (basicMode_ ? "Basic Mode" : "Advanced Mode");
     basicModeButton.setTooltip (basicMode_
@@ -341,12 +359,15 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         setResizeLimits (480, 500, 3840, 2160);
         setSize (1800, extendedHeight_);
     }
+    applyTheme (lightMode_);
+    initialising_ = false;
     startTimerHz (30);
 }
 
 SPLMeterAudioProcessorEditor::~SPLMeterAudioProcessorEditor()
 {
     stopTimer();
+    saveSettings();
 }
 
 //==============================================================================
@@ -370,7 +391,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.2.2   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.3.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -474,6 +495,14 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     for (auto* b : { &realTimeButton, &fileButton, &fastButton, &slowButton })
         styleBtn (*b);
 
+    noteField.setColour (juce::TextEditor::backgroundColourId,
+                         light ? juce::Colour (0xffe5e5ea) : juce::Colour (0xff2c2c2e));
+    noteField.setColour (juce::TextEditor::textColourId,
+                         light ? juce::Colour (0xff1c1c1e) : juce::Colours::white);
+    noteField.setColour (juce::TextEditor::outlineColourId,
+                         light ? juce::Colour (0xffb0b0b8) : juce::Colour (0xff48484a));
+    noteField.repaint();
+
     meter.setLightMode (light);
     log.setLightMode   (light);
 
@@ -483,6 +512,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 #endif
 
     repaint();
+    if (!initialising_) saveSettings();
 }
 
 void SPLMeterAudioProcessorEditor::timerCallback()
@@ -509,6 +539,14 @@ void SPLMeterAudioProcessorEditor::timerCallback()
     }
 
     updateTimeWeightButtons();
+
+    // Apply correction file metadata (Sens Factor → calOffset, SERNO → noteField)
+    if (audioProcessor.correctionMetaReady_.exchange (false))
+    {
+        if (audioProcessor.correctionSerno_.isNotEmpty())
+            noteField.setText ("SERNO: " + audioProcessor.correctionSerno_,
+                               juce::dontSendNotification);
+    }
 
     // Auto-return to Real Time when file playback finishes
     if (fileMode && !audioProcessor.isFileModeActive())

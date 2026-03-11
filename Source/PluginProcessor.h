@@ -135,6 +135,11 @@ public:
     bool isCorrectionLoaded()       const noexcept { return correctionLoaded_.load(); }
     juce::String getCorrectionFileName() const     { return correctionFileName_; }
 
+    // Metadata parsed from correction file header (Sens Factor / SERNO)
+    std::atomic<bool>  correctionMetaReady_ { false };
+    juce::String       correctionSerno_;
+    float              correctionCalibration_ { 0.0f };
+
     //==========================================================================
     // Graph overlay 1 (visual only - no audio processing)
     void loadGraphOverlay  (const juce::File& file);
@@ -240,6 +245,7 @@ private:
     juce::String                            correctionFileName_;
     std::vector<std::pair<float,float>>     correctionPoints_; // (freq, spl)
     void rebuildCorrectionFIR();
+
 
     // Graph overlay 1
     std::atomic<bool>                       graphOverlayLoaded_ { false };

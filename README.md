@@ -295,6 +295,15 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### v2.3.0
+- **Persistent user settings** — all settings (monitor level, FFT parameters, calibration, hold time, bandpass, 94 dB line, light mode, etc.) are saved to disk and restored on the next launch
+- **Light mode persistence** — light/dark theme is remembered across launches
+- **Correction filter auto-enable** — loading a correction curve automatically enables it
+- **Correction file metadata parsing** — if the first line of a correction `.txt` contains `Sens Factor` and `SERNO:` (e.g. from a calibrated measurement microphone data sheet), the calibration offset is set to `94 + |Sens Factor|` and the serial number is filled into the notes field
+- **Windows build provenance** — replaced expensive Azure Trusted Signing with free GitHub Artifact Attestations (SLSA); binaries are cryptographically linked to the CI workflow and verifiable with `gh attestation verify`
+- **macOS microphone permission** — added `NSMicrophoneUsageDescription` to the app bundle so macOS shows the permission dialog on first launch
+- **Light mode note field** — the notes text field now correctly follows the light/dark theme
+
 ### v2.2.2
 - **Developer ID codesigning** — macOS builds are signed with a Developer ID Application certificate and notarized with the Apple Notary Service; Gatekeeper passes without warnings on all Macs
 - **macOS distribution as DMG** — the Standalone app is packaged as a `.dmg` so the notarization ticket is preserved through download and the bundle structure is intact

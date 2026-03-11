@@ -89,6 +89,8 @@ public:
 
 private:
     void timerCallback() override;
+    void saveSettings();
+    void loadSettings();
 
     SPLMeterAudioProcessor& audioProcessor;
 
@@ -119,7 +121,8 @@ private:
     void updateTimeWeightButtons();
     void applyTheme (bool light);
 
-    bool lightMode_ = false;
+    bool lightMode_     = false;
+    bool initialising_  = true;
     juce::Label       clockLabel;
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
