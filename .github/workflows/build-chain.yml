@@ -162,31 +162,24 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            build/SPLMeter_artefacts/Release/Standalone/SPLMeter.exe
+            build/SPLMeter_artefacts/Release/VST3/SPLMeter.vst3
+
       - name: Upload Standalone
-        id: upload-standalone
         uses: actions/upload-artifact@v4
         with:
           name: SPLMeter-Windows-Standalone
           path: build/SPLMeter_artefacts/Release/Standalone/SPLMeter.exe
 
-      - name: Attest Standalone provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: SPLMeter.exe
-          subject-digest: ${{ steps.upload-standalone.outputs.artifact-digest }}
-
       - name: Upload VST3
-        id: upload-vst3
         uses: actions/upload-artifact@v4
         with:
           name: SPLMeter-Windows-VST3
           path: build/SPLMeter_artefacts/Release/VST3/SPLMeter.vst3
-
-      - name: Attest VST3 provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: SPLMeter.vst3
-          subject-digest: ${{ steps.upload-vst3.outputs.artifact-digest }}
 
   # ---------------------------------------------------------------------------
   # Linux — Standalone, VST3
