@@ -245,6 +245,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
+        spectrogramButton.setVisible (!basicMode_);
+        if (basicMode_ && spectrogramWindow != nullptr)
+            spectrogramWindow->setVisible (false);
 #if JUCE_MAC
         visqolButton.setVisible (!basicMode_);
 #endif
@@ -289,6 +292,27 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         }
     };
     addAndMakeVisible (settingsButton);
+
+    spectrogramButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    spectrogramButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    spectrogramButton.onClick = [this]
+    {
+        if (spectrogramWindow == nullptr)
+            spectrogramWindow = std::make_unique<SpectrogramWindow> (audioProcessor);
+
+        if (spectrogramWindow->isVisible())
+        {
+            spectrogramWindow->setVisible (false);
+        }
+        else
+        {
+            auto pos = localPointToGlobal (spectrogramButton.getBounds().getBottomLeft());
+            spectrogramWindow->setTopLeftPosition (pos);
+            spectrogramWindow->setVisible (true);
+            spectrogramWindow->toFront (true);
+        }
+    };
+    addAndMakeVisible (spectrogramButton);
 
 #if JUCE_MAC
     // ViSQOL quality analysis button
@@ -344,6 +368,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         ? "You are currently in basic mode, click to go advanced mode."
         : "You are currently in advanced mode, click to go to basic mode.");
     log.setVisible (!basicMode_);
+    spectrogramButton.setVisible (!basicMode_);
 #if JUCE_MAC
     visqolButton.setVisible (!basicMode_);
 #endif
@@ -408,8 +433,8 @@ void SPLMeterAudioProcessorEditor::resized()
     auto tbL = [&] (int w) { return titleBar.removeFromLeft  (juce::roundToInt (w * ts)).reduced (10, 22); };
     auto tbR = [&] (int w) { return titleBar.removeFromRight (juce::roundToInt (w * ts)).reduced (10, 22); };
 
-    settingsButton.setBounds  (tbL (160));
-    saveWavButton.setBounds   (tbL (140));
+    settingsButton.setBounds      (tbL (160));
+    saveWavButton.setBounds       (tbL (140));
     saveButton.setBounds      (tbL (160));
     saveCsvButton.setBounds   (tbL (160));
 #if JUCE_MAC
@@ -431,6 +456,7 @@ void SPLMeterAudioProcessorEditor::resized()
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 2, 52, 96);
+    spectrogramButton.setBounds (monitorGainSlider.getRight() + 8, 22, juce::roundToInt (160 * ts), 56);
 
     const int meterHeight = 215;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -477,7 +503,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
         btn.setColour (juce::TextButton::buttonColourId,  bgBtn);
         btn.setColour (juce::TextButton::textColourOffId, textOff);
     };
-    for (auto* b : { &settingsButton, &saveButton, &saveCsvButton, &saveWavButton })
+    for (auto* b : { &settingsButton, &spectrogramButton, &saveButton, &saveCsvButton, &saveWavButton })
         styleBtn (*b);
 #if JUCE_MAC
     styleBtn (visqolButton);

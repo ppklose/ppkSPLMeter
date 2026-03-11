@@ -44,6 +44,10 @@ SPLMeterAudioProcessor::createParameterLayout()
         "monitorGain", "Monitor Gain (dB)",
         juce::NormalisableRange<float> (-60.0f, 12.0f, 0.5f), 0.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "spectroGain", "Spectrogram Gain (dB)",
+        juce::NormalisableRange<float> (-40.0f, 40.0f, 0.5f), 0.0f));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftPeakHold", "FFT Peak Hold", false));
 
@@ -420,6 +424,18 @@ void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size) const noexcep
         int readPos = (writePos - size + i + kFftCircBufSize) % kFftCircBufSize;
         dest[i] = fftCircBuf_[readPos];
     }
+}
+
+int SPLMeterAudioProcessor::pullSpectroSamples (float* dest, int maxSamples) noexcept
+{
+    const int writePos = fftWritePos_.load (std::memory_order_acquire);
+    int readPos = spectroReadPos_.load (std::memory_order_relaxed);
+    int available = (writePos - readPos + kFftCircBufSize) % kFftCircBufSize;
+    int count = std::min (available, maxSamples);
+    for (int i = 0; i < count; ++i)
+        dest[i] = fftCircBuf_[(readPos + i) % kFftCircBufSize];
+    spectroReadPos_.store ((readPos + count) % kFftCircBufSize, std::memory_order_release);
+    return count;
 }
 
 std::vector<LogEntry> SPLMeterAudioProcessor::copyLog()

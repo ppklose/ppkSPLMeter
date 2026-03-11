@@ -4,6 +4,7 @@
 #include "MeterComponent.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
+#include "SpectrogramComponent.h"
 #if JUCE_MAC
  #include "VisqolComponent.h"
 #endif
@@ -98,7 +99,8 @@ private:
     LogComponent         log;
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
-    juce::TextButton settingsButton  { "Settings" };
+    juce::TextButton settingsButton      { "Settings" };
+    juce::TextButton spectrogramButton  { "Spectrogram" };
     juce::TextButton resetButton     { "Reset" };
     juce::TextButton saveButton      { "Save JPG" };
     juce::TextButton saveCsvButton   { "Save CSV" };
@@ -126,7 +128,8 @@ private:
     juce::Label       clockLabel;
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
-    std::unique_ptr<SettingsWindow> settingsWindow;
+    std::unique_ptr<SettingsWindow>     settingsWindow;
+    std::unique_ptr<SpectrogramWindow>  spectrogramWindow;
 #if JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;
     juce::TextButton visqolButton { "ViSQOL" };

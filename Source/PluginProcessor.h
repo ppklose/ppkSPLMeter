@@ -113,6 +113,7 @@ public:
     // FFT circular buffer (audio thread → GUI, lock-free)
     static constexpr int kFftCircBufSize = 8192;
     void copyFftWindow (float* dest, int size) const noexcept;
+    int  pullSpectroSamples (float* dest, int maxSamples) noexcept;
     double getSampleRate() const noexcept { return currentSampleRate; }
 
     //==========================================================================
@@ -222,6 +223,7 @@ private:
 
     std::array<float, kFftCircBufSize> fftCircBuf_ {};
     std::atomic<int>                   fftWritePos_ { 0 };
+    std::atomic<int>                   spectroReadPos_ { 0 };
 
 
     // File playback
