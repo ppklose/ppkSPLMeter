@@ -16,6 +16,7 @@ const juce::Colour LogComponent::colRoughness   { 0xff00c7be };  // teal
 const juce::Colour LogComponent::colFluctuation { 0xffeb34b1 };  // pink
 const juce::Colour LogComponent::colSharpness   { 0xffc77dff };  // violet
 const juce::Colour LogComponent::colLoudness    { 0xffffe57f };  // gold
+const juce::Colour LogComponent::colAnnoyance   { 0xffff6b6b };  // coral red
 
 //==============================================================================
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
@@ -60,9 +61,10 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
         {
             if (btn.getToggleState())
             {
-                // Deselect the other three
+                // Deselect the others
                 for (auto* b : { &roughnessVisButton, &fluctuationVisButton,
-                                 &sharpnessVisButton, &loudnessVisButton })
+                                 &sharpnessVisButton, &loudnessVisButton,
+                                 &annoyanceVisButton })
                     if (b != &btn)
                         b->setToggleState (false, juce::dontSendNotification);
                 selectedMetric = metric;
@@ -80,6 +82,7 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupPsychoBtn (fluctuationVisButton, colFluctuation, PsychoMetric::Fluctuation);
     setupPsychoBtn (sharpnessVisButton,   colSharpness,   PsychoMetric::Sharpness);
     setupPsychoBtn (loudnessVisButton,    colLoudness,    PsychoMetric::Loudness);
+    setupPsychoBtn (annoyanceVisButton,   colAnnoyance,   PsychoMetric::Annoyance);
 
     // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
@@ -104,7 +107,8 @@ void LogComponent::setLightMode (bool light) noexcept
     durationSlider.setColour (juce::Slider::textBoxTextColourId, textPrimary);
     for (auto* b : { &splVisButton, &dbaVisButton, &dbcVisButton,
                      &roughnessVisButton, &fluctuationVisButton,
-                     &sharpnessVisButton, &loudnessVisButton })
+                     &sharpnessVisButton, &loudnessVisButton,
+                     &annoyanceVisButton })
         b->setColour (juce::ToggleButton::textColourId, textPrimary);
 
     repaint();
@@ -135,11 +139,12 @@ void LogComponent::resized()
 
     // Psychoacoustic checkbox row (row 2)
     const float psychoBtnY = btnY + btnH + 4.0f;
-    const float psychoBtnW = plotW / 4.0f;
+    const float psychoBtnW = plotW / 5.0f;
     roughnessVisButton.setBounds   (juce::Rectangle<float> (plotX,                  psychoBtnY, psychoBtnW, btnH).toNearestInt());
     fluctuationVisButton.setBounds (juce::Rectangle<float> (plotX + psychoBtnW,     psychoBtnY, psychoBtnW, btnH).toNearestInt());
     sharpnessVisButton.setBounds   (juce::Rectangle<float> (plotX + psychoBtnW*2,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
     loudnessVisButton.setBounds    (juce::Rectangle<float> (plotX + psychoBtnW*3,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
+    annoyanceVisButton.setBounds   (juce::Rectangle<float> (plotX + psychoBtnW*4,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
 }
 
 void LogComponent::timerCallback()
@@ -212,6 +217,9 @@ void LogComponent::paint (juce::Graphics& g)
         case PsychoMetric::Loudness:
             rightMin = 0; rightMax = 100; rightUnit = "sone";
             psychoColour = colLoudness; break;
+        case PsychoMetric::Annoyance:
+            rightMin = 0; rightMax = 100; rightUnit = "PA";
+            psychoColour = colAnnoyance; break;
     }
 
     auto rightToY = [&] (float val) -> float {
@@ -374,7 +382,8 @@ void LogComponent::paint (juce::Graphics& g)
                 case PsychoMetric::Roughness:   val = e.roughness;    break;
                 case PsychoMetric::Fluctuation: val = e.fluctuation;  break;
                 case PsychoMetric::Sharpness:   val = e.sharpness;    break;
-                case PsychoMetric::Loudness:    val = e.loudnessSone; break;
+                case PsychoMetric::Loudness:    val = e.loudnessSone;    break;
+                case PsychoMetric::Annoyance:   val = e.psychoAnnoyance; break;
                 default: break;
             }
             float x = timeToX (e.timestampMs);

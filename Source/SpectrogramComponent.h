@@ -36,8 +36,9 @@ public:
     void setColourMap  (int map)  { colourMap_  = map; }
     void setWindowType (int wt)   { windowType_ = wt; }
 
-    void setFreqMin (float f) { freqMin_ = f; clearSpectrogramImage(); repaint(); }
-    void setFreqMax (float f) { freqMax_ = f; clearSpectrogramImage(); repaint(); }
+    void setFreqMin   (float f) { freqMin_    = f; clearSpectrogramImage(); repaint(); }
+    void setFreqMax   (float f) { freqMax_    = f; clearSpectrogramImage(); repaint(); }
+    void setFreqScale (int   s) { freqScale_  = s; clearSpectrogramImage(); repaint(); }
 
     //==========================================================================
     void resized() override
@@ -72,8 +73,7 @@ public:
         {
             if (freq < freqMin_ * 0.5f || freq > freqMax_ * 2.0f) continue;
 
-            float frac = (std::log10 (freq)    - std::log10 (freqMin_))
-                       / (std::log10 (freqMax_) - std::log10 (freqMin_));
+            float frac = freqToFrac (freq);
             int y = juce::roundToInt ((1.0f - frac) * (h - 1));
             if (y < 0 || y >= h) continue;
 
@@ -91,6 +91,33 @@ public:
     }
 
 private:
+    //==========================================================================
+    static float freqToMel (float f) noexcept { return 2595.0f * std::log10 (1.0f + f / 700.0f); }
+    static float melToFreq (float m) noexcept { return 700.0f * (std::pow (10.0f, m / 2595.0f) - 1.0f); }
+
+    // Returns normalised position [0,1] for a given frequency (0=freqMin, 1=freqMax)
+    float freqToFrac (float freq) const noexcept
+    {
+        if (freqScale_ == 1)
+        {
+            const float mMin = freqToMel (freqMin_), mMax = freqToMel (freqMax_);
+            return (freqToMel (freq) - mMin) / (mMax - mMin);
+        }
+        return (std::log10 (freq) - std::log10 (freqMin_))
+             / (std::log10 (freqMax_) - std::log10 (freqMin_));
+    }
+
+    // Inverse of freqToFrac
+    float fracToFreq (float frac) const noexcept
+    {
+        if (freqScale_ == 1)
+        {
+            const float mMin = freqToMel (freqMin_), mMax = freqToMel (freqMax_);
+            return melToFreq (mMin + frac * (mMax - mMin));
+        }
+        return std::pow (10.0f, std::log10 (freqMin_) + frac * (std::log10 (freqMax_) - std::log10 (freqMin_)));
+    }
+
     //==========================================================================
     void rebuildFFT (int order)
     {
@@ -273,8 +300,6 @@ private:
         spectrogramImage.moveImageSection (0, 0, 1, 0, imgW - 1, imgH);
 
         // Draw spectrogram column
-        const float logMin  = std::log10 (freqMin_);
-        const float logMax  = std::log10 (freqMax_);
         const float binHz   = static_cast<float> (sampleRate) / fftSize_;
         const int   numBins = fftSize_ / 2;
         const float gainDB  = processor.apvts.getRawParameterValue ("spectroGain")->load();
@@ -282,7 +307,7 @@ private:
         for (int y = 0; y < imgH; ++y)
         {
             float frac = 1.0f - static_cast<float>(y) / (imgH - 1);
-            float freq = std::pow (10.0f, logMin + frac * (logMax - logMin));
+            float freq = fracToFreq (frac);
             int   bin  = juce::roundToInt (freq / binHz);
             bin = juce::jlimit (0, numBins - 1, bin);
 
@@ -304,7 +329,7 @@ private:
 
             for (int fi = 0; fi < (int) formants.size() && fi < 4; ++fi)
             {
-                float frac = (std::log10 (formants[fi]) - logMin) / (logMax - logMin);
+                float frac = freqToFrac (formants[fi]);
                 int   y    = juce::roundToInt ((1.0f - frac) * (imgH - 1));
                 auto  col  = formantColours[fi];
 
@@ -397,6 +422,7 @@ private:
     float dbCeil_     =  0.0f;
     int   colourMap_  = 0;   // 0=Fire 1=Greyscale 2=Inferno 3=Viridis
     int   windowType_ = 0;   // 0=Hann 1=Hamming 2=Blackman 3=Flat-top
+    int   freqScale_  = 0;   // 0=Log 1=Mel
     bool  formantsEnabled_ = false;
 
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
@@ -483,6 +509,14 @@ class SpectrogramWindow : public juce::DocumentWindow
                 s.setTooltip (tooltip);
                 addAndMakeVisible (s);
             };
+
+            // Freq Scale (row 1)
+            makeRowLabel (scaleLabel, "Scale");
+            scaleCombo.addItem ("Log", 1);
+            scaleCombo.addItem ("Mel", 2);
+            scaleCombo.setSelectedId (1, juce::dontSendNotification);
+            scaleCombo.onChange = [this] { spectro.setFreqScale (scaleCombo.getSelectedId() - 1); };
+            styleCombo (scaleCombo, "Frequency axis scale");
 
             // FFT Size
             makeRowLabel (fftSizeLabel, "FFT");
@@ -588,6 +622,9 @@ class SpectrogramWindow : public juce::DocumentWindow
             auto row1 = r.removeFromBottom (28).reduced (4, 4);
             formantsButton.setBounds (row1.removeFromRight (90));
             row1.removeFromRight (4);
+            scaleCombo.setBounds  (row1.removeFromRight (65));
+            scaleLabel.setBounds  (row1.removeFromRight (36));
+            row1.removeFromRight (4);
             gainLabel.setBounds (row1.removeFromLeft (36));
             gainSlider.setBounds (row1);
 
@@ -618,6 +655,8 @@ class SpectrogramWindow : public juce::DocumentWindow
         // Row 1
         juce::Slider     gainSlider;
         juce::Label      gainLabel;
+        juce::Label      scaleLabel;
+        juce::ComboBox   scaleCombo;
         juce::TextButton formantsButton { "Formants" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttachment;
 

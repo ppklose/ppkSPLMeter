@@ -289,7 +289,17 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         correctionConv_.process (ctx);
     }
 
-    const float channelScale = numChannels > 0 ? 1.0f / static_cast<float> (numChannels) : 1.0f;
+    // Count channels that actually carry signal.
+    // ASIO interfaces present all hardware channels (e.g. 32) even when only
+    // one input is connected, so we must not divide by the total channel count —
+    // that would give ~20-30 dB too low on ASIO vs. Windows Audio / Core Audio.
+    // Muted channels have already been zeroed above, so they contribute 0 here.
+    int activeChannels = 0;
+    for (int ch = 0; ch < numChannels; ++ch)
+        if (buffer.getMagnitude (ch, 0, numSamples) > 1e-9f)
+            ++activeChannels;
+    if (activeChannels == 0) activeChannels = 1;   // silence guard
+    const float channelScale = 1.0f / static_cast<float> (activeChannels);
 
     for (int s = 0; s < numSamples; ++s)
     {
@@ -402,6 +412,18 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.fluctuation  = fluctuation;
     e.sharpness    = sharpness;
     e.loudnessSone = loudnessSone;
+
+    {
+        const float N   = loudnessSone;
+        const float R   = roughness   / 100.0f;
+        const float F   = fluctuation / 100.0f;
+        const float wS  = (sharpness > 1.75f)
+                          ? (sharpness - 1.75f) / 4.0f * N / (N + 10.0f) : 0.0f;
+        const float wFR = (N > 0.01f)
+                          ? std::pow (N, 0.4f) * (0.07f * std::sqrt (F) + 0.2f * std::sqrt (R))
+                          : 0.0f;
+        e.psychoAnnoyance = (N > 0.01f) ? N * (1.0f + std::sqrt (wS * wS + wFR * wFR)) : 0.0f;
+    }
 
     juce::SpinLock::ScopedLockType lock (logLock);
     logEntries.push_back (e);

@@ -48,103 +48,32 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (resetButton);
 
-    saveCsvButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
-    saveCsvButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    saveCsvButton.onClick = [this]
+    saveMenuButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    saveMenuButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    saveMenuButton.setTooltip ("Save CSV log, WAV recording, or screenshot");
+    saveMenuButton.onClick = [this]
     {
-        auto rows = audioProcessor.copyLog();
-        if (rows.empty()) return;
-
-        fileChooser = std::make_unique<juce::FileChooser> (
-            "Save log as CSV",
-            juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
-                .getChildFile ("SPLMeter.csv"),
-            "*.csv");
-        fileChooser->launchAsync (
-            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-            [rows] (const juce::FileChooser& fc)
+        juce::PopupMenu menu;
+        menu.addItem (1, "Save CSV...");
+        menu.addItem (2, "Save WAV...");
+        menu.addItem (3, "Save Screenshot...");
+        menu.addSeparator();
+        menu.addItem (4, "Save All...");
+        menu.showMenuAsync (
+            juce::PopupMenu::Options().withTargetComponent (saveMenuButton),
+            [this] (int result)
             {
-                auto file = fc.getResult();
-                if (file == juce::File{}) return;
-                juce::FileOutputStream stream (file);
-                if (!stream.openedOk()) return;
-                stream.setPosition (0);
-                stream.truncate();
-
-                stream.writeText ("Timestamp,Peak dB SPL,Peak dBA SPL,Peak dBC SPL,"
-                                  "RMS dB SPL,RMS dBA SPL,RMS dBC SPL,"
-                                  "Roughness (%),Fluctuation (%),Sharpness (acum),Loudness (sone)\n",
-                                  false, false, nullptr);
-
-                for (const auto& e : rows)
+                switch (result)
                 {
-                    juce::String line =
-                        juce::Time (e.timestampMs).toString (true, true, true, true) + ","
-                        + juce::String (e.peakSPL,      2) + ","
-                        + juce::String (e.peakDBASPL,   2) + ","
-                        + juce::String (e.peakDBCSPL,   2) + ","
-                        + juce::String (e.rmsSPL,       2) + ","
-                        + juce::String (e.rmsDBASPL,    2) + ","
-                        + juce::String (e.rmsDBCSPL,    2) + ","
-                        + juce::String (e.roughness,    2) + ","
-                        + juce::String (e.fluctuation,  2) + ","
-                        + juce::String (e.sharpness,    3) + ","
-                        + juce::String (e.loudnessSone, 3) + "\n";
-                    stream.writeText (line, false, false, nullptr);
+                    case 1: doSaveCsv(); break;
+                    case 2: doSaveWav(); break;
+                    case 3: doSaveJpg(); break;
+                    case 4: doSaveAll(); break;
+                    default: break;
                 }
             });
     };
-    addAndMakeVisible (saveCsvButton);
-
-    saveWavButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
-    saveWavButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    saveWavButton.setTooltip ("Save the last 'Keep Last' seconds of Input 01 and 02 as a stereo WAV file.");
-    saveWavButton.onClick = [this]
-    {
-        fileChooser = std::make_unique<juce::FileChooser> (
-            "Save recording as WAV",
-            juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
-                .getChildFile ("SPLMeter.wav"),
-            "*.wav");
-        fileChooser->launchAsync (
-            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-            [this] (const juce::FileChooser& fc)
-            {
-                auto file = fc.getResult();
-                if (file == juce::File{}) return;
-                audioProcessor.saveWavToFile (file);
-            });
-    };
-    addAndMakeVisible (saveWavButton);
-
-    saveButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
-    saveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    saveButton.onClick = [this]
-    {
-        auto snapshot = createComponentSnapshot (getLocalBounds());
-        fileChooser = std::make_unique<juce::FileChooser> (
-            "Save snapshot as JPEG",
-            juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
-                .getChildFile ("SPLMeter.jpg"),
-            "*.jpg");
-        fileChooser->launchAsync (
-            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-            [snapshot] (const juce::FileChooser& fc)
-            {
-                auto file = fc.getResult();
-                if (file == juce::File{}) return;
-                juce::FileOutputStream stream (file);
-                if (stream.openedOk())
-                {
-                    stream.setPosition (0);
-                    stream.truncate();
-                    juce::JPEGImageFormat jpeg;
-                    jpeg.setQuality (0.95f);
-                    jpeg.writeImageToStream (snapshot, stream);
-                }
-            });
-    };
-    addAndMakeVisible (saveButton);
+    addAndMakeVisible (saveMenuButton);
 
     // Real Time / File mode buttons
     auto setupModeBtn = [this] (juce::TextButton& btn)
@@ -245,12 +174,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
-        spectrogramButton.setVisible (!basicMode_);
+        toolsMenuButton.setVisible (!basicMode_);
         if (basicMode_ && spectrogramWindow != nullptr)
             spectrogramWindow->setVisible (false);
-#if JUCE_MAC
-        visqolButton.setVisible (!basicMode_);
-#endif
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
@@ -293,51 +219,57 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (settingsButton);
 
-    spectrogramButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
-    spectrogramButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    spectrogramButton.onClick = [this]
+    toolsMenuButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+    toolsMenuButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    toolsMenuButton.setTooltip ("Spectrogram and analysis tools");
+    toolsMenuButton.onClick = [this]
     {
-        if (spectrogramWindow == nullptr)
-            spectrogramWindow = std::make_unique<SpectrogramWindow> (audioProcessor);
-
-        if (spectrogramWindow->isVisible())
-        {
-            spectrogramWindow->setVisible (false);
-        }
-        else
-        {
-            auto pos = localPointToGlobal (spectrogramButton.getBounds().getBottomLeft());
-            spectrogramWindow->setTopLeftPosition (pos);
-            spectrogramWindow->setVisible (true);
-            spectrogramWindow->toFront (true);
-        }
-    };
-    addAndMakeVisible (spectrogramButton);
-
+        juce::PopupMenu menu;
+        menu.addItem (1, "Spectrogram");
 #if JUCE_MAC
-    // ViSQOL quality analysis button
-    visqolButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
-    visqolButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    visqolButton.setTooltip ("Open ViSQOL perceptual quality analyser");
-    visqolButton.onClick = [this]
-    {
-        if (visqolWindow == nullptr)
-            visqolWindow = std::make_unique<VisqolWindow>();
-
-        if (visqolWindow->isVisible())
-        {
-            visqolWindow->setVisible (false);
-        }
-        else
-        {
-            auto pos = localPointToGlobal (visqolButton.getBounds().getBottomLeft());
-            visqolWindow->setTopLeftPosition (pos);
-            visqolWindow->setVisible (true);
-            visqolWindow->toFront (true);
-        }
-    };
-    addAndMakeVisible (visqolButton);
+        menu.addItem (2, "ViSQOL");
 #endif
+        menu.showMenuAsync (
+            juce::PopupMenu::Options().withTargetComponent (toolsMenuButton),
+            [this] (int result)
+            {
+                if (result == 1)
+                {
+                    if (spectrogramWindow == nullptr)
+                        spectrogramWindow = std::make_unique<SpectrogramWindow> (audioProcessor);
+                    if (spectrogramWindow->isVisible())
+                    {
+                        spectrogramWindow->setVisible (false);
+                    }
+                    else
+                    {
+                        auto pos = localPointToGlobal (toolsMenuButton.getBounds().getBottomLeft());
+                        spectrogramWindow->setTopLeftPosition (pos);
+                        spectrogramWindow->setVisible (true);
+                        spectrogramWindow->toFront (true);
+                    }
+                }
+#if JUCE_MAC
+                else if (result == 2)
+                {
+                    if (visqolWindow == nullptr)
+                        visqolWindow = std::make_unique<VisqolWindow>();
+                    if (visqolWindow->isVisible())
+                    {
+                        visqolWindow->setVisible (false);
+                    }
+                    else
+                    {
+                        auto pos = localPointToGlobal (toolsMenuButton.getBounds().getBottomLeft());
+                        visqolWindow->setTopLeftPosition (pos);
+                        visqolWindow->setVisible (true);
+                        visqolWindow->toFront (true);
+                    }
+                }
+#endif
+            });
+    };
+    addAndMakeVisible (toolsMenuButton);
 
     // Clock label (line 1 - auto-updates every second)
     clockLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (11.0f)));
@@ -368,10 +300,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         ? "You are currently in basic mode, click to go advanced mode."
         : "You are currently in advanced mode, click to go to basic mode.");
     log.setVisible (!basicMode_);
-    spectrogramButton.setVisible (!basicMode_);
-#if JUCE_MAC
-    visqolButton.setVisible (!basicMode_);
-#endif
+    toolsMenuButton.setVisible (!basicMode_);
     meter.setPsychoVisible (!basicMode_);
     const int basicH = 100 + 215 + 24;
     if (basicMode_)
@@ -433,13 +362,9 @@ void SPLMeterAudioProcessorEditor::resized()
     auto tbL = [&] (int w) { return titleBar.removeFromLeft  (juce::roundToInt (w * ts)).reduced (10, 22); };
     auto tbR = [&] (int w) { return titleBar.removeFromRight (juce::roundToInt (w * ts)).reduced (10, 22); };
 
-    settingsButton.setBounds      (tbL (160));
-    saveWavButton.setBounds       (tbL (140));
-    saveButton.setBounds      (tbL (160));
-    saveCsvButton.setBounds   (tbL (160));
-#if JUCE_MAC
-    visqolButton.setBounds    (tbL (160));
-#endif
+    settingsButton.setBounds  (tbL (160));
+    toolsMenuButton.setBounds (tbL (140));
+    saveMenuButton.setBounds  (tbL (140));
     resetButton.setBounds     (tbR (160));
     basicModeButton.setBounds (tbR (160));
     {
@@ -456,7 +381,6 @@ void SPLMeterAudioProcessorEditor::resized()
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 2, 52, 96);
-    spectrogramButton.setBounds (monitorGainSlider.getRight() + 8, 22, juce::roundToInt (160 * ts), 56);
 
     const int meterHeight = 215;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -503,11 +427,8 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
         btn.setColour (juce::TextButton::buttonColourId,  bgBtn);
         btn.setColour (juce::TextButton::textColourOffId, textOff);
     };
-    for (auto* b : { &settingsButton, &spectrogramButton, &saveButton, &saveCsvButton, &saveWavButton })
+    for (auto* b : { &settingsButton, &toolsMenuButton, &saveMenuButton })
         styleBtn (*b);
-#if JUCE_MAC
-    styleBtn (visqolButton);
-#endif
 
     monitorGainSlider.setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
     monitorGainSlider.setColour (juce::Slider::thumbColourId,       juce::Colour (0xff5ac8fa));
@@ -541,6 +462,135 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     if (!initialising_) saveSettings();
 }
 
+//==============================================================================
+// Save helpers
+//==============================================================================
+void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
+                                                  const std::vector<LogEntry>& rows)
+{
+    stream.writeText ("Timestamp,Peak dB SPL,Peak dBA SPL,Peak dBC SPL,"
+                      "RMS dB SPL,RMS dBA SPL,RMS dBC SPL,"
+                      "Roughness (%),Fluctuation (%),Sharpness (acum),"
+                      "Specific Loudness (sone),Psychoacoustic Annoyance\n",
+                      false, false, nullptr);
+    for (const auto& e : rows)
+    {
+        juce::String line =
+            juce::Time (e.timestampMs).toString (true, true, true, true) + ","
+            + juce::String (e.peakSPL,         2) + ","
+            + juce::String (e.peakDBASPL,       2) + ","
+            + juce::String (e.peakDBCSPL,       2) + ","
+            + juce::String (e.rmsSPL,           2) + ","
+            + juce::String (e.rmsDBASPL,        2) + ","
+            + juce::String (e.rmsDBCSPL,        2) + ","
+            + juce::String (e.roughness,        2) + ","
+            + juce::String (e.fluctuation,      2) + ","
+            + juce::String (e.sharpness,        3) + ","
+            + juce::String (e.loudnessSone,     3) + ","
+            + juce::String (e.psychoAnnoyance,  3) + "\n";
+        stream.writeText (line, false, false, nullptr);
+    }
+}
+
+void SPLMeterAudioProcessorEditor::doSaveCsv()
+{
+    auto rows = audioProcessor.copyLog();
+    if (rows.empty()) return;
+    fileChooser = std::make_unique<juce::FileChooser> (
+        "Save log as CSV",
+        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.csv"),
+        "*.csv");
+    fileChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [rows] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return;
+            juce::FileOutputStream stream (file);
+            if (!stream.openedOk()) return;
+            stream.setPosition (0); stream.truncate();
+            writeCsvRows (stream, rows);
+        });
+}
+
+void SPLMeterAudioProcessorEditor::doSaveWav()
+{
+    fileChooser = std::make_unique<juce::FileChooser> (
+        "Save recording as WAV",
+        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.wav"),
+        "*.wav");
+    fileChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [this] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return;
+            audioProcessor.saveWavToFile (file);
+        });
+}
+
+void SPLMeterAudioProcessorEditor::doSaveJpg()
+{
+    auto snapshot = createComponentSnapshot (getLocalBounds());
+    fileChooser = std::make_unique<juce::FileChooser> (
+        "Save snapshot as JPEG",
+        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.jpg"),
+        "*.jpg");
+    fileChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [snapshot] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return;
+            juce::FileOutputStream stream (file);
+            if (!stream.openedOk()) return;
+            stream.setPosition (0); stream.truncate();
+            juce::JPEGImageFormat jpeg;
+            jpeg.setQuality (0.95f);
+            jpeg.writeImageToStream (snapshot, stream);
+        });
+}
+
+void SPLMeterAudioProcessorEditor::doSaveAll()
+{
+    auto rows     = audioProcessor.copyLog();
+    auto snapshot = createComponentSnapshot (getLocalBounds());
+    fileChooser = std::make_unique<juce::FileChooser> (
+        "Choose destination folder",
+        juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
+    fileChooser->launchAsync (
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+        [this, rows, snapshot] (const juce::FileChooser& fc)
+        {
+            auto folder = fc.getResult();
+            if (folder == juce::File{} || !folder.isDirectory()) return;
+
+            auto ts   = juce::Time::getCurrentTime().formatted ("%Y-%m-%d_%H-%M-%S");
+            auto base = folder.getChildFile ("SPLMeter_" + ts);
+
+            // CSV
+            if (!rows.empty())
+            {
+                juce::FileOutputStream csv (base.withFileExtension ("csv"));
+                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows); }
+            }
+
+            // WAV
+            audioProcessor.saveWavToFile (base.withFileExtension ("wav"));
+
+            // JPG
+            juce::FileOutputStream jpg (base.withFileExtension ("jpg"));
+            if (jpg.openedOk())
+            {
+                jpg.setPosition (0); jpg.truncate();
+                juce::JPEGImageFormat jpeg;
+                jpeg.setQuality (0.95f);
+                jpeg.writeImageToStream (snapshot, jpg);
+            }
+        });
+}
+
+//==============================================================================
 void SPLMeterAudioProcessorEditor::timerCallback()
 {
     meter.setValues (audioProcessor.getPeakSPL(),
@@ -549,7 +599,8 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getRoughness(),
                      audioProcessor.getFluctuation(),
                      audioProcessor.getSharpness(),
-                     audioProcessor.getLoudnessSone());
+                     audioProcessor.getLoudnessSone(),
+                     audioProcessor.getPsychoAnnoyance());
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
 

@@ -93,18 +93,22 @@ private:
     void saveSettings();
     void loadSettings();
 
+    void doSaveCsv();
+    void doSaveWav();
+    void doSaveJpg();
+    void doSaveAll();
+    static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&);
+
     SPLMeterAudioProcessor& audioProcessor;
 
     MeterComponent       meter;
     LogComponent         log;
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
-    juce::TextButton settingsButton      { "Settings" };
-    juce::TextButton spectrogramButton  { "Spectrogram" };
+    juce::TextButton settingsButton      { "Settings..." };
+    juce::TextButton toolsMenuButton    { "Tools..." };
     juce::TextButton resetButton     { "Reset" };
-    juce::TextButton saveButton      { "Save JPG" };
-    juce::TextButton saveCsvButton   { "Save CSV" };
-    juce::TextButton saveWavButton   { "Save WAV" };
+    juce::TextButton saveMenuButton  { "Save..." };
     juce::TextButton basicModeButton { "Advanced Mode" };
     juce::TextButton fastButton      { "FAST" };
     juce::TextButton slowButton      { "SLOW" };
@@ -132,7 +136,6 @@ private:
     std::unique_ptr<SpectrogramWindow>  spectrogramWindow;
 #if JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;
-    juce::TextButton visqolButton { "ViSQOL" };
 #endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessorEditor)

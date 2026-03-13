@@ -19,10 +19,11 @@ struct LogEntry
     float rmsDBASPL   = 0.0f;
     float rmsDBCSPL   = 0.0f;
     // Psychoacoustic metrics
-    float roughness   = 0.0f;
-    float fluctuation = 0.0f;
-    float sharpness   = 0.0f;
-    float loudnessSone = 0.0f;
+    float roughness        = 0.0f;
+    float fluctuation      = 0.0f;
+    float sharpness        = 0.0f;
+    float loudnessSone     = 0.0f;
+    float psychoAnnoyance  = 0.0f;
 };
 
 //==============================================================================
@@ -80,6 +81,18 @@ public:
         return (phons >= 40.0f)
                ? std::pow (2.0f, (phons - 40.0f) / 10.0f)
                : std::pow (phons / 40.0f, 2.642f);
+    }
+
+    float getPsychoAnnoyance() const noexcept
+    {
+        const float N = getLoudnessSone();
+        if (N < 0.01f) return 0.0f;
+        const float S   = atomicSharpness.load();
+        const float R   = atomicRoughness.load()   / 100.0f;   // % → [0,1]
+        const float F   = atomicFluctuation.load() / 100.0f;
+        const float wS  = (S > 1.75f) ? (S - 1.75f) / 4.0f * N / (N + 10.0f) : 0.0f;
+        const float wFR = std::pow (N, 0.4f) * (0.07f * std::sqrt (F) + 0.2f * std::sqrt (R));
+        return N * (1.0f + std::sqrt (wS * wS + wFR * wFR));
     }
 
     std::vector<LogEntry> copyLog();
