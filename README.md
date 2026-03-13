@@ -2,7 +2,7 @@
 
 A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows standalone app and as VST3 / AU plugin.
 
-![SPLMeter v2.0 screenshot](screenShot.png)
+![SPLMeter v2.4 screenshot](screenShot.png)
 
 ---
 
@@ -20,7 +20,12 @@ A professional Sound Pressure Level (SPL) meter built with JUCE, available as a 
 - Numeric SPL readout with peak-hold indicator
 - **Basic / Advanced mode** toggle — Basic shows only the SPL meter; Advanced adds the full log plot and psychoacoustic overlay
 - Time-series **log plot** with per-series visibility toggles (Left y-axis: dB / dB(A) / dB(C))
-- Selectable psychoacoustic overlay on the right y-axis: Roughness, Fluctuation Strength, Sharpness, Loudness
+- Selectable psychoacoustic overlay on the right y-axis: Roughness, Fluctuation Strength, Sharpness, Specific Loudness, Psychoacoustic Annoyance
+
+### Spectrogram
+- Opened via the **Tools…** menu; floating window with configurable controls
+- **Frequency scale:** Log (default) or **Mel**
+- Gain and time-resolution controls
 
 ### FFT Spectrum Analyser
 - Toggled via the **FFT** button; displayed as a semi-transparent overlay on the log plot
@@ -40,7 +45,8 @@ Continuous real-time estimation of:
 | Roughness | Perceived roughness / beating (15–300 Hz AM range) |
 | Sharpness | High-frequency spectral centroid (acum, Zwicker/Aures model) |
 | Fluctuation Strength | Slow amplitude modulation (0.5–20 Hz range) |
-| Loudness | Perceived loudness approximation (sone) |
+| Specific Loudness | Perceived loudness approximation (sone) |
+| Psychoacoustic Annoyance | Combined annoyance index (Zwicker & Fastl 1999): N × (1 + √(w_S² + w_FR²)) |
 
 ### Input Modes
 - **Real Time** — live microphone / audio interface input, up to **32 channels**
@@ -48,13 +54,18 @@ Continuous real-time estimation of:
 - **Monitor button** — speaker icon; output is muted by default, click to enable pass-through
 
 ### Export
-- **Save JPG** — exports the current view as a JPEG image
+Accessible via the **Save…** button (popup menu):
 - **Save CSV** — exports the full measurement log (timestamps, all SPL values, all psychoacoustic metrics) as a CSV file
 - **Save WAV** — saves the last *Keep Last* seconds of Input 01 and 02 as a stereo 24-bit WAV file
+- **Save Screenshot** — exports the current view as a JPEG image
+- **Save All** — saves CSV, WAV, and screenshot in one step into a chosen folder
 
 ### Analysis Tools
-- **Correction Filter** — load a frequency-response correction curve (.txt / .csv: Hz + dB pairs); applied as a linear-phase FIR filter before metering
-- **Graph Overlay** — load a reference curve and display it as a dashed blue line in the FFT view
+Accessible via the **Tools…** button (popup menu):
+- **Spectrogram** — opens the spectrogram floating window (Log or Mel frequency scale)
+- **ViSQOL** *(macOS only)* — perceptual audio quality analysis (MOS-LQO + per-band NSIM)
+- **Correction Filter** — load a frequency-response correction curve (.txt / .csv: Hz + dB pairs); applied as a linear-phase FIR filter before metering (configured in Settings)
+- **Graph Overlay** — load a reference curve and display it as a dashed blue line in the FFT view (configured in Settings)
 
 ### Title Bar Utilities
 - **Live clock** — auto-updating date/time display (updates every second)
@@ -88,7 +99,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 | FAST / SLOW | IEC 61672 time weighting |
 | Real Time / File | Input source |
 | Monitor (speaker icon) | Enables audio pass-through output; OFF by default |
-| Settings | Opens the settings panel |
+| Settings… | Opens the settings panel |
 | Calibration | dB offset to convert full-scale to SPL (right-click for MIDI learn) |
 | Hold Time | Peak hold duration in seconds (right-click for MIDI learn) |
 | FFT Gain | Input gain for the FFT overlay (right-click for MIDI learn) |
@@ -98,10 +109,9 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 | 94 dB Line | Draw a dashed reference line at 94 dB SPL in the log plot |
 | Light Mode | Switch to light theme |
 | Left y axis checkboxes | Visibility of dB SPL / dBA SPL / dBC SPL series |
-| Right y axis checkboxes | Psychoacoustic overlay: Roughness / Fluctuation / Sharpness / Loudness |
-| Save JPG | Export current view as JPEG |
-| Save CSV | Export full measurement log as CSV |
-| Save WAV | Save the last *Keep Last* seconds of IN01 + IN02 as a stereo WAV |
+| Right y axis checkboxes | Psychoacoustic overlay: Roughness / Fluctuation / Sharpness / Specific Loudness / Annoyance |
+| Save… | Popup menu: Save CSV / Save WAV / Save Screenshot / Save All |
+| Tools… | Popup menu: Spectrogram / ViSQOL (macOS) |
 | Reset | Clear log and reset peak holds |
 | Clock | Live date/time (updates every second) |
 | Note field | Free-text annotation field (3 lines) |
@@ -289,11 +299,20 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 |---|---|
 | **IEC 61672-1:2013** | Electroacoustics — Sound level meters. Defines FAST (125 ms) and SLOW (1 s) time weighting and A/C frequency weighting curves. |
 | **ISO 266:1997** | Preferred frequencies — defines the 31 standard 1/3-octave band centre frequencies (20 Hz – 20 kHz). |
-| **Zwicker & Fastl, *Psychoacoustics: Facts and Models* (3rd ed., Springer, 2007)** | Theoretical basis for the Roughness, Sharpness, Fluctuation Strength, and Loudness estimators. |
+| **Zwicker & Fastl, *Psychoacoustics: Facts and Models* (3rd ed., Springer, 2007)** | Theoretical basis for the Roughness, Sharpness, Fluctuation Strength, Specific Loudness, and Psychoacoustic Annoyance estimators. |
 
 ---
 
 ## Changelog
+
+### v2.4.0
+- **Psychoacoustic Annoyance** — real-time Zwicker & Fastl annoyance index (PA) added as a momentary readout in the meter bar and as a selectable trace on the right y-axis of the log plot; included in CSV export
+- **Specific Loudness** — renamed from "Loudness" throughout the UI and CSV output for clarity
+- **Mel frequency scale** — spectrogram now offers a Log / Mel toggle; Mel scale compresses high frequencies and expands low frequencies for perceptually-uniform display
+- **Save… menu** — Save CSV, Save WAV, Save Screenshot, and Save All grouped under a single popup button; Save All exports all three formats in one step to a chosen folder
+- **Tools… menu** — Spectrogram and ViSQOL (macOS) grouped under a single popup button
+- **ASIO level fix** — level readings with ASIO drivers (e.g. 32-channel interfaces) were up to 30 dB too low because the mono mix divided by total hardware channel count; fix counts only channels carrying signal
+- **Settings… button** — renamed from "Settings" for standard macOS/Windows UI convention
 
 ### v2.3.0
 - **Persistent user settings** — all settings (monitor level, FFT parameters, calibration, hold time, bandpass, 94 dB line, light mode, etc.) are saved to disk and restored on the next launch
