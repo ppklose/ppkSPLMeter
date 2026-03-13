@@ -363,8 +363,8 @@ void SPLMeterAudioProcessorEditor::resized()
     auto tbR = [&] (int w) { return titleBar.removeFromRight (juce::roundToInt (w * ts)).reduced (10, 22); };
 
     settingsButton.setBounds  (tbL (160));
-    toolsMenuButton.setBounds (tbL (140));
     saveMenuButton.setBounds  (tbL (140));
+    toolsMenuButton.setBounds (tbL (140));
     resetButton.setBounds     (tbR (160));
     basicModeButton.setBounds (tbR (160));
     {
