@@ -114,6 +114,9 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     roughnessEst.prepare (sampleRate);
     sharpnessEst.prepare (sampleRate);
     fluctuationEst.prepare (sampleRate);
+    impulsivenessEst.prepare (sampleRate);
+    tonalityEst.prepare (sampleRate);
+    soundDetective_.prepare (sampleRate);
 
     rawPeak = aPeak = cPeak = rawPeakHeld = aPeakHeld = cPeakHeld = 0.0f;
     peakHoldCounterRaw = peakHoldCounterA = peakHoldCounterC = 0;
@@ -330,6 +333,9 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             fftWritePos_.store ((pos + 1) % kFftCircBufSize, std::memory_order_release);
         }
 
+        // Feed SoundDetective (single sample at a time — batched internally)
+        soundDetective_.pushSamples (&raw, 1);
+
         roughnessEst.processSample (raw);
         atomicRoughness.store (roughnessEst.getRoughness());
 
@@ -338,6 +344,12 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         fluctuationEst.processSample (raw);
         atomicFluctuation.store (fluctuationEst.getFluctuation());
+
+        impulsivenessEst.processSample (raw);
+        atomicImpulsiveness.store (impulsivenessEst.getImpulsiveness());
+
+        tonalityEst.processSample (raw);
+        atomicTonality.store (tonalityEst.getTonality());
 
         // Peak tracking
         auto trackPeak = [&] (float absVal, float& peak, float& peakHeld, int& counter)
@@ -375,7 +387,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                            : (dbaDB < 2.0f ? 0.0f : std::pow (dbaDB / 40.0f, 2.642f));
             pushLogEntry (rawPeakHeld, aPeakHeld, cPeakHeld, rawRms, aRms, cRms, calOffset,
                           roughnessEst.getRoughness(), fluctuationEst.getFluctuation(),
-                          sharpnessEst.getSharpness(), soneSnap);
+                          sharpnessEst.getSharpness(), soneSnap,
+                          impulsivenessEst.getImpulsiveness(), tonalityEst.getTonality());
             pruneLog (logDurationS);
         }
     }
@@ -398,7 +411,8 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
                                             float rawRms, float aRms, float cRms,
                                             float calOffset,
                                             float roughness, float fluctuation,
-                                            float sharpness, float loudnessSone)
+                                            float sharpness, float loudnessSone,
+                                            float impulsiveness, float tonality)
 {
     LogEntry e;
     e.timestampMs  = juce::Time::currentTimeMillis();
@@ -408,10 +422,12 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.rmsSPL       = linearToDBFS (rawRms) + calOffset;
     e.rmsDBASPL    = linearToDBFS (aRms)   + calOffset;
     e.rmsDBCSPL    = linearToDBFS (cRms)   + calOffset;
-    e.roughness    = roughness;
-    e.fluctuation  = fluctuation;
-    e.sharpness    = sharpness;
-    e.loudnessSone = loudnessSone;
+    e.roughness      = roughness;
+    e.fluctuation    = fluctuation;
+    e.sharpness      = sharpness;
+    e.loudnessSone   = loudnessSone;
+    e.impulsiveness  = impulsiveness;
+    e.tonality       = tonality;
 
     {
         const float N   = loudnessSone;

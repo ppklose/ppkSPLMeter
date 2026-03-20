@@ -5,6 +5,7 @@
 #include "LogComponent.h"
 #include "SettingsComponent.h"
 #include "SpectrogramComponent.h"
+#include "SoundDetectiveComponent.h"
 #if JUCE_MAC
  #include "VisqolComponent.h"
 #endif
@@ -132,8 +133,10 @@ private:
     juce::Label       clockLabel;
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
-    std::unique_ptr<SettingsWindow>     settingsWindow;
-    std::unique_ptr<SpectrogramWindow>  spectrogramWindow;
+    std::unique_ptr<SettingsWindow>       settingsWindow;
+    std::unique_ptr<SpectrogramWindow>    spectrogramWindow;
+    std::unique_ptr<SoundDetectiveWindow> soundDetectiveWindow;
+    std::vector<SoundEvent>               allSoundEvents_;
 #if JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;
 #endif

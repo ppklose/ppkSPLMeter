@@ -226,6 +226,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     {
         juce::PopupMenu menu;
         menu.addItem (1, "Spectrogram");
+        menu.addItem (3, "SoundDetective...");
 #if JUCE_MAC
         menu.addItem (2, "ViSQOL");
 #endif
@@ -233,22 +234,28 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             juce::PopupMenu::Options().withTargetComponent (toolsMenuButton),
             [this] (int result)
             {
-                if (result == 1)
+                auto openWindow = [this] (auto& winPtr, auto makeWindow)
                 {
-                    if (spectrogramWindow == nullptr)
-                        spectrogramWindow = std::make_unique<SpectrogramWindow> (audioProcessor);
-                    if (spectrogramWindow->isVisible())
+                    if (winPtr == nullptr) winPtr = makeWindow();
+                    if (winPtr->isVisible())
                     {
-                        spectrogramWindow->setVisible (false);
+                        winPtr->setVisible (false);
                     }
                     else
                     {
                         auto pos = localPointToGlobal (toolsMenuButton.getBounds().getBottomLeft());
-                        spectrogramWindow->setTopLeftPosition (pos);
-                        spectrogramWindow->setVisible (true);
-                        spectrogramWindow->toFront (true);
+                        winPtr->setTopLeftPosition (pos);
+                        winPtr->setVisible (true);
+                        winPtr->toFront (true);
                     }
-                }
+                };
+
+                if (result == 1)
+                    openWindow (spectrogramWindow,
+                                [this] { return std::make_unique<SpectrogramWindow> (audioProcessor); });
+                else if (result == 3)
+                    openWindow (soundDetectiveWindow,
+                                [this] { return std::make_unique<SoundDetectiveWindow> (audioProcessor); });
 #if JUCE_MAC
                 else if (result == 2)
                 {
@@ -345,7 +352,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.3.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.5.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -382,7 +389,7 @@ void SPLMeterAudioProcessorEditor::resized()
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 2, 52, 96);
 
-    const int meterHeight = 215;
+    const int meterHeight = 240;
     auto meterArea = area.removeFromTop (meterHeight);
     meter.setBounds (meterArea);
 
@@ -600,7 +607,9 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getFluctuation(),
                      audioProcessor.getSharpness(),
                      audioProcessor.getLoudnessSone(),
-                     audioProcessor.getPsychoAnnoyance());
+                     audioProcessor.getPsychoAnnoyance(),
+                     audioProcessor.getImpulsiveness(),
+                     audioProcessor.getTonality());
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
 
@@ -623,6 +632,22 @@ void SPLMeterAudioProcessorEditor::timerCallback()
         if (audioProcessor.correctionSerno_.isNotEmpty())
             noteField.setText ("SERNO: " + audioProcessor.correctionSerno_,
                                juce::dontSendNotification);
+    }
+
+    // Poll sound detection events and forward to log and detective window
+    {
+        auto newEvents = audioProcessor.popSoundEvents();
+        if (!newEvents.empty())
+        {
+            allSoundEvents_.insert (allSoundEvents_.end(), newEvents.begin(), newEvents.end());
+            // Prune to keep max 1000 events
+            if (allSoundEvents_.size() > 1000)
+                allSoundEvents_.erase (allSoundEvents_.begin(),
+                                       allSoundEvents_.begin() + 200);
+            log.setSoundEvents (allSoundEvents_);
+            if (soundDetectiveWindow != nullptr && soundDetectiveWindow->isVisible())
+                soundDetectiveWindow->addEvents (newEvents);
+        }
     }
 
     // Auto-return to Real Time when file playback finishes

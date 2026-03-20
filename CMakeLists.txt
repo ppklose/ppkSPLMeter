@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.2.2)
+project(SPLMeter VERSION 2.5.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     2.2.2
+    VERSION                     2.5.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
@@ -126,6 +126,18 @@ target_sources(SPLMeter PRIVATE
     Source/MeterComponent.cpp
     Source/LogComponent.cpp
 )
+
+# SoundDetective: Apple ML backend (macOS + iOS only)
+if(APPLE)
+    target_sources(SPLMeter PRIVATE Source/SoundDetectiveApple.mm)
+    find_library(SOUND_ANALYSIS_FRAMEWORK SoundAnalysis)
+    if(SOUND_ANALYSIS_FRAMEWORK)
+        target_link_libraries(SPLMeter PRIVATE ${SOUND_ANALYSIS_FRAMEWORK})
+    else()
+        # Weak-link so the binary still runs on older OS versions
+        target_link_libraries(SPLMeter PRIVATE "-weak_framework SoundAnalysis")
+    endif()
+endif()
 
 target_include_directories(SPLMeter PRIVATE
     Source

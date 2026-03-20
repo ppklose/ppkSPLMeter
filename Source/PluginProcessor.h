@@ -5,6 +5,9 @@
 #include "RoughnessEstimator.h"
 #include "SharpnessEstimator.h"
 #include "FluctuationStrengthEstimator.h"
+#include "ImpulsivenessEstimator.h"
+#include "TonalityEstimator.h"
+#include "SoundDetective.h"
 #include <atomic>
 #include <deque>
 
@@ -24,6 +27,8 @@ struct LogEntry
     float sharpness        = 0.0f;
     float loudnessSone     = 0.0f;
     float psychoAnnoyance  = 0.0f;
+    float impulsiveness    = 0.0f;
+    float tonality         = 0.0f;
 };
 
 //==============================================================================
@@ -71,9 +76,11 @@ public:
     float getRMSSPL()     const noexcept { return atomicRMSSPL.load(); }
     float getRMSDBASPL()  const noexcept { return atomicRMSDBASPL.load(); }
     float getRMSDBCSPL()  const noexcept { return atomicRMSDBCSPL.load(); }
-    float getRoughness()  const noexcept { return atomicRoughness.load(); }
-    float getSharpness()    const noexcept { return atomicSharpness.load(); }
-    float getFluctuation()  const noexcept { return atomicFluctuation.load(); }
+    float getRoughness()      const noexcept { return atomicRoughness.load(); }
+    float getSharpness()      const noexcept { return atomicSharpness.load(); }
+    float getFluctuation()    const noexcept { return atomicFluctuation.load(); }
+    float getImpulsiveness()  const noexcept { return atomicImpulsiveness.load(); }
+    float getTonality()       const noexcept { return atomicTonality.load(); }
     float getLoudnessSone() const noexcept
     {
         float phons = atomicRMSDBASPL.load();
@@ -174,6 +181,12 @@ public:
     bool saveWavToFile (const juce::File& destFile);
 
     //==========================================================================
+    // SoundDetective
+    SoundDetective& getSoundDetective() noexcept { return soundDetective_; }
+    void setSoundDetectiveEnabled (bool e) noexcept { soundDetective_.setEnabled (e); }
+    std::vector<SoundEvent> popSoundEvents() { return soundDetective_.popNewEvents(); }
+
+    //==========================================================================
     // MIDI Learn - param indices: 0=calOffset, 1=peakHoldTime, 2=fftGain
     static constexpr int kNumMidiParams = 3;
     static const char* const kMidiParamIds[kNumMidiParams];
@@ -198,9 +211,12 @@ private:
     static constexpr int kBpStages = 4;
     juce::IIRFilter bpHP[32][kBpStages];
     juce::IIRFilter bpLP[32][kBpStages];
-    RoughnessEstimator roughnessEst;
-    SharpnessEstimator          sharpnessEst;
+    RoughnessEstimator           roughnessEst;
+    SharpnessEstimator           sharpnessEst;
     FluctuationStrengthEstimator fluctuationEst;
+    ImpulsivenessEstimator       impulsivenessEst;
+    TonalityEstimator            tonalityEst;
+    SoundDetective               soundDetective_;
     double currentSampleRate = 44100.0;
 
     // Peak tracking
@@ -224,9 +240,11 @@ private:
     std::atomic<float> atomicRMSSPL     { -999.0f };
     std::atomic<float> atomicRMSDBASPL  { -999.0f };
     std::atomic<float> atomicRMSDBCSPL  { -999.0f };
-    std::atomic<float> atomicRoughness  { 0.0f };
-    std::atomic<float> atomicSharpness    { 0.0f };
-    std::atomic<float> atomicFluctuation  { 0.0f };
+    std::atomic<float> atomicRoughness      { 0.0f };
+    std::atomic<float> atomicSharpness      { 0.0f };
+    std::atomic<float> atomicFluctuation    { 0.0f };
+    std::atomic<float> atomicImpulsiveness  { 0.0f };
+    std::atomic<float> atomicTonality       { 0.0f };
 
     juce::SpinLock       logLock;
     std::deque<LogEntry> logEntries;
@@ -251,7 +269,8 @@ private:
                        float rawRms,  float aRms,  float cRms,
                        float calOffset,
                        float roughness, float fluctuation,
-                       float sharpness, float loudnessSone);
+                       float sharpness, float loudnessSone,
+                       float impulsiveness, float tonality);
     void pruneLog (float logDurationSeconds);
 
     // Correction filter

@@ -152,59 +152,44 @@ void MeterComponent::paint (juce::Graphics& g)
         }
     }
 
-    // ---- Psychoacoustic rows (left-aligned label + value) ----
-    // Row 1: 2 columns (Roughness | Fluctuation) at 22 pt
-    // Row 2: 3 columns (Sharpness | Specific Loudness | Annoyance) at 17 pt
-    const float roughnessY = peakY + barH + 10.0f;
-    const float sharpnessY = roughnessY + 34.0f;
-    const float col2X      = bounds.getWidth() / 2.0f;
-    const float boldW      = 130.0f;
-    const float valW       = col2X - margin - boldW - 8.0f;
+    // ---- Psychoacoustic table (2-column grid, 4 rows) ----
+    const float tableY   = peakY + barH + 12.0f;
+    const float rowH     = 20.0f;
+    const float rowGap   = 6.0f;
+    const float colW     = barAreaW / 2.0f;
+    const float lblW     = 118.0f;
 
-    // Row-1 helper (22 pt, fixed two-column geometry)
-    auto drawPsychoRow = [&] (float x, float y,
-                               const juce::String& label,
-                               const juce::String& value)
+    // Unified cell renderer: col 0 or 1, row index
+    auto drawCell = [&] (int col, int row,
+                          const juce::String& label,
+                          const juce::String& value)
     {
-        g.setFont (juce::Font (juce::FontOptions().withHeight (17.0f).withStyle ("Bold")));
-        g.setColour (textPrimary);
-        g.drawText (label, static_cast<int>(x), static_cast<int>(y),
-                    static_cast<int>(boldW), 24, juce::Justification::centredLeft, false);
+        const float x  = margin + col * colW;
+        const float y  = tableY + row * (rowH + rowGap);
+        const float vW = colW - lblW - 4.0f;
 
-        g.setFont (juce::Font (juce::FontOptions().withHeight (17.0f)));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (15.0f).withStyle ("Bold")));
         g.setColour (textSecond);
-        g.drawText (value, static_cast<int>(x + boldW + 8.0f), static_cast<int>(y),
-                    static_cast<int>(valW), 24, juce::Justification::centredLeft, false);
-    };
-
-    // Row-2 helper (17 pt, three equal cells)
-    const float cell3W  = barAreaW / 3.0f;
-    const float lbl3W   = 104.0f;   // label column within each cell
-    auto drawPsychoCell = [&] (int col, float y,
-                                const juce::String& label,
-                                const juce::String& value)
-    {
-        const float x   = margin + col * cell3W;
-        const float vW  = cell3W - lbl3W - 6.0f;
-        g.setFont (juce::Font (juce::FontOptions().withHeight (17.0f).withStyle ("Bold")));
-        g.setColour (textPrimary);
         g.drawText (label, static_cast<int>(x), static_cast<int>(y),
-                    static_cast<int>(lbl3W), 24, juce::Justification::centredLeft, false);
-        g.setFont (juce::Font (juce::FontOptions().withHeight (17.0f)));
-        g.setColour (textSecond);
-        g.drawText (value, static_cast<int>(x + lbl3W + 6.0f), static_cast<int>(y),
-                    static_cast<int>(vW), 24, juce::Justification::centredLeft, false);
+                    static_cast<int>(lblW), static_cast<int>(rowH),
+                    juce::Justification::centredLeft, false);
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (15.0f)));
+        g.setColour (textPrimary);
+        g.drawText (value, static_cast<int>(x + lblW), static_cast<int>(y),
+                    static_cast<int>(vW), static_cast<int>(rowH),
+                    juce::Justification::centredLeft, false);
     };
 
     if (psychoVisible_)
     {
-        // Row 1
-        drawPsychoRow (margin, roughnessY, "Roughness",   juce::String (roughness_,   1) + " %  (15-300 Hz)");
-        drawPsychoRow (col2X,  roughnessY, "Fluctuation", juce::String (fluctuation_, 1) + " %  (0.5-20 Hz)");
-        // Row 2
-        drawPsychoCell (0, sharpnessY, "Sharpness",        juce::String (sharpness_,       2) + " acum");
-        drawPsychoCell (1, sharpnessY, "Loudness",                    juce::String (sone_,            2) + " sone");
-        drawPsychoCell (2, sharpnessY, "Annoyance", juce::String (psychoAnnoyance_, 2));
+        drawCell (0, 0, "Roughness",      juce::String (roughness_,      1) + " %");
+        drawCell (1, 0, "Fluctuation",    juce::String (fluctuation_,    1) + " %");
+        drawCell (0, 1, "Sharpness",      juce::String (sharpness_,      2) + " acum");
+        drawCell (1, 1, "Loudness",       juce::String (sone_,           2) + " sone");
+        drawCell (0, 2, "Impulsiveness",  juce::String (impulsiveness_,  1) + " dB");
+        drawCell (1, 2, "Tonality",       juce::String (tonality_,       1) + " %");
+        drawCell (0, 3, "Annoyance",      juce::String (psychoAnnoyance_, 2));
     }
 
 }
@@ -228,7 +213,8 @@ void MeterComponent::mouseDown (const juce::MouseEvent& e)
 //==============================================================================
 void MeterComponent::setValues (float peakSPL, float peakDBASPL, float peakDBCSPL,
                                  float roughness, float fluctuation,
-                                 float sharpness, float sone, float psychoAnnoyance)
+                                 float sharpness, float sone, float psychoAnnoyance,
+                                 float impulsiveness, float tonality)
 {
     peakSPL_          = peakSPL;
     peakDBASPL_       = peakDBASPL;
@@ -238,6 +224,8 @@ void MeterComponent::setValues (float peakSPL, float peakDBASPL, float peakDBCSP
     sharpness_        = sharpness;
     sone_             = sone;
     psychoAnnoyance_  = psychoAnnoyance;
+    impulsiveness_    = impulsiveness;
+    tonality_         = tonality;
 
     double now = juce::Time::getMillisecondCounterHiRes();
     float selVal = selectedValue();

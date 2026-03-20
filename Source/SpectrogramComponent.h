@@ -38,12 +38,18 @@ public:
 
     void setFreqMin   (float f) { freqMin_    = f; clearSpectrogramImage(); repaint(); }
     void setFreqMax   (float f) { freqMax_    = f; clearSpectrogramImage(); repaint(); }
-    void setFreqScale (int   s) { freqScale_  = s; clearSpectrogramImage(); repaint(); }
+    void setFreqScale (int s)
+    {
+        freqScale_ = s;
+        resized();   // rebuilds image at correct label width
+        repaint();
+    }
+    void setDuration  (float s) { durationSeconds_ = s; clearSpectrogramImage(); }
 
     //==========================================================================
     void resized() override
     {
-        const int w = getWidth() - kLabelWidth;
+        const int w = getWidth() - effectiveLabelWidth();
         const int h = getHeight();
         if (w > 1 && h > 1)
         {
@@ -57,43 +63,130 @@ public:
     {
         g.fillAll (juce::Colour (0xff1c1c1e));
 
+        const int lw = effectiveLabelWidth();
+
         if (spectrogramImage.getWidth() > 1)
             g.drawImage (spectrogramImage,
-                         juce::Rectangle<float> ((float) kLabelWidth, 0.0f,
+                         juce::Rectangle<float> ((float) lw, 0.0f,
                                                  (float) spectrogramImage.getWidth(),
                                                  (float) getHeight()));
 
-        // Frequency axis labels + gridlines
         const int h = getHeight();
-        static const float kLabelFreqs[] = { 20000.f, 10000.f, 5000.f, 2000.f,
-                                             1000.f, 500.f, 200.f, 100.f, 50.f, 20.f };
         g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
 
-        for (float freq : kLabelFreqs)
+        if (freqScale_ == 1)  // Mel + Bark dual-axis
         {
-            if (freq < freqMin_ * 0.5f || freq > freqMax_ * 2.0f) continue;
+            // Column split: left half = Mel, right half = Bark
+            const int colW = lw / 2;  // 46px each
 
-            float frac = freqToFrac (freq);
-            int y = juce::roundToInt ((1.0f - frac) * (h - 1));
-            if (y < 0 || y >= h) continue;
+            // Column headers
+            g.setFont (juce::Font (juce::FontOptions().withHeight (9.0f).withStyle ("Bold")));
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.drawText ("mel", 0,    2, colW - 2, 10, juce::Justification::centredRight, false);
+            g.drawText ("brk", colW, 2, colW - 2, 10, juce::Justification::centredRight, false);
 
-            g.setColour (juce::Colours::white.withAlpha (0.12f));
-            g.drawHorizontalLine (y, (float) kLabelWidth, (float) getWidth());
+            // Thin divider between the two columns
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.drawVerticalLine (colW, 0.0f, (float) h);
 
-            juce::String label = (freq >= 1000.f)
-                ? juce::String ((int)(freq / 1000.f)) + "k"
-                : juce::String ((int) freq);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
 
-            g.setColour (juce::Colours::white.withAlpha (0.65f));
-            g.drawText (label, 0, y - 6, kLabelWidth - 4, 12,
-                        juce::Justification::centredRight, false);
+            // --- Mel ticks (left column) ---
+            static const float kLabelMels[] = { 200.f, 500.f, 1000.f, 1500.f, 2000.f,
+                                                2500.f, 3000.f, 3500.f, 4000.f };
+            for (float mel : kLabelMels)
+            {
+                float freq = melToFreq (mel);
+                if (freq < freqMin_ * 0.5f || freq > freqMax_ * 2.0f) continue;
+                float frac = freqToFrac (freq);
+                int y = juce::roundToInt ((1.0f - frac) * (h - 1));
+                if (y < 0 || y >= h) continue;
+
+                g.setColour (juce::Colours::white.withAlpha (0.12f));
+                g.drawHorizontalLine (y, (float) lw, (float) getWidth());
+
+                juce::String label = (mel >= 1000.f)
+                    ? juce::String ((int)(mel / 1000.f)) + "k"
+                    : juce::String ((int) mel);
+                g.setColour (juce::Colours::white.withAlpha (0.65f));
+                g.drawText (label, 0, y - 6, colW - 2, 12,
+                            juce::Justification::centredRight, false);
+            }
+
+            // --- Bark ticks (right column) ---
+            static const float kLabelBarks[] = { 2.f, 4.f, 6.f, 8.f, 10.f, 12.f,
+                                                  14.f, 16.f, 18.f, 20.f, 22.f, 24.f };
+            for (float bark : kLabelBarks)
+            {
+                float freq = barkToFreq (bark);
+                if (freq < freqMin_ * 0.5f || freq > freqMax_ * 2.0f) continue;
+                float frac = freqToFrac (freq);
+                int y = juce::roundToInt ((1.0f - frac) * (h - 1));
+                if (y < 0 || y >= h) continue;
+
+                g.setColour (juce::Colours::white.withAlpha (0.08f));
+                g.drawHorizontalLine (y, (float) lw, (float) getWidth());
+
+                g.setColour (juce::Colours::white.withAlpha (0.50f));
+                g.drawText (juce::String ((int) bark), colW, y - 6, colW - 2, 12,
+                            juce::Justification::centredRight, false);
+            }
+        }
+        else  // Hz (log) scale — single column
+        {
+            static const float kLabelFreqs[] = { 20000.f, 10000.f, 5000.f, 2000.f,
+                                                  1000.f, 500.f, 200.f, 100.f, 50.f, 20.f };
+            for (float freq : kLabelFreqs)
+            {
+                if (freq < freqMin_ * 0.5f || freq > freqMax_ * 2.0f) continue;
+                float frac = freqToFrac (freq);
+                int y = juce::roundToInt ((1.0f - frac) * (h - 1));
+                if (y < 0 || y >= h) continue;
+
+                g.setColour (juce::Colours::white.withAlpha (0.12f));
+                g.drawHorizontalLine (y, (float) lw, (float) getWidth());
+
+                juce::String label = (freq >= 1000.f)
+                    ? juce::String ((int)(freq / 1000.f)) + "k"
+                    : juce::String ((int) freq);
+                g.setColour (juce::Colours::white.withAlpha (0.65f));
+                g.drawText (label, 0, y - 6, lw - 4, 12,
+                            juce::Justification::centredRight, false);
+            }
         }
     }
 
 private:
     //==========================================================================
+    int effectiveLabelWidth() const noexcept { return (freqScale_ == 1) ? 92 : kLabelWidth; }
+
     static float freqToMel (float f) noexcept { return 2595.0f * std::log10 (1.0f + f / 700.0f); }
     static float melToFreq (float m) noexcept { return 700.0f * (std::pow (10.0f, m / 2595.0f) - 1.0f); }
+
+    static float freqToBark (float f) noexcept
+    {
+        return 13.0f * std::atan (0.00076f * f)
+             + 3.5f  * std::atan ((f / 7500.0f) * (f / 7500.0f));
+    }
+
+    static float barkToFreq (float b) noexcept
+    {
+        // Newton's method to invert freqToBark
+        float f = 600.0f * std::sinh (b / 6.0f);  // initial estimate
+        for (int i = 0; i < 20; ++i)
+        {
+            float fb  = freqToBark (f);
+            float err = fb - b;
+            if (std::fabs (err) < 1e-4f) break;
+            // derivative d(bark)/df
+            float df = 13.0f * 0.00076f / (1.0f + (0.00076f * f) * (0.00076f * f))
+                     + 7.0f * f / (7500.0f * 7500.0f)
+                         / (1.0f + (f * f) / (7500.0f * 7500.0f) * (f * f) / (7500.0f * 7500.0f));
+            f -= err / df;
+            f = std::max (1.0f, f);
+        }
+        return f;
+    }
 
     // Returns normalised position [0,1] for a given frequency (0=freqMin, 1=freqMax)
     float freqToFrac (float freq) const noexcept
@@ -147,6 +240,9 @@ private:
         std::array<float, 2048> tmp;
         int pulled = processor.pullSpectroSamples (tmp.data(), (int) tmp.size());
 
+        const int spCol = std::max (1, (int)(durationSeconds_ * sampleRate
+                                           / std::max (1, spectrogramImage.getWidth())));
+
         bool drew = false;
         for (int i = 0; i < pulled; ++i)
         {
@@ -157,8 +253,13 @@ private:
             if (hopCounter >= hopSize_)
             {
                 hopCounter = 0;
-                drawColumn();
-                drew = true;
+                colSampleAcc_ += hopSize_;
+                if (colSampleAcc_ >= spCol)
+                {
+                    colSampleAcc_ -= spCol;
+                    drawColumn();
+                    drew = true;
+                }
             }
         }
 
@@ -423,14 +524,16 @@ private:
     int   colourMap_  = 0;   // 0=Fire 1=Greyscale 2=Inferno 3=Viridis
     int   windowType_ = 0;   // 0=Hann 1=Hamming 2=Blackman 3=Flat-top
     int   freqScale_  = 0;   // 0=Log 1=Mel
+    float durationSeconds_ = 30.0f;
     bool  formantsEnabled_ = false;
 
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
     std::vector<float> inputBuf;
     std::vector<float> fftData;
-    int    inputHead  = 0;
-    int    hopCounter = 0;
-    double sampleRate = 44100.0;
+    int    inputHead     = 0;
+    int    hopCounter    = 0;
+    int    colSampleAcc_ = 0;
+    double sampleRate    = 44100.0;
 
     juce::Image spectrogramImage { juce::Image::RGB, 1, 1, true };
 
@@ -509,6 +612,21 @@ class SpectrogramWindow : public juce::DocumentWindow
                 s.setTooltip (tooltip);
                 addAndMakeVisible (s);
             };
+
+            // Duration (row 1)
+            makeRowLabel (durationLabel, "Dur");
+            durationCombo.addItem ("10 s",  1);
+            durationCombo.addItem ("30 s",  2);
+            durationCombo.addItem ("1 min", 3);
+            durationCombo.addItem ("2 min", 4);
+            durationCombo.addItem ("5 min", 5);
+            durationCombo.setSelectedId (2, juce::dontSendNotification);
+            durationCombo.onChange = [this]
+            {
+                const float durations[] = { 10.f, 30.f, 60.f, 120.f, 300.f };
+                spectro.setDuration (durations[durationCombo.getSelectedId() - 1]);
+            };
+            styleCombo (durationCombo, "Total spectrogram duration");
 
             // Freq Scale (row 1)
             makeRowLabel (scaleLabel, "Scale");
@@ -622,6 +740,9 @@ class SpectrogramWindow : public juce::DocumentWindow
             auto row1 = r.removeFromBottom (28).reduced (4, 4);
             formantsButton.setBounds (row1.removeFromRight (90));
             row1.removeFromRight (4);
+            durationCombo.setBounds (row1.removeFromRight (72));
+            durationLabel.setBounds (row1.removeFromRight (26));
+            row1.removeFromRight (4);
             scaleCombo.setBounds  (row1.removeFromRight (65));
             scaleLabel.setBounds  (row1.removeFromRight (36));
             row1.removeFromRight (4);
@@ -657,6 +778,8 @@ class SpectrogramWindow : public juce::DocumentWindow
         juce::Label      gainLabel;
         juce::Label      scaleLabel;
         juce::ComboBox   scaleCombo;
+        juce::Label      durationLabel;
+        juce::ComboBox   durationCombo;
         juce::TextButton formantsButton { "Formants" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttachment;
 

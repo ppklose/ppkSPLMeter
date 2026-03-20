@@ -49,7 +49,7 @@ namespace ProjectInfo
 {
     const char* const  projectName    = "SPLMeter";
     const char* const  companyName    = "Philipp Paul Klose Audio Engineering";
-    const char* const  versionString  = "2.0.0";
-    const int          versionNumber  = 0x20000;
+    const char* const  versionString  = "2.5.0";
+    const int          versionNumber  = 0x20500;
 }
 #endif

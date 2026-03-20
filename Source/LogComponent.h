@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "SoundDetective.h"
 
 //==============================================================================
 class LogComponent  : public juce::Component,
@@ -17,6 +18,9 @@ public:
     void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
     void setLightMode  (bool light) noexcept;
 
+    // Sound event markers on the timeline
+    void setSoundEvents (const std::vector<SoundEvent>& events) { soundEvents_ = events; repaint(); }
+
 private:
     void timerCallback() override;
     void computeFftBands();
@@ -31,11 +35,13 @@ private:
     juce::ToggleButton splVisButton          { "dB SPL"     };
     juce::ToggleButton dbaVisButton          { "dBA SPL"    };
     juce::ToggleButton dbcVisButton          { "dBC SPL"    };
-    juce::ToggleButton roughnessVisButton    { "Roughness"  };
-    juce::ToggleButton fluctuationVisButton  { "Fluctuation" };
-    juce::ToggleButton sharpnessVisButton    { "Sharpness"  };
-    juce::ToggleButton loudnessVisButton     { "Specific Loudness" };
-    juce::ToggleButton annoyanceVisButton    { "Psychoacoustic Annoyance" };
+    juce::ToggleButton roughnessVisButton      { "Roughness"  };
+    juce::ToggleButton fluctuationVisButton    { "Fluctuation" };
+    juce::ToggleButton sharpnessVisButton      { "Sharpness"  };
+    juce::ToggleButton loudnessVisButton       { "Loudness" };
+    juce::ToggleButton annoyanceVisButton      { "Annoyance" };
+    juce::ToggleButton impulsivenessVisButton  { "Impulsiveness" };
+    juce::ToggleButton tonalityVisButton       { "Tonality" };
 
     // FFT
     static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
@@ -56,10 +62,11 @@ private:
     bool                            fftEnabled_ = false;
     bool                            lightMode_  = false;
 
-    std::vector<LogEntry> rows;
+    std::vector<LogEntry>  rows;
+    std::vector<SoundEvent> soundEvents_;
 
     // Selected psychoacoustic metric
-    enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Off };
+    enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Impulsiveness, Tonality, Off };
     PsychoMetric selectedMetric = PsychoMetric::Roughness;
 
 
@@ -81,6 +88,8 @@ private:
     static const juce::Colour colSharpness;
     static const juce::Colour colLoudness;
     static const juce::Colour colAnnoyance;
+    static const juce::Colour colImpulsiveness;
+    static const juce::Colour colTonality;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LogComponent)
 };

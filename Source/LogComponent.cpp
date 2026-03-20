@@ -12,11 +12,13 @@ const juce::Colour LogComponent::colPeakDBC  { 0xffff2d55 };  // red
 const juce::Colour LogComponent::colRmsDBC   { 0xffffe620 };  // yellow
 
 // Psychoacoustic series colours
-const juce::Colour LogComponent::colRoughness   { 0xff00c7be };  // teal
-const juce::Colour LogComponent::colFluctuation { 0xffeb34b1 };  // pink
-const juce::Colour LogComponent::colSharpness   { 0xffc77dff };  // violet
-const juce::Colour LogComponent::colLoudness    { 0xffffe57f };  // gold
-const juce::Colour LogComponent::colAnnoyance   { 0xffff6b6b };  // coral red
+const juce::Colour LogComponent::colRoughness      { 0xff00c7be };  // teal
+const juce::Colour LogComponent::colFluctuation    { 0xffeb34b1 };  // pink
+const juce::Colour LogComponent::colSharpness      { 0xffc77dff };  // violet
+const juce::Colour LogComponent::colLoudness       { 0xffffe57f };  // gold
+const juce::Colour LogComponent::colAnnoyance      { 0xffff6b6b };  // coral red
+const juce::Colour LogComponent::colImpulsiveness  { 0xffff9f0a };  // amber
+const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime green
 
 //==============================================================================
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
@@ -64,7 +66,8 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
                 // Deselect the others
                 for (auto* b : { &roughnessVisButton, &fluctuationVisButton,
                                  &sharpnessVisButton, &loudnessVisButton,
-                                 &annoyanceVisButton })
+                                 &annoyanceVisButton, &impulsivenessVisButton,
+                                 &tonalityVisButton })
                     if (b != &btn)
                         b->setToggleState (false, juce::dontSendNotification);
                 selectedMetric = metric;
@@ -78,11 +81,13 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
         addAndMakeVisible (btn);
     };
     roughnessVisButton.setToggleState   (true, juce::dontSendNotification);  // default on
-    setupPsychoBtn (roughnessVisButton,   colRoughness,   PsychoMetric::Roughness);
-    setupPsychoBtn (fluctuationVisButton, colFluctuation, PsychoMetric::Fluctuation);
-    setupPsychoBtn (sharpnessVisButton,   colSharpness,   PsychoMetric::Sharpness);
-    setupPsychoBtn (loudnessVisButton,    colLoudness,    PsychoMetric::Loudness);
-    setupPsychoBtn (annoyanceVisButton,   colAnnoyance,   PsychoMetric::Annoyance);
+    setupPsychoBtn (roughnessVisButton,      colRoughness,      PsychoMetric::Roughness);
+    setupPsychoBtn (fluctuationVisButton,    colFluctuation,    PsychoMetric::Fluctuation);
+    setupPsychoBtn (sharpnessVisButton,      colSharpness,      PsychoMetric::Sharpness);
+    setupPsychoBtn (loudnessVisButton,       colLoudness,       PsychoMetric::Loudness);
+    setupPsychoBtn (annoyanceVisButton,      colAnnoyance,      PsychoMetric::Annoyance);
+    setupPsychoBtn (impulsivenessVisButton,  colImpulsiveness,  PsychoMetric::Impulsiveness);
+    setupPsychoBtn (tonalityVisButton,       colTonality,       PsychoMetric::Tonality);
 
     // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
@@ -108,7 +113,8 @@ void LogComponent::setLightMode (bool light) noexcept
     for (auto* b : { &splVisButton, &dbaVisButton, &dbcVisButton,
                      &roughnessVisButton, &fluctuationVisButton,
                      &sharpnessVisButton, &loudnessVisButton,
-                     &annoyanceVisButton })
+                     &annoyanceVisButton, &impulsivenessVisButton,
+                     &tonalityVisButton })
         b->setColour (juce::ToggleButton::textColourId, textPrimary);
 
     repaint();
@@ -123,28 +129,35 @@ void LogComponent::resized()
     durationLabel.setBounds  (controlRow.removeFromLeft (200));
     durationSlider.setBounds (controlRow);
 
-    // Position SPL visibility checkboxes in the legend strip (row 1 of the plot header)
+    // Uniform 4-column grid for all checkbox rows
     const float marginL  = 80.0f;
     const float marginR  = 75.0f;
     const float controlH = 52.0f;
     auto graphBounds = getLocalBounds().reduced (4).withTrimmedBottom (static_cast<int> (controlH));
-    const float plotX = graphBounds.getX() + marginL;
-    const float plotW = graphBounds.getWidth() - marginL - marginR;
-    const float btnW  = plotW / 3.0f;
-    const float btnY  = graphBounds.getY();
-    const float btnH  = 36.0f;
-    splVisButton.setBounds (juce::Rectangle<float> (plotX,           btnY, btnW, btnH).toNearestInt());
-    dbaVisButton.setBounds (juce::Rectangle<float> (plotX + btnW,    btnY, btnW, btnH).toNearestInt());
-    dbcVisButton.setBounds (juce::Rectangle<float> (plotX + btnW*2,  btnY, btnW, btnH).toNearestInt());
+    const float plotX  = graphBounds.getX() + marginL;
+    const float plotW  = graphBounds.getWidth() - marginL - marginR;
+    const float colW   = plotW / 4.0f;
+    const float btnY   = graphBounds.getY();
+    const float btnH   = 32.0f;
+    const float rowGap = 4.0f;
 
-    // Psychoacoustic checkbox row (row 2)
-    const float psychoBtnY = btnY + btnH + 4.0f;
-    const float psychoBtnW = plotW / 5.0f;
-    roughnessVisButton.setBounds   (juce::Rectangle<float> (plotX,                  psychoBtnY, psychoBtnW, btnH).toNearestInt());
-    fluctuationVisButton.setBounds (juce::Rectangle<float> (plotX + psychoBtnW,     psychoBtnY, psychoBtnW, btnH).toNearestInt());
-    sharpnessVisButton.setBounds   (juce::Rectangle<float> (plotX + psychoBtnW*2,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
-    loudnessVisButton.setBounds    (juce::Rectangle<float> (plotX + psychoBtnW*3,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
-    annoyanceVisButton.setBounds   (juce::Rectangle<float> (plotX + psychoBtnW*4,   psychoBtnY, psychoBtnW, btnH).toNearestInt());
+    // Row 1 — SPL series (3 of 4 columns)
+    splVisButton.setBounds (juce::Rectangle<float> (plotX,          btnY, colW, btnH).toNearestInt());
+    dbaVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   btnY, colW, btnH).toNearestInt());
+    dbcVisButton.setBounds (juce::Rectangle<float> (plotX + colW*2, btnY, colW, btnH).toNearestInt());
+
+    // Row 2 — psychoacoustic (4 columns)
+    const float row2Y = btnY + btnH + rowGap;
+    roughnessVisButton.setBounds   (juce::Rectangle<float> (plotX,          row2Y, colW, btnH).toNearestInt());
+    fluctuationVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   row2Y, colW, btnH).toNearestInt());
+    sharpnessVisButton.setBounds   (juce::Rectangle<float> (plotX + colW*2, row2Y, colW, btnH).toNearestInt());
+    loudnessVisButton.setBounds    (juce::Rectangle<float> (plotX + colW*3, row2Y, colW, btnH).toNearestInt());
+
+    // Row 3 — psychoacoustic continued (3 of 4 columns)
+    const float row3Y = row2Y + btnH + rowGap;
+    annoyanceVisButton.setBounds     (juce::Rectangle<float> (plotX,          row3Y, colW, btnH).toNearestInt());
+    impulsivenessVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   row3Y, colW, btnH).toNearestInt());
+    tonalityVisButton.setBounds      (juce::Rectangle<float> (plotX + colW*2, row3Y, colW, btnH).toNearestInt());
 }
 
 void LogComponent::timerCallback()
@@ -167,7 +180,7 @@ void LogComponent::paint (juce::Graphics& g)
 
     const float marginL = 80.0f;
     const float marginR = 75.0f;   // right axis labels
-    const float marginT = 120.0f;  // two checkbox rows
+    const float marginT = 116.0f;  // three checkbox rows (3×32 + 2×4 = 104, +12 pad)
     const float marginB = 50.0f;
 
     const juce::Rectangle<float> plot (
@@ -220,6 +233,13 @@ void LogComponent::paint (juce::Graphics& g)
         case PsychoMetric::Annoyance:
             rightMin = 0; rightMax = 100; rightUnit = "PA";
             psychoColour = colAnnoyance; break;
+        case PsychoMetric::Impulsiveness:
+            rightMin = 0; rightMax = 40; rightUnit = "dB";
+            psychoColour = colImpulsiveness; break;
+        case PsychoMetric::Tonality:
+            rightMin = 0; rightMax = 100; rightUnit = "%";
+            psychoColour = colTonality; break;
+        default: break;
     }
 
     auto rightToY = [&] (float val) -> float {
@@ -293,18 +313,20 @@ void LogComponent::paint (juce::Graphics& g)
 
     // Legend strip axis labels (drawn in left margin, aligned with checkbox rows)
     {
-        const float row1Y = graphArea.getY();
-        const float row2Y = graphArea.getY() + 36.0f + 4.0f;
+        // Rows: same geometry as resized() — 32px tall, 4px gap
+        const float row1Y  = graphArea.getY();
+        const float row2Y  = graphArea.getY() + 32.0f + 4.0f;
+        const float row3Y  = graphArea.getY() + 72.0f + 4.0f;
         const float labelX = graphArea.getX();
         const float labelW = marginL - 6.0f;
-        const float rowH   = 36.0f;
+        const float rowH   = 32.0f;
 
-        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
         g.setColour (textSecond);
-        g.drawText ("Left y axis:",  static_cast<int>(labelX), static_cast<int>(row1Y),
+        g.drawText ("Left axis:",  static_cast<int>(labelX), static_cast<int>(row1Y),
                     static_cast<int>(labelW), static_cast<int>(rowH),
                     juce::Justification::centredRight, false);
-        g.drawText ("Right y axis:", static_cast<int>(labelX), static_cast<int>(row2Y),
+        g.drawText ("Right axis:", static_cast<int>(labelX), static_cast<int>(row2Y),
                     static_cast<int>(labelW), static_cast<int>(rowH),
                     juce::Justification::centredRight, false);
     }
@@ -379,11 +401,13 @@ void LogComponent::paint (juce::Graphics& g)
             float val = 0.0f;
             switch (selectedMetric)
             {
-                case PsychoMetric::Roughness:   val = e.roughness;    break;
-                case PsychoMetric::Fluctuation: val = e.fluctuation;  break;
-                case PsychoMetric::Sharpness:   val = e.sharpness;    break;
-                case PsychoMetric::Loudness:    val = e.loudnessSone;    break;
-                case PsychoMetric::Annoyance:   val = e.psychoAnnoyance; break;
+                case PsychoMetric::Roughness:      val = e.roughness;        break;
+                case PsychoMetric::Fluctuation:    val = e.fluctuation;      break;
+                case PsychoMetric::Sharpness:      val = e.sharpness;        break;
+                case PsychoMetric::Loudness:       val = e.loudnessSone;     break;
+                case PsychoMetric::Annoyance:      val = e.psychoAnnoyance;  break;
+                case PsychoMetric::Impulsiveness:  val = e.impulsiveness;    break;
+                case PsychoMetric::Tonality:       val = e.tonality;         break;
                 default: break;
             }
             float x = timeToX (e.timestampMs);
@@ -393,6 +417,62 @@ void LogComponent::paint (juce::Graphics& g)
         }
         g.setColour (psychoColour);
         g.strokePath (path, juce::PathStrokeType (2.5f));
+    }
+
+    // ---- Sound event markers ----
+    {
+        const juce::Colour flagBg   (0xccff453a);
+        const juce::Colour flagText (juce::Colours::white);
+        const float dashLen = 4.0f, gapLen = 3.0f;
+        const float flagH   = 14.0f;
+        const float flagPad = 4.0f;
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+
+        // Keep a set of already-drawn x positions to avoid label overlap
+        std::vector<float> usedFlagX;
+
+        for (const auto& ev : soundEvents_)
+        {
+            if (ev.timestampMs < tMin || ev.timestampMs > tMax) continue;
+
+            float x = timeToX (ev.timestampMs);
+
+            // Dashed red vertical line spanning the full plot height
+            g.setColour (flagBg);
+            float y = plot.getY();
+            while (y < plot.getBottom())
+            {
+                float segEnd = std::min (y + dashLen, plot.getBottom());
+                g.drawLine (x, y, x, segEnd, 1.5f);
+                y += dashLen + gapLen;
+            }
+
+            // Flag: position it just above the plot, avoiding overlap with neighbours
+            float approxLabelW = std::min (
+                110.0f,
+                g.getCurrentFont().getStringWidthFloat (ev.label) + 2.0f * flagPad);
+            float flagX = x - approxLabelW * 0.5f;
+            // Push right if overlapping a previous flag
+            for (float used : usedFlagX)
+                if (std::fabs (flagX - used) < approxLabelW + 2.0f)
+                    flagX = used + approxLabelW + 3.0f;
+            flagX = juce::jlimit (plot.getX(), plot.getRight() - approxLabelW, flagX);
+            usedFlagX.push_back (flagX);
+
+            const float flagY = plot.getY() - flagH - 2.0f;
+
+            g.setColour (flagBg);
+            g.fillRoundedRectangle (flagX, flagY, approxLabelW, flagH, 2.0f);
+
+            // Small downward stem from flag to plot top
+            g.drawLine (x, flagY + flagH, x, plot.getY(), 1.5f);
+
+            g.setColour (flagText);
+            g.drawText (ev.label,
+                        (int) flagX, (int) flagY, (int) approxLabelW, (int) flagH,
+                        juce::Justification::centred, true);
+        }
     }
 
     // ---- 94 dB reference line ----

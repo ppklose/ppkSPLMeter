@@ -20,7 +20,8 @@ public:
 
     void setValues (float peakSPL, float peakDBASPL, float peakDBCSPL,
                     float roughness, float fluctuation,
-                    float sharpness, float sone, float psychoAnnoyance);
+                    float sharpness, float sone, float psychoAnnoyance,
+                    float impulsiveness, float tonality);
 
     void setPsychoVisible (bool v) noexcept
     {
@@ -31,6 +32,7 @@ public:
     {
         peakSPL_ = peakDBASPL_ = peakDBCSPL_ = kMin;
         roughness_ = fluctuation_ = sharpness_ = sone_ = psychoAnnoyance_ = 0.0f;
+        impulsiveness_ = tonality_ = 0.0f;
         holdVal_ = kMin;
         holdTimestampMs_ = 0.0;
         repaint();
@@ -52,6 +54,8 @@ private:
     float sharpness_        = 0.0f;
     float sone_             = 0.0f;
     float psychoAnnoyance_  = 0.0f;
+    float impulsiveness_    = 0.0f;
+    float tonality_         = 0.0f;
 
     bool  lightMode_        = false;
     bool  psychoVisible_    = true;
