@@ -178,15 +178,31 @@ if(APPLE AND TARGET SPLMeter_Standalone)
     )
 endif()
 
-# ViSQOL static library + required Apple frameworks — macOS desktop only
-if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    find_library(VISQOL_CORE_FOUNDATION  CoreFoundation       REQUIRED)
-    find_library(VISQOL_SECURITY         Security             REQUIRED)
-    find_library(VISQOL_SYSCONFIGURATION SystemConfiguration  REQUIRED)
-    target_link_libraries(SPLMeter PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/Vendor/visqol/lib/libvisqol_ffi.a
-        ${VISQOL_CORE_FOUNDATION}
-        ${VISQOL_SECURITY}
-        ${VISQOL_SYSCONFIGURATION}
-    )
+# ViSQOL static library — enabled when the pre-built lib is present in Vendor/
+#   macOS:   Vendor/visqol/lib/libvisqol_ffi.a
+#   Windows: Vendor/visqol/lib/visqol_ffi.lib
+if(WIN32)
+    set(_VISQOL_LIB "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/visqol/lib/visqol_ffi.lib")
+elseif(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(_VISQOL_LIB "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/visqol/lib/libvisqol_ffi.a")
+else()
+    set(_VISQOL_LIB "")
+endif()
+
+if(_VISQOL_LIB AND EXISTS "${_VISQOL_LIB}")
+    message(STATUS "ViSQOL enabled: ${_VISQOL_LIB}")
+    target_compile_definitions(SPLMeter PUBLIC SPLMETER_HAS_VISQOL=1)
+    target_link_libraries(SPLMeter PRIVATE "${_VISQOL_LIB}")
+    if(APPLE)
+        find_library(VISQOL_CORE_FOUNDATION  CoreFoundation       REQUIRED)
+        find_library(VISQOL_SECURITY         Security             REQUIRED)
+        find_library(VISQOL_SYSCONFIGURATION SystemConfiguration  REQUIRED)
+        target_link_libraries(SPLMeter PRIVATE
+            ${VISQOL_CORE_FOUNDATION}
+            ${VISQOL_SECURITY}
+            ${VISQOL_SYSCONFIGURATION}
+        )
+    endif()
+else()
+    message(STATUS "ViSQOL disabled (pre-built lib not found at ${_VISQOL_LIB})")
 endif()
