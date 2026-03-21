@@ -22,6 +22,17 @@ A professional Sound Pressure Level (SPL) meter built with JUCE, available as a 
 - Time-series **log plot** with per-series visibility toggles (Left y-axis: dB / dB(A) / dB(C))
 - Selectable psychoacoustic overlay on the right y-axis: Roughness, Fluctuation Strength, Sharpness, Specific Loudness, Psychoacoustic Annoyance
 
+### SoundDetective
+- ML-powered sound event detection; opened via the **Tools…** menu
+- **Apple platforms (macOS / iOS):** uses Apple SoundAnalysis framework for on-device neural classification
+- **All platforms:** optional user-supplied **TFLite model** (`.tflite`) loaded at runtime — supports any 1-D audio input model (e.g. YAMNet); auto-detects a matching `_labels.txt` file in the same directory; configurable model sample rate (default 16 kHz)
+- Falls back to a heuristic amplitude-onset detector when no ML framework or model is available
+- Configurable **minimum confidence threshold** (0.10 – 0.90)
+- Scrollable **event log** — timestamp, label, confidence for each detected event; auto-trims to 500 events
+- **Timeline markers** — detected events appear as labelled vertical markers on the log plot
+- **Clear** button resets both the event log and the timeline markers simultaneously
+- **Save Events CSV** export
+
 ### Spectrogram
 - Opened via the **Tools…** menu; floating window with configurable controls
 - **Frequency scale:** Log (default) or **Mel**
@@ -63,7 +74,8 @@ Accessible via the **Save…** button (popup menu):
 ### Analysis Tools
 Accessible via the **Tools…** button (popup menu):
 - **Spectrogram** — opens the spectrogram floating window (Log or Mel frequency scale)
-- **ViSQOL** *(macOS only)* — perceptual audio quality analysis (MOS-LQO + per-band NSIM)
+- **SoundDetective** — ML-powered sound event detection (Apple SoundAnalysis on Apple platforms; optional TFLite model on all platforms; heuristic fallback)
+- **ViSQOL** *(macOS / Windows when pre-built lib is present)* — perceptual audio quality analysis (MOS-LQO + per-band NSIM)
 - **Correction Filter** — load a frequency-response correction curve (.txt / .csv: Hz + dB pairs); applied as a linear-phase FIR filter before metering (configured in Settings)
 - **Graph Overlay** — load a reference curve and display it as a dashed blue line in the FFT view (configured in Settings)
 
@@ -111,7 +123,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 | Left y axis checkboxes | Visibility of dB SPL / dBA SPL / dBC SPL series |
 | Right y axis checkboxes | Psychoacoustic overlay: Roughness / Fluctuation / Sharpness / Specific Loudness / Annoyance |
 | Save… | Popup menu: Save CSV / Save WAV / Save Screenshot / Save All |
-| Tools… | Popup menu: Spectrogram / ViSQOL (macOS) |
+| Tools… | Popup menu: Spectrogram / SoundDetective / ViSQOL (macOS/Windows) |
 | Reset | Clear log and reset peak holds |
 | Clock | Live date/time (updates every second) |
 | Note field | Free-text annotation field (3 lines) |
@@ -122,7 +134,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ppkSPLmeter v2.1 — Real-Time Audio Signal Flow           │
+│                    ppkSPLmeter v2.5 — Real-Time Audio Signal Flow           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────┐     ┌──────────────────────┐
@@ -304,6 +316,19 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 ---
 
 ## Changelog
+
+### v2.5.0
+- **SoundDetective** — new ML sound event detection panel (via **Tools…** menu):
+  - Apple platforms use the on-device **Apple SoundAnalysis** neural classifier
+  - All platforms support loading a user-supplied **TFLite model** (`.tflite`) at runtime; auto-detects matching `_labels.txt`; configurable model sample rate
+  - Heuristic amplitude-onset fallback when no ML framework or model is available
+  - Configurable minimum confidence threshold; scrollable event log with timestamp, label, and confidence; auto-trims at 500 events
+  - **Timeline markers** — events appear as vertical markers on the log plot
+  - **Clear** button resets the event log and the timeline markers simultaneously
+  - **Save Events CSV** export
+- **TFLite cross-platform ML backend** — TensorFlow Lite 2.16.2 fetched and linked via CMake on all platforms; defines `SPLMETER_HAS_TFLITE`; model input window size adapted automatically from the tensor shape
+- **ViSQOL cross-platform** — CMake now detects `Vendor/visqol/lib/visqol_ffi.lib` on Windows and enables ViSQOL there too; compile definition changed from hard-coded `JUCE_MAC` to `SPLMETER_HAS_VISQOL` (with `|| JUCE_MAC` fallback for Xcode builds)
+- **Build fix** — AVFoundation and CoreMedia are now explicitly linked in the CMake build, fixing linker errors introduced by SoundDetective's Apple SoundAnalysis backend
 
 ### v2.4.0
 - **Psychoacoustic Annoyance** — real-time Zwicker & Fastl annoyance index (PA) added as a momentary readout in the meter bar and as a selectable trace on the right y-axis of the log plot; included in CSV export

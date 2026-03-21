@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
 
   # ---------------------------------------------------------------------------
@@ -22,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-macos
+          key: juce-8.0.7-tflite-2.16.2-noxnn-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -154,7 +157,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-noxnn-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -206,7 +209,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-linux
+          key: juce-8.0.7-tflite-2.16.2-noxnn-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
