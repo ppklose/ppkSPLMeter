@@ -163,6 +163,15 @@ if(SPLMETER_TFLITE)
     set(TFLITE_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
     set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 
+    # Abseil's check_cxx_compiler_flag(-msse4.1) returns true on arm64-apple-darwin
+    # because AppleClang accepts the flag syntactically, but actual compilation then
+    # fails with "unsupported option '-msse4.1' for target 'arm64-apple-darwin'".
+    # Pre-setting these cache vars to OFF prevents the flag from being applied.
+    if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        set(ABSL_HAVE_MSSE4_1 OFF CACHE INTERNAL "SSE4.1 not available on ARM64" FORCE)
+        set(ABSL_HAVE_MAES    OFF CACHE INTERNAL "AES-NI not available on ARM64"  FORCE)
+    endif()
+
     FetchContent_Declare(
         tensorflow_lite
         URL https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.16.2.tar.gz
