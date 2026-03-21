@@ -254,8 +254,15 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                     openWindow (spectrogramWindow,
                                 [this] { return std::make_unique<SpectrogramWindow> (audioProcessor); });
                 else if (result == 3)
+                {
                     openWindow (soundDetectiveWindow,
                                 [this] { return std::make_unique<SoundDetectiveWindow> (audioProcessor); });
+                    soundDetectiveWindow->onEventsCleared = [this]
+                    {
+                        allSoundEvents_.clear();
+                        log.setSoundEvents ({});
+                    };
+                }
 #if JUCE_MAC
                 else if (result == 2)
                 {

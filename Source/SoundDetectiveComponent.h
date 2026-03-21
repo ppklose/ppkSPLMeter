@@ -11,7 +11,8 @@ class SoundDetectiveWindow : public juce::DocumentWindow
     class Content : public juce::Component
     {
     public:
-        explicit Content (SPLMeterAudioProcessor& p) : processor (p)
+        explicit Content (SPLMeterAudioProcessor& p, std::function<void()> onClear = nullptr)
+            : processor (p), onClear_ (std::move (onClear))
         {
             // ---- Enable button ----
             enableButton.setClickingTogglesState (true);
@@ -72,6 +73,7 @@ class SoundDetectiveWindow : public juce::DocumentWindow
                 eventLog.clear();
                 processor.getSoundDetective().clearPendingEvents();
                 updateStatus();
+                if (onClear_) onClear_();
             };
             addAndMakeVisible (clearButton);
 
@@ -211,19 +213,22 @@ class SoundDetectiveWindow : public juce::DocumentWindow
 
         std::vector<SoundEvent>          events_;
         std::unique_ptr<juce::FileChooser> fileChooser;
+        std::function<void()>            onClear_;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Content)
     };
 
 public:
     //==========================================================================
+    std::function<void()> onEventsCleared;
+
     explicit SoundDetectiveWindow (SPLMeterAudioProcessor& p)
         : juce::DocumentWindow ("SoundDetective",
                                 juce::Colour (0xff1c1c1e),
                                 juce::DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (false);
-        auto* c = new Content (p);
+        auto* c = new Content (p, [this] { if (onEventsCleared) onEventsCleared(); });
         c->setSize (560, 400);
         setContentOwned (c, true);
         setResizable (true, false);

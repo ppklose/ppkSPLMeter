@@ -25,5 +25,7 @@
     <string>2025 Philipp Paul Klose Audio Engineering</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>SPLMeter needs microphone access to measure sound pressure levels.</string>
   </dict>
 </plist>

@@ -131,12 +131,18 @@ target_sources(SPLMeter PRIVATE
 if(APPLE)
     target_sources(SPLMeter PRIVATE Source/SoundDetectiveApple.mm)
     find_library(SOUND_ANALYSIS_FRAMEWORK SoundAnalysis)
+    find_library(AV_FOUNDATION_FRAMEWORK  AVFoundation  REQUIRED)
+    find_library(CORE_MEDIA_FRAMEWORK     CoreMedia     REQUIRED)
     if(SOUND_ANALYSIS_FRAMEWORK)
         target_link_libraries(SPLMeter PRIVATE ${SOUND_ANALYSIS_FRAMEWORK})
     else()
         # Weak-link so the binary still runs on older OS versions
         target_link_libraries(SPLMeter PRIVATE "-weak_framework SoundAnalysis")
     endif()
+    target_link_libraries(SPLMeter PRIVATE
+        ${AV_FOUNDATION_FRAMEWORK}
+        ${CORE_MEDIA_FRAMEWORK}
+    )
 endif()
 
 target_include_directories(SPLMeter PRIVATE
