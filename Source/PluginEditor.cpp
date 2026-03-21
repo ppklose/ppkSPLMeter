@@ -227,7 +227,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         juce::PopupMenu menu;
         menu.addItem (1, "Spectrogram");
         menu.addItem (3, "SoundDetective...");
-#if SPLMETER_HAS_VISQOL
+#if SPLMETER_HAS_VISQOL || JUCE_MAC
         menu.addItem (2, "ViSQOL");
 #endif
         menu.showMenuAsync (
@@ -263,7 +263,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                         log.setSoundEvents ({});
                     };
                 }
-#if SPLMETER_HAS_VISQOL
+#if SPLMETER_HAS_VISQOL || JUCE_MAC
                 else if (result == 2)
                 {
                     if (visqolWindow == nullptr)
@@ -467,7 +467,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     meter.setLightMode (light);
     log.setLightMode   (light);
 
-#if SPLMETER_HAS_VISQOL
+#if SPLMETER_HAS_VISQOL || JUCE_MAC
     if (visqolWindow != nullptr)
         visqolWindow->setLightMode (light);
 #endif
