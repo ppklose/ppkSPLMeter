@@ -7,6 +7,11 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # CMake 3.31 removed compatibility with cmake_minimum_required < 3.5.
+  # FP16 (a transitive dependency of XNNPACK inside TFLite) still declares
+  # cmake_minimum_required(VERSION 2.x).  Setting this env var tells every
+  # cmake subprocess (including ExternalProject sub-builds) to allow it.
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
 
@@ -25,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-noxnn-macos
+          key: juce-8.0.7-tflite-2.16.2-polmin-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -157,7 +162,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-noxnn-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-polmin-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -209,7 +214,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-noxnn-linux
+          key: juce-8.0.7-tflite-2.16.2-polmin-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release

@@ -162,9 +162,6 @@ if(SPLMETER_TFLITE)
 
     set(TFLITE_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
     set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
-    # XNNPACK pulls in FP16 via ExternalProject_Add with cmake_minimum_required(2.x),
-    # which CMake 3.31+ rejects. Disable XNNPACK — TFLite works without it.
-    set(TFLITE_ENABLE_XNNPACK  OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         tensorflow_lite
