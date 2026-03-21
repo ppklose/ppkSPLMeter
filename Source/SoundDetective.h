@@ -4,6 +4,10 @@
 #include <array>
 #include <deque>
 #include <functional>
+#include <memory>
+#if SPLMETER_HAS_TFLITE
+ #include "TFLiteDetector.h"
+#endif
 
 //==============================================================================
 struct SoundEvent
@@ -109,6 +113,65 @@ public:
     }
 
     //==========================================================================
+#if SPLMETER_HAS_TFLITE
+    /** Load a TFLite model. Briefly stops and restarts the detection thread. */
+    void loadTFLiteModel (const TFLiteDetector::Config& cfg, juce::String& err)
+    {
+        auto det = TFLiteDetector::create (cfg, err);
+        if (!det) return;
+
+        const bool wasEnabled = enabled_;
+        if (wasEnabled) setEnabled (false);
+
+        if (sampleRate_ > 0)
+        {
+            // Expand window to cover the model's full audio duration at app rate
+            const int minWin = (int) std::ceil (
+                det->windowSamples() * sampleRate_ / (double) det->modelSampleRate());
+            winSamples_ = std::max (winSamples_, minWin);
+        }
+        {
+            juce::SpinLock::ScopedLockType lock (tfliteLock_);
+            tfliteDetector_ = std::move (det);
+            tfliteWindow_.assign ((size_t) tfliteDetector_->windowSamples(), 0.0f);
+        }
+        tfliteResampler_.reset();
+
+        if (wasEnabled) setEnabled (true);
+    }
+
+    void clearTFLiteModel()
+    {
+        const bool wasEnabled = enabled_;
+        if (wasEnabled) setEnabled (false);
+        {
+            juce::SpinLock::ScopedLockType lock (tfliteLock_);
+            tfliteDetector_.reset();
+            tfliteWindow_.clear();
+        }
+        winSamples_ = std::max (1, (int)(sampleRate_ * 0.5));
+        if (wasEnabled) setEnabled (true);
+    }
+
+    bool hasTFLiteModel() const noexcept
+    {
+        juce::SpinLock::ScopedLockType lock (tfliteLock_);
+        return tfliteDetector_ != nullptr;
+    }
+
+    /** Returns a human-readable summary of the loaded model (GUI thread only). */
+    juce::String getTFLiteModelInfo() const noexcept
+    {
+        juce::SpinLock::ScopedLockType lock (tfliteLock_);
+        if (!tfliteDetector_) return {};
+        return tfliteDetector_->modelName()
+            + "  |  " + juce::String (tfliteDetector_->windowSamples())
+            + " smp @ " + juce::String (tfliteDetector_->modelSampleRate()) + " Hz"
+            + "  |  " + juce::String (tfliteDetector_->numClasses()) + " classes";
+    }
+#endif
+
+    //==========================================================================
     // Called on the audio thread — lock-free ring buffer write
     void pushSamples (const float* data, int numSamples) noexcept
     {
@@ -170,13 +233,39 @@ private:
             readPos_.store (end, std::memory_order_relaxed);
             framePos_ += hopSamples_;
 
-#if JUCE_MAC || JUCE_IOS
-            if (appleHandle_)
-                SoundDetectiveBridge::process (appleHandle_, window.data(),
-                                               winSamples_, framePos_);
-#else
-            classifyHeuristic (window.data(), winSamples_);
+            // TFLite takes priority when a model is loaded (all platforms)
+            bool ranTFLite = false;
+#if SPLMETER_HAS_TFLITE
+            {
+                std::shared_ptr<TFLiteDetector> det;
+                {
+                    juce::SpinLock::ScopedLockType lock (tfliteLock_);
+                    det = tfliteDetector_;
+                }
+                if (det)
+                {
+                    ranTFLite = true;
+                    tfliteResampler_.reset();
+                    tfliteResampler_.process (
+                        sampleRate_ / (double) det->modelSampleRate(),
+                        window.data(), tfliteWindow_.data(),
+                        det->windowSamples());
+                    det->classify (tfliteWindow_.data(), threshold_,
+                        [this] (const juce::String& label, float conf)
+                        { postEvent (label, conf); });
+                }
+            }
 #endif
+            if (!ranTFLite)
+            {
+#if JUCE_MAC || JUCE_IOS
+                if (appleHandle_)
+                    SoundDetectiveBridge::process (appleHandle_, window.data(),
+                                                   winSamples_, framePos_);
+#else
+                classifyHeuristic (window.data(), winSamples_);
+#endif
+            }
         }
     }
 
@@ -348,6 +437,13 @@ private:
 
 #if JUCE_MAC || JUCE_IOS
     void* appleHandle_ = nullptr;
+#endif
+
+#if SPLMETER_HAS_TFLITE
+    mutable juce::SpinLock              tfliteLock_;
+    std::shared_ptr<TFLiteDetector>     tfliteDetector_;
+    juce::LagrangeInterpolator          tfliteResampler_;
+    std::vector<float>                  tfliteWindow_;
 #endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SoundDetective)

@@ -90,6 +90,43 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             statusLabel.setText ("Heuristic mode (no ML framework available on this platform)",
                                  juce::dontSendNotification);
 #endif
+
+#if SPLMETER_HAS_TFLITE
+            // ---- TFLite model row ----
+            srLabel_.setText ("SR:", juce::dontSendNotification);
+            srLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+            srLabel_.setColour (juce::Label::textColourId, juce::Colour (0xffaaaaaa));
+            srLabel_.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (srLabel_);
+
+            srField_.setText ("16000", juce::dontSendNotification);
+            srField_.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (12.0f)));
+            srField_.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff2c2c2e));
+            srField_.setColour (juce::TextEditor::textColourId,       juce::Colour (0xffdddddd));
+            srField_.setColour (juce::TextEditor::outlineColourId,    juce::Colour (0xff48484a));
+            srField_.setInputRestrictions (6, "0123456789");
+            addAndMakeVisible (srField_);
+
+            loadModelButton_.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+            loadModelButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            loadModelButton_.onClick = [this] { doLoadModel(); };
+            addAndMakeVisible (loadModelButton_);
+
+            clearModelButton_.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+            clearModelButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            clearModelButton_.onClick = [this]
+            {
+                processor.getSoundDetective().clearTFLiteModel();
+                updateModelInfo();
+            };
+            addAndMakeVisible (clearModelButton_);
+
+            modelInfoLabel_.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+            modelInfoLabel_.setColour (juce::Label::textColourId, juce::Colour (0xff8e8e93));
+            modelInfoLabel_.setJustificationType (juce::Justification::centredLeft);
+            addAndMakeVisible (modelInfoLabel_);
+            updateModelInfo();
+#endif
         }
 
         ~Content() override
@@ -134,6 +171,20 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             thresholdSlider.setBounds (row1.removeFromLeft (220));
             r.removeFromTop (4);
 
+#if SPLMETER_HAS_TFLITE
+            // TFLite model row
+            auto row2 = r.removeFromTop (24).reduced (0, 2);
+            loadModelButton_.setBounds  (row2.removeFromLeft (120));
+            row2.removeFromLeft (6);
+            srLabel_.setBounds          (row2.removeFromLeft (24));
+            srField_.setBounds          (row2.removeFromLeft (52));
+            row2.removeFromLeft (4);
+            clearModelButton_.setBounds (row2.removeFromLeft (24));
+            row2.removeFromLeft (6);
+            modelInfoLabel_.setBounds   (row2);
+            r.removeFromTop (4);
+#endif
+
             // Bottom row
             auto rowB = r.removeFromBottom (28).reduced (0, 2);
             clearButton.setBounds   (rowB.removeFromLeft (100));
@@ -170,6 +221,57 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             eventLog.setText (text);
             eventLog.moveCaretToEnd();
         }
+
+#if SPLMETER_HAS_TFLITE
+        void doLoadModel()
+        {
+            fileChooser = std::make_unique<juce::FileChooser> (
+                "Load TFLite model",
+                juce::File::getSpecialLocation (juce::File::userDesktopDirectory),
+                "*.tflite");
+            fileChooser->launchAsync (
+                juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [this] (const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    if (f == juce::File{}) return;
+
+                    TFLiteDetector::Config cfg;
+                    cfg.modelPath      = f.getFullPathName();
+                    cfg.modelSampleRate = srField_.getText().getIntValue();
+                    if (cfg.modelSampleRate < 8000 || cfg.modelSampleRate > 96000)
+                        cfg.modelSampleRate = 16000;
+                    cfg.modelSampleRate = juce::jlimit (8000, 96000, cfg.modelSampleRate);
+
+                    juce::String err;
+                    processor.getSoundDetective().loadTFLiteModel (cfg, err);
+
+                    if (err.isNotEmpty())
+                        modelInfoLabel_.setText ("Error: " + err, juce::dontSendNotification);
+                    else
+                        updateModelInfo();
+                });
+        }
+
+        void updateModelInfo()
+        {
+            const auto info = processor.getSoundDetective().getTFLiteModelInfo();
+            if (info.isEmpty())
+            {
+               #if JUCE_MAC || JUCE_IOS
+                modelInfoLabel_.setText ("No model  —  Apple SoundAnalysis active",
+                                         juce::dontSendNotification);
+               #else
+                modelInfoLabel_.setText ("No model  —  Heuristic mode active",
+                                         juce::dontSendNotification);
+               #endif
+            }
+            else
+            {
+                modelInfoLabel_.setText (info, juce::dontSendNotification);
+            }
+        }
+#endif
 
         void doSaveCsv()
         {
@@ -211,9 +313,17 @@ class SoundDetectiveWindow : public juce::DocumentWindow
         juce::TextButton  clearButton     { "Clear" };
         juce::TextButton  saveCsvButton   { "Save Events CSV..." };
 
-        std::vector<SoundEvent>          events_;
+        std::vector<SoundEvent>            events_;
         std::unique_ptr<juce::FileChooser> fileChooser;
-        std::function<void()>            onClear_;
+        std::function<void()>              onClear_;
+
+#if SPLMETER_HAS_TFLITE
+        juce::TextButton  loadModelButton_  { "Load TFLite Model..." };
+        juce::TextButton  clearModelButton_ { "x" };
+        juce::Label       srLabel_;
+        juce::TextEditor  srField_;
+        juce::Label       modelInfoLabel_;
+#endif
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Content)
     };
@@ -229,7 +339,11 @@ public:
     {
         setUsingNativeTitleBar (false);
         auto* c = new Content (p, [this] { if (onEventsCleared) onEventsCleared(); });
+#if SPLMETER_HAS_TFLITE
+        c->setSize (560, 432);
+#else
         c->setSize (560, 400);
+#endif
         setContentOwned (c, true);
         setResizable (true, false);
     }

@@ -18,11 +18,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache JUCE
+      - name: Cache deps (JUCE + TFLite)
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-macos
+          key: juce-8.0.7-tflite-2.16.2-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -150,11 +150,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache JUCE + ASIO SDK
+      - name: Cache deps (JUCE + ASIO + TFLite)
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-asio-2.3.3-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -202,11 +202,11 @@ jobs:
             libfreetype-dev libfontconfig1-dev \
             libgtk-3-dev
 
-      - name: Cache JUCE
+      - name: Cache deps (JUCE + TFLite)
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-linux
+          key: juce-8.0.7-tflite-2.16.2-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release

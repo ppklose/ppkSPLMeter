@@ -145,6 +145,38 @@ if(APPLE)
     )
 endif()
 
+# ---------------------------------------------------------------------------
+# TFLite cross-platform ML backend
+# Fetches only the tensorflow/lite sub-tree via SOURCE_SUBDIR.
+# First build is slow (~5–10 min); subsequent builds use cached deps.
+# ---------------------------------------------------------------------------
+option(SPLMETER_TFLITE "Enable TFLite ML inference backend (all platforms)" ON)
+
+if(SPLMETER_TFLITE)
+    message(STATUS "TFLite enabled — fetching TensorFlow Lite 2.16.2 …")
+
+    # Suppress warnings from TFLite's own headers
+    if(MSVC)
+        add_compile_options(/wd4996 /wd4244 /wd4267)
+    endif()
+
+    set(TFLITE_ENABLE_INSTALL  OFF CACHE BOOL "" FORCE)
+    set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        tensorflow_lite
+        URL https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.16.2.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR  "tensorflow/lite"
+    )
+    FetchContent_MakeAvailable(tensorflow_lite)
+
+    target_compile_definitions(SPLMeter PUBLIC SPLMETER_HAS_TFLITE=1)
+    target_link_libraries(SPLMeter PRIVATE tensorflow-lite)
+    # TF root must be on the include path so <tensorflow/lite/c/c_api.h> resolves
+    target_include_directories(SPLMeter SYSTEM PRIVATE ${tensorflow_lite_SOURCE_DIR})
+endif()
+
 target_include_directories(SPLMeter PRIVATE
     Source
     $<$<BOOL:${ASIO_SDK_DIR}>:${ASIO_SDK_DIR}>
