@@ -218,6 +218,26 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         peakHoldCounterRaw = peakHoldCounterA = peakHoldCounterC = 0;
     }
 
+    // DAW transport sync
+    const bool isDawSyncEnabled = dawSync_.load();
+    bool dawPlaying = true;
+    if (isDawSyncEnabled)
+    {
+        if (auto* ph = getPlayHead())
+        {
+            if (auto pos = ph->getPosition())
+                dawPlaying = pos->getIsPlaying();
+            else
+                dawPlaying = false;
+        }
+        else
+        {
+            dawPlaying = false;
+        }
+        dawIsPlaying_.store (dawPlaying);
+    }
+    const bool skipMetering = paused_.load() || (isDawSyncEnabled && !dawPlaying);
+
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
 
@@ -336,60 +356,63 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         // Feed SoundDetective (single sample at a time — batched internally)
         soundDetective_.pushSamples (&raw, 1);
 
-        roughnessEst.processSample (raw);
-        atomicRoughness.store (roughnessEst.getRoughness());
-
-        sharpnessEst.processSample (raw);
-        atomicSharpness.store (sharpnessEst.getSharpness());
-
-        fluctuationEst.processSample (raw);
-        atomicFluctuation.store (fluctuationEst.getFluctuation());
-
-        impulsivenessEst.processSample (raw);
-        atomicImpulsiveness.store (impulsivenessEst.getImpulsiveness());
-
-        tonalityEst.processSample (raw);
-        atomicTonality.store (tonalityEst.getTonality());
-
-        // Peak tracking
-        auto trackPeak = [&] (float absVal, float& peak, float& peakHeld, int& counter)
+        if (!skipMetering)
         {
-            if (absVal >= peak) { peak = absVal; counter = peakHoldSamples; }
-            else if (counter > 0) { --counter; }
-            else { peak *= 0.9999f; }
-            peakHeld = peak;
-        };
-        trackPeak (std::fabs (raw),     rawPeak, rawPeakHeld, peakHoldCounterRaw);
-        trackPeak (std::fabs (aSample), aPeak,   aPeakHeld,   peakHoldCounterA);
-        trackPeak (std::fabs (cSample), cPeak,   cPeakHeld,   peakHoldCounterC);
+            roughnessEst.processSample (raw);
+            atomicRoughness.store (roughnessEst.getRoughness());
 
-        // Exponential RMS smoothing (IEC 61672 FAST/SLOW time weighting)
-        rmsSmoothedRaw += rmsAlpha * (static_cast<double> (raw)     * raw     - rmsSmoothedRaw);
-        rmsSmoothedA   += rmsAlpha * (static_cast<double> (aSample) * aSample - rmsSmoothedA);
-        rmsSmoothedC   += rmsAlpha * (static_cast<double> (cSample) * cSample - rmsSmoothedC);
+            sharpnessEst.processSample (raw);
+            atomicSharpness.store (sharpnessEst.getSharpness());
 
-        if (++logSampleCounter >= logIntervalSamples)
-        {
-            logSampleCounter = 0;
-            float rawRms = static_cast<float> (std::sqrt (rmsSmoothedRaw));
-            float aRms   = static_cast<float> (std::sqrt (rmsSmoothedA));
-            float cRms   = static_cast<float> (std::sqrt (rmsSmoothedC));
+            fluctuationEst.processSample (raw);
+            atomicFluctuation.store (fluctuationEst.getFluctuation());
 
-            atomicPeakSPL.store    (linearToDBFS (rawPeakHeld) + calOffset);
-            atomicPeakDBASPL.store (linearToDBFS (aPeakHeld)   + calOffset);
-            atomicPeakDBCSPL.store (linearToDBFS (cPeakHeld)   + calOffset);
-            atomicRMSSPL.store     (linearToDBFS (rawRms)      + calOffset);
-            atomicRMSDBASPL.store  (linearToDBFS (aRms)        + calOffset);
-            atomicRMSDBCSPL.store  (linearToDBFS (cRms)        + calOffset);
+            impulsivenessEst.processSample (raw);
+            atomicImpulsiveness.store (impulsivenessEst.getImpulsiveness());
 
-            float dbaDB    = linearToDBFS (aRms) + calOffset;
-            float soneSnap = (dbaDB >= 40.0f) ? std::pow (2.0f, (dbaDB - 40.0f) / 10.0f)
-                           : (dbaDB < 2.0f ? 0.0f : std::pow (dbaDB / 40.0f, 2.642f));
-            pushLogEntry (rawPeakHeld, aPeakHeld, cPeakHeld, rawRms, aRms, cRms, calOffset,
-                          roughnessEst.getRoughness(), fluctuationEst.getFluctuation(),
-                          sharpnessEst.getSharpness(), soneSnap,
-                          impulsivenessEst.getImpulsiveness(), tonalityEst.getTonality());
-            pruneLog (logDurationS);
+            tonalityEst.processSample (raw);
+            atomicTonality.store (tonalityEst.getTonality());
+
+            // Peak tracking
+            auto trackPeak = [&] (float absVal, float& peak, float& peakHeld, int& counter)
+            {
+                if (absVal >= peak) { peak = absVal; counter = peakHoldSamples; }
+                else if (counter > 0) { --counter; }
+                else { peak *= 0.9999f; }
+                peakHeld = peak;
+            };
+            trackPeak (std::fabs (raw),     rawPeak, rawPeakHeld, peakHoldCounterRaw);
+            trackPeak (std::fabs (aSample), aPeak,   aPeakHeld,   peakHoldCounterA);
+            trackPeak (std::fabs (cSample), cPeak,   cPeakHeld,   peakHoldCounterC);
+
+            // Exponential RMS smoothing (IEC 61672 FAST/SLOW time weighting)
+            rmsSmoothedRaw += rmsAlpha * (static_cast<double> (raw)     * raw     - rmsSmoothedRaw);
+            rmsSmoothedA   += rmsAlpha * (static_cast<double> (aSample) * aSample - rmsSmoothedA);
+            rmsSmoothedC   += rmsAlpha * (static_cast<double> (cSample) * cSample - rmsSmoothedC);
+
+            if (++logSampleCounter >= logIntervalSamples)
+            {
+                logSampleCounter = 0;
+                float rawRms = static_cast<float> (std::sqrt (rmsSmoothedRaw));
+                float aRms   = static_cast<float> (std::sqrt (rmsSmoothedA));
+                float cRms   = static_cast<float> (std::sqrt (rmsSmoothedC));
+
+                atomicPeakSPL.store    (linearToDBFS (rawPeakHeld) + calOffset);
+                atomicPeakDBASPL.store (linearToDBFS (aPeakHeld)   + calOffset);
+                atomicPeakDBCSPL.store (linearToDBFS (cPeakHeld)   + calOffset);
+                atomicRMSSPL.store     (linearToDBFS (rawRms)      + calOffset);
+                atomicRMSDBASPL.store  (linearToDBFS (aRms)        + calOffset);
+                atomicRMSDBCSPL.store  (linearToDBFS (cRms)        + calOffset);
+
+                float dbaDB    = linearToDBFS (aRms) + calOffset;
+                float soneSnap = (dbaDB >= 40.0f) ? std::pow (2.0f, (dbaDB - 40.0f) / 10.0f)
+                               : (dbaDB < 2.0f ? 0.0f : std::pow (dbaDB / 40.0f, 2.642f));
+                pushLogEntry (rawPeakHeld, aPeakHeld, cPeakHeld, rawRms, aRms, cRms, calOffset,
+                              roughnessEst.getRoughness(), fluctuationEst.getFluctuation(),
+                              sharpnessEst.getSharpness(), soneSnap,
+                              impulsivenessEst.getImpulsiveness(), tonalityEst.getTonality());
+                pruneLog (logDurationS);
+            }
         }
     }
 
@@ -415,7 +438,7 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
                                             float impulsiveness, float tonality)
 {
     LogEntry e;
-    e.timestampMs  = juce::Time::currentTimeMillis();
+    e.timestampMs  = juce::Time::currentTimeMillis() - pauseOffsetMs_.load (std::memory_order_relaxed);
     e.peakSPL      = linearToDBFS (rawPk)  + calOffset;
     e.peakDBASPL   = linearToDBFS (aPk)    + calOffset;
     e.peakDBCSPL   = linearToDBFS (cPk)    + calOffset;

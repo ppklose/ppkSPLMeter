@@ -137,6 +137,21 @@ public:
     double getSampleRate() const noexcept { return currentSampleRate; }
 
     //==========================================================================
+    // Pause / DAW sync
+    void setPaused (bool p) noexcept
+    {
+        if (p && !paused_.load())
+            pauseStartMs_ = juce::Time::currentTimeMillis();
+        else if (!p && paused_.load())
+            pauseOffsetMs_.fetch_add (juce::Time::currentTimeMillis() - pauseStartMs_);
+        paused_.store (p);
+    }
+    bool isPaused      ()       const noexcept { return paused_.load(); }
+    void setDawSync    (bool d) noexcept { dawSync_.store (d); }
+    bool isDawSync     ()       const noexcept { return dawSync_.load(); }
+    bool isDawPlaying  ()       const noexcept { return dawIsPlaying_.load(); }
+
+    //==========================================================================
     // Monitor (pass-through)
     void setMonitorEnabled (bool e) noexcept { monitorEnabled.store (e); }
     bool isMonitorEnabled  ()       noexcept { return monitorEnabled.load(); }
@@ -256,6 +271,12 @@ private:
     std::atomic<int>                   fftWritePos_ { 0 };
     std::atomic<int>                   spectroReadPos_ { 0 };
 
+
+    std::atomic<bool>         paused_         { false };
+    std::atomic<bool>         dawSync_        { false };
+    std::atomic<bool>         dawIsPlaying_   { true };
+    juce::int64               pauseStartMs_   { 0 };      // set on GUI thread only
+    std::atomic<juce::int64>  pauseOffsetMs_  { 0 };      // cumulative pause duration
 
     // File playback
     juce::AudioFormatManager                         formatManager;

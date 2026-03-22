@@ -79,6 +79,53 @@ public:
 };
 
 //==============================================================================
+// Pause / Play toggle button — draws ⏸ (two bars) or ▶ (triangle) depending on toggle state
+class PauseButton : public juce::Button
+{
+public:
+    PauseButton() : juce::Button ("Pause")
+    {
+        setClickingTogglesState (true);
+        setToggleState (false, juce::dontSendNotification);  // false = running
+    }
+
+    void paintButton (juce::Graphics& g, bool isMouseOver, bool /*isButtonDown*/) override
+    {
+        const bool paused = getToggleState();
+        const auto b = getLocalBounds().toFloat();
+
+        const juce::Colour bg = isMouseOver ? juce::Colour (0xff4a4a4e) : juce::Colour (0xff3a3a3c);
+        g.setColour (bg);
+        g.fillRoundedRectangle (b, 4.0f);
+
+        const float cx = b.getCentreX();
+        const float cy = b.getCentreY();
+        const float h  = b.getHeight() * 0.42f;
+        const float w  = h * 0.38f;
+
+        g.setColour (juce::Colours::white);
+
+        if (paused)
+        {
+            // Play triangle
+            juce::Path tri;
+            tri.startNewSubPath (cx - w * 0.8f, cy - h * 0.6f);
+            tri.lineTo          (cx + w * 1.2f, cy);
+            tri.lineTo          (cx - w * 0.8f, cy + h * 0.6f);
+            tri.closeSubPath();
+            g.fillPath (tri);
+        }
+        else
+        {
+            // Pause: two vertical bars
+            const float gap = w * 0.5f;
+            g.fillRoundedRectangle (cx - gap - w, cy - h * 0.5f, w, h, 2.0f);
+            g.fillRoundedRectangle (cx + gap,      cy - h * 0.5f, w, h, 2.0f);
+        }
+    }
+};
+
+//==============================================================================
 class SPLMeterAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                       private juce::Timer
 {
@@ -88,6 +135,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void timerCallback() override;
@@ -113,6 +161,9 @@ private:
     juce::TextButton basicModeButton { "Advanced Mode" };
     juce::TextButton fastButton      { "FAST" };
     juce::TextButton slowButton      { "SLOW" };
+    juce::Label      holdTimeLabel;
+    PauseButton      pauseButton;
+    juce::ToggleButton dawSyncToggle { "DAW sync" };
     bool basicMode_      = true;
     int  extendedHeight_ = 900;
     MonitorButton    monitorButton;

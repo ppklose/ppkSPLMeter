@@ -137,6 +137,44 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     setupTimeBtn (slowButton, 1);
     updateTimeWeightButtons();
 
+    holdTimeLabel.setFont (juce::Font (juce::FontOptions().withHeight (15.0f)));
+    holdTimeLabel.setJustificationType (juce::Justification::centredRight);
+    holdTimeLabel.setColour (juce::Label::textColourId,          juce::Colour (0xffaeaeb2));
+    holdTimeLabel.setColour (juce::Label::outlineWhenEditingColourId, juce::Colour (0xff5ac8fa));
+    holdTimeLabel.setEditable (true, true);
+    holdTimeLabel.setTooltip ("Peak hold time (s) - click to edit");
+    holdTimeLabel.onTextChange = [this]
+    {
+        float val = holdTimeLabel.getText()
+                        .upToFirstOccurrenceOf (" s", false, false)
+                        .trim()
+                        .getFloatValue();
+        val = juce::jlimit (0.1f, 5.0f, val);
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (
+                audioProcessor.apvts.getParameter ("peakHoldTime")))
+            rp->setValueNotifyingHost (rp->convertTo0to1 (val));
+    };
+    addAndMakeVisible (holdTimeLabel);
+
+    // Pause / Play button
+    pauseButton.setTooltip ("Pause or resume measurement");
+    pauseButton.onClick = [this]
+    {
+        audioProcessor.setPaused (pauseButton.getToggleState());
+    };
+    addAndMakeVisible (pauseButton);
+
+    // DAW sync toggle — only relevant for AU / VST3 (not Standalone)
+    const bool isPlugin = (audioProcessor.wrapperType != juce::AudioProcessor::wrapperType_Standalone);
+    dawSyncToggle.setColour (juce::ToggleButton::textColourId, juce::Colours::white);
+    dawSyncToggle.setTooltip ("Sync measurement to DAW transport: only logs when DAW is playing");
+    dawSyncToggle.onClick = [this]
+    {
+        audioProcessor.setDawSync (dawSyncToggle.getToggleState());
+    };
+    dawSyncToggle.setVisible (isPlugin);
+    addAndMakeVisible (dawSyncToggle);
+
     // Monitor (mute) button - default OFF (muted)
     monitorButton.onClick = [this]
     {
@@ -379,6 +417,8 @@ void SPLMeterAudioProcessorEditor::resized()
     settingsButton.setBounds  (tbL (160));
     saveMenuButton.setBounds  (tbL (140));
     toolsMenuButton.setBounds (tbL (140));
+    pauseButton.setBounds     (tbL (50));
+    dawSyncToggle.setBounds   (tbL (110));
     resetButton.setBounds     (tbR (160));
     basicModeButton.setBounds (tbR (160));
     {
@@ -408,6 +448,8 @@ void SPLMeterAudioProcessorEditor::resized()
     const int btnY      = meterArea.getY() + 20 + (40 - btnH) / 2;
     slowButton.setBounds (meterArea.getRight() - btnMargin - btnW,       btnY, btnW, btnH);
     fastButton.setBounds (meterArea.getRight() - btnMargin - btnW * 2 - 4, btnY, btnW, btnH);
+    const int holdLabelW = 130;
+    holdTimeLabel.setBounds (fastButton.getX() - holdLabelW - 4, btnY, holdLabelW, btnH);
 
     area.removeFromBottom (24);   // reserve strip for build time
 
@@ -443,6 +485,8 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     };
     for (auto* b : { &settingsButton, &toolsMenuButton, &saveMenuButton })
         styleBtn (*b);
+
+    dawSyncToggle.setColour (juce::ToggleButton::textColourId, textOff);
 
     monitorGainSlider.setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
     monitorGainSlider.setColour (juce::Slider::thumbColourId,       juce::Colour (0xff5ac8fa));
@@ -605,6 +649,19 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
 }
 
 //==============================================================================
+bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (key.getTextCharacter() == 'm' || key.getTextCharacter() == 'M')
+    {
+        const bool nowPaused = !audioProcessor.isPaused();
+        audioProcessor.setPaused (nowPaused);
+        pauseButton.setToggleState (nowPaused, juce::dontSendNotification);
+        return true;
+    }
+    return false;
+}
+
+//==============================================================================
 void SPLMeterAudioProcessorEditor::timerCallback()
 {
     meter.setValues (audioProcessor.getPeakSPL(),
@@ -619,6 +676,8 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getTonality());
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
+    if (!holdTimeLabel.isBeingEdited())
+        holdTimeLabel.setText ("Hold time: " + juce::String (holdSecs, 1) + " s", juce::dontSendNotification);
 
     // Update clock label once per second
     {
@@ -632,6 +691,15 @@ void SPLMeterAudioProcessorEditor::timerCallback()
     }
 
     updateTimeWeightButtons();
+
+    // Pause button: keep toggle state in sync with processor (may be changed externally)
+    pauseButton.setToggleState (audioProcessor.isPaused(), juce::dontSendNotification);
+
+    // DAW sync indicator: dim the dawSyncToggle when synced but DAW is stopped
+    if (audioProcessor.isDawSync())
+        dawSyncToggle.setAlpha (audioProcessor.isDawPlaying() ? 1.0f : 0.5f);
+    else
+        dawSyncToggle.setAlpha (1.0f);
 
     // Apply correction file metadata (Sens Factor → calOffset, SERNO → noteField)
     if (audioProcessor.correctionMetaReady_.exchange (false))
