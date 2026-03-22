@@ -36,7 +36,10 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release
+        # Build only the targets we ship; avoids building unreachable abseil
+        # targets (e.g. absl_random_internal_randen_hwaes_impl) that pick up
+        # -msse4.1 and fail on arm64-apple-darwin.
+        run: cmake --build build --config Release --target SPLMeter_Standalone SPLMeter_VST3 SPLMeter_AU
 
       - name: Import Developer ID certificate
         env:

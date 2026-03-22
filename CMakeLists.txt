@@ -174,10 +174,15 @@ if(SPLMETER_TFLITE)
     # Abseil's check_cxx_compiler_flag(-msse4.1) returns true on arm64-apple-darwin
     # because AppleClang accepts the flag syntactically, but actual compilation then
     # fails with "unsupported option '-msse4.1' for target 'arm64-apple-darwin'".
-    # Pre-setting these cache vars to OFF prevents the flag from being applied.
+    # Pre-setting these cache vars (BOOL, matching check_cxx_compiler_flag output
+    # type) to OFF prevents the flag from being applied.  We also block
+    # ABSL_RANDOM_RANDEN_HWAES_IMPL_COPTS directly so randen_hwaes_impl never
+    # receives -msse4.1/-maes regardless of how cmake evaluates the checks above.
     if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-        set(ABSL_HAVE_MSSE4_1 OFF CACHE INTERNAL "SSE4.1 not available on ARM64" FORCE)
-        set(ABSL_HAVE_MAES    OFF CACHE INTERNAL "AES-NI not available on ARM64"  FORCE)
+        set(ABSL_HAVE_MSSE4_1 OFF CACHE BOOL "SSE4.1 not available on ARM64" FORCE)
+        set(ABSL_HAVE_MAES    OFF CACHE BOOL "AES-NI not available on ARM64"  FORCE)
+        set(ABSL_RANDOM_RANDEN_HWAES_IMPL_COPTS "" CACHE STRING
+            "No x86 HWAES flags on ARM64" FORCE)
     endif()
 
     FetchContent_Declare(
