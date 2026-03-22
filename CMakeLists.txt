@@ -163,6 +163,14 @@ if(SPLMETER_TFLITE)
     set(TFLITE_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
     set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 
+    # CMake 3.31 tightened the git update step in ExternalProject: it now runs
+    # "git rev-parse HEAD" before fetching, which fails for shallow clones created
+    # by TFLite's deprecated FetchContent_Populate() calls (farmhash, eigen, …).
+    # Setting this cache var tells CMake to skip the update step for all
+    # FetchContent dependencies — the download/clone still happens on first run.
+    set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
+        "Skip git update step (avoids CMake 3.31 shallow-clone bug in TFLite deps)" FORCE)
+
     # Abseil's check_cxx_compiler_flag(-msse4.1) returns true on arm64-apple-darwin
     # because AppleClang accepts the flag syntactically, but actual compilation then
     # fails with "unsupported option '-msse4.1' for target 'arm64-apple-darwin'".
