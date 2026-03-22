@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-polmin-abslarm-disconn-macos
+          key: juce-8.0.7-tflite-2.16.2-polmin-abslarm-jucedisconn-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -165,7 +165,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-polmin-disconn-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-polmin-jucedisconn-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -217,7 +217,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-8.0.7-tflite-2.16.2-polmin-disconn-linux
+          key: juce-8.0.7-tflite-2.16.2-polmin-jucedisconn-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release

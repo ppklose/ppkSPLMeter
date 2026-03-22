@@ -163,13 +163,17 @@ if(SPLMETER_TFLITE)
     set(TFLITE_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
     set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 
-    # CMake 3.31 tightened the git update step in ExternalProject: it now runs
-    # "git rev-parse HEAD" before fetching, which fails for shallow clones created
-    # by TFLite's deprecated FetchContent_Populate() calls (farmhash, eigen, …).
-    # Setting this cache var tells CMake to skip the update step for all
-    # FetchContent dependencies — the download/clone still happens on first run.
-    set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
-        "Skip git update step (avoids CMake 3.31 shallow-clone bug in TFLite deps)" FORCE)
+    # CMake 3.31 tightened the git update step: it now runs "git rev-parse HEAD"
+    # before updating, which fails for shallow clones that lack a real .git repo.
+    # JUCE is fetched as a GIT_SHALLOW clone and is the content that triggers this.
+    # We set per-content DISCONNECTED only for JUCE (already declared above) so its
+    # update step is skipped on re-runs.  TFLite's own sub-deps (farmhash, eigen,
+    # abseil-cpp) are URL/archive downloads — they have no git update step — so
+    # setting the flag globally would cause TFLite's OverridableFetchContent to
+    # mistake an empty placeholder dir for a populated source and fail its license
+    # file check.
+    set(FETCHCONTENT_UPDATE_DISCONNECTED_JUCE ON CACHE BOOL
+        "Skip git update for JUCE shallow clone (avoids CMake 3.31 git rev-parse failure)" FORCE)
 
     # Abseil's check_cxx_compiler_flag(-msse4.1) returns true on arm64-apple-darwin
     # because AppleClang accepts the flag syntactically, but actual compilation then
