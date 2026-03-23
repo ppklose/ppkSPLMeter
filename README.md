@@ -317,7 +317,7 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
-### v2.6.0
+### [v2.6.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.6.0)
 - **FFT adjustable frequency range** — lower and upper frequency limits (10–20 kHz) configurable via right-click on the FFT button in Settings; displayed range and axis labels update accordingly; persisted in APVTS and JSON settings
 - **Pause timeline markers** — pausing and resuming analysis leaves a yellow dashed vertical line on the timeline with a flag showing the pause duration (e.g. "5s pause"); clock label now shows the wall-clock time of the last recorded data point and freezes while paused
 - **Input channel rename** — right-click any channel button in Settings to rename it; names are saved with the project state
