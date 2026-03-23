@@ -135,9 +135,13 @@ namespace SoundDetectiveBridge
             impl->observer = [[SoundDetObserver alloc] initWithImpl: impl];
 
             NSError* error = nil;
-            SNClassifySoundRequest* req = [[SNClassifySoundRequest alloc]
-                initWithClassifierIdentifier: SNClassifierIdentifierVersion1
-                                       error: &error];
+            SNClassifySoundRequest* req = nil;
+            if (@available (macOS 12.0, iOS 15.0, *))
+            {
+                req = [[SNClassifySoundRequest alloc]
+                    initWithClassifierIdentifier: SNClassifierIdentifierVersion1
+                                           error: &error];
+            }
             if (!req || error) { delete impl; return nullptr; }
 
             if (@available (macOS 12.0, iOS 15.0, *))

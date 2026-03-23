@@ -2,7 +2,7 @@
 
 A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows standalone app and as VST3 / AU plugin.
 
-![SPLMeter v2.4 screenshot](screenShot.png)
+![SPLMeter v2.6 screenshot](screenShot.png)
 
 ---
 
@@ -134,7 +134,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ppkSPLmeter v2.5 — Real-Time Audio Signal Flow           │
+│                    ppkSPLmeter v2.6 — Real-Time Audio Signal Flow           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────┐     ┌──────────────────────┐
@@ -316,6 +316,15 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 ---
 
 ## Changelog
+
+### v2.6.0
+- **FFT adjustable frequency range** — lower and upper frequency limits (10–20 kHz) configurable via right-click on the FFT button in Settings; displayed range and axis labels update accordingly; persisted in APVTS and JSON settings
+- **Pause timeline markers** — pausing and resuming analysis leaves a yellow dashed vertical line on the timeline with a flag showing the pause duration (e.g. "5s pause"); clock label now shows the wall-clock time of the last recorded data point and freezes while paused
+- **Input channel rename** — right-click any channel button in Settings to rename it; names are saved with the project state
+- **Ex-/Import menu** — Save Settings… and Load Settings… options export/import all parameters, UI state, channel names, and MIDI CCs as a human-readable JSON file
+- **Last-used folder memory** — all file pickers remember the last-used folder
+- **Maximize button** — standalone window now has a third title-bar button for full-screen zoom
+- **MIT license** added
 
 ### v2.5.0
 - **SoundDetective** — new ML sound event detection panel (via **Tools…** menu):

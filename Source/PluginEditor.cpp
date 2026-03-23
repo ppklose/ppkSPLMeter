@@ -423,7 +423,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.5.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.6.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -703,7 +703,7 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             // Root
             juce::var root (new juce::DynamicObject());
             auto* r = root.getDynamicObject();
-            r->setProperty ("version", juce::var ("2.5"));
+            r->setProperty ("version", juce::var ("2.6"));
 
             // UI state
             juce::var ui (new juce::DynamicObject());
