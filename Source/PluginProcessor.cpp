@@ -85,6 +85,14 @@ SPLMeterAudioProcessor::createParameterLayout()
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "graphOverlay2Enabled", "Graph Overlay 2", false));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "fftLowerFreq", "FFT Lower Freq (Hz)",
+        juce::NormalisableRange<float> (10.0f, 20000.0f, 1.0f, 0.4f), 20.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "fftUpperFreq", "FFT Upper Freq (Hz)",
+        juce::NormalisableRange<float> (100.0f, 20000.0f, 1.0f, 0.4f), 20000.0f));
+
     for (int i = 0; i < 32; ++i)
         params.push_back (std::make_unique<juce::AudioParameterBool> (
             "channelMute" + juce::String (i),
@@ -438,7 +446,9 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
                                             float impulsiveness, float tonality)
 {
     LogEntry e;
-    e.timestampMs  = juce::Time::currentTimeMillis() - pauseOffsetMs_.load (std::memory_order_relaxed);
+    const juce::int64 nowMs = juce::Time::currentTimeMillis();
+    e.timestampMs  = nowMs - pauseOffsetMs_.load (std::memory_order_relaxed);
+    lastEntryWallMs_.store (nowMs, std::memory_order_relaxed);
     e.peakSPL      = linearToDBFS (rawPk)  + calOffset;
     e.peakDBASPL   = linearToDBFS (aPk)    + calOffset;
     e.peakDBCSPL   = linearToDBFS (cPk)    + calOffset;
@@ -517,6 +527,9 @@ void SPLMeterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     for (int i = 0; i < kNumMidiParams; ++i)
         xml->setAttribute (juce::String ("midiCC_") + kMidiParamIds[i], midiCC[i].load());
+    for (int i = 0; i < 32; ++i)
+        if (channelNames_[i].isNotEmpty())
+            xml->setAttribute ("channelName_" + juce::String (i), channelNames_[i]);
     copyXmlToBinary (*xml, destData);
 }
 
@@ -527,6 +540,8 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
     {
         for (int i = 0; i < kNumMidiParams; ++i)
             midiCC[i].store (xml->getIntAttribute (juce::String ("midiCC_") + kMidiParamIds[i], -1));
+        for (int i = 0; i < 32; ++i)
+            channelNames_[i] = xml->getStringAttribute ("channelName_" + juce::String (i), "");
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
     }
 }

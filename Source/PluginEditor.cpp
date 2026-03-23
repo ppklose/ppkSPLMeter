@@ -9,6 +9,24 @@ static juce::PropertiesFile::Options splmeterPropsOptions()
     return o;
 }
 
+static juce::File splmeterLastFolder()
+{
+    juce::PropertiesFile prefs (splmeterPropsOptions());
+    const auto path = prefs.getValue ("lastUsedFolder");
+    const juce::File f (path);
+    return (path.isNotEmpty() && f.isDirectory())
+               ? f
+               : juce::File::getSpecialLocation (juce::File::userDesktopDirectory);
+}
+
+static void splmeterSaveLastFolder (const juce::File& fileOrFolder)
+{
+    juce::PropertiesFile prefs (splmeterPropsOptions());
+    prefs.setValue ("lastUsedFolder",
+        (fileOrFolder.isDirectory() ? fileOrFolder
+                                    : fileOrFolder.getParentDirectory()).getFullPathName());
+}
+
 void SPLMeterAudioProcessorEditor::saveSettings()
 {
     juce::PropertiesFile prefs (splmeterPropsOptions());
@@ -59,6 +77,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (3, "Save Screenshot...");
         menu.addSeparator();
         menu.addItem (4, "Save All...");
+        menu.addSeparator();
+        menu.addItem (5, "Save Settings...");
+        menu.addItem (6, "Load Settings...");
         menu.showMenuAsync (
             juce::PopupMenu::Options().withTargetComponent (saveMenuButton),
             [this] (int result)
@@ -69,6 +90,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                     case 2: doSaveWav(); break;
                     case 3: doSaveJpg(); break;
                     case 4: doSaveAll(); break;
+                    case 5: doSaveSettingsJson(); break;
+                    case 6: doLoadSettingsJson(); break;
                     default: break;
                 }
             });
@@ -98,8 +121,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     fileButton.onClick = [this]
     {
         fileChooser = std::make_unique<juce::FileChooser> (
-            "Open audio file",
-            juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+            "Open audio file", splmeterLastFolder(),
             "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
         fileChooser->launchAsync (
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -107,6 +129,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             {
                 auto file = fc.getResult();
                 if (file == juce::File{}) return;
+                splmeterSaveLastFolder (file);
                 audioProcessor.loadFile (file);
                 fileMode = true;
                 updateModeButtons();
@@ -160,7 +183,10 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     pauseButton.setTooltip ("Pause or resume measurement");
     pauseButton.onClick = [this]
     {
-        audioProcessor.setPaused (pauseButton.getToggleState());
+        const bool nowPaused = pauseButton.getToggleState();
+        if (nowPaused) recordPauseStart();
+        else           recordPauseEnd();
+        audioProcessor.setPaused (nowPaused);
     };
     addAndMakeVisible (pauseButton);
 
@@ -556,7 +582,7 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
     if (rows.empty()) return;
     fileChooser = std::make_unique<juce::FileChooser> (
         "Save log as CSV",
-        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.csv"),
+        splmeterLastFolder().getChildFile ("SPLMeter.csv"),
         "*.csv");
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
@@ -564,6 +590,7 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
+            splmeterSaveLastFolder (file);
             juce::FileOutputStream stream (file);
             if (!stream.openedOk()) return;
             stream.setPosition (0); stream.truncate();
@@ -575,7 +602,7 @@ void SPLMeterAudioProcessorEditor::doSaveWav()
 {
     fileChooser = std::make_unique<juce::FileChooser> (
         "Save recording as WAV",
-        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.wav"),
+        splmeterLastFolder().getChildFile ("SPLMeter.wav"),
         "*.wav");
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
@@ -583,6 +610,7 @@ void SPLMeterAudioProcessorEditor::doSaveWav()
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
+            splmeterSaveLastFolder (file);
             audioProcessor.saveWavToFile (file);
         });
 }
@@ -592,7 +620,7 @@ void SPLMeterAudioProcessorEditor::doSaveJpg()
     auto snapshot = createComponentSnapshot (getLocalBounds());
     fileChooser = std::make_unique<juce::FileChooser> (
         "Save snapshot as JPEG",
-        juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("SPLMeter.jpg"),
+        splmeterLastFolder().getChildFile ("SPLMeter.jpg"),
         "*.jpg");
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
@@ -600,6 +628,7 @@ void SPLMeterAudioProcessorEditor::doSaveJpg()
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
+            splmeterSaveLastFolder (file);
             juce::FileOutputStream stream (file);
             if (!stream.openedOk()) return;
             stream.setPosition (0); stream.truncate();
@@ -614,14 +643,14 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
     auto rows     = audioProcessor.copyLog();
     auto snapshot = createComponentSnapshot (getLocalBounds());
     fileChooser = std::make_unique<juce::FileChooser> (
-        "Choose destination folder",
-        juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
+        "Choose destination folder", splmeterLastFolder());
     fileChooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
         [this, rows, snapshot] (const juce::FileChooser& fc)
         {
             auto folder = fc.getResult();
             if (folder == juce::File{} || !folder.isDirectory()) return;
+            splmeterSaveLastFolder (folder);
 
             auto ts   = juce::Time::getCurrentTime().formatted ("%Y-%m-%d_%H-%M-%S");
             auto base = folder.getChildFile ("SPLMeter_" + ts);
@@ -648,12 +677,210 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
         });
 }
 
+void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
+{
+    settingsJsonChooser_ = std::make_unique<juce::FileChooser> (
+        "Save Settings",
+        splmeterLastFolder().getChildFile ("SPLMeter_settings.json"),
+        "*.json");
+
+    settingsJsonChooser_->launchAsync (
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [this] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return;
+            if (file.getFileExtension().isEmpty())
+                file = file.withFileExtension ("json");
+
+            auto getRaw = [&] (const char* id)
+            {
+                return audioProcessor.apvts.getRawParameterValue (id)->load();
+            };
+            auto getBool = [&] (const char* id) -> bool { return getRaw (id) > 0.5f; };
+            auto getInt  = [&] (const char* id) -> int  { return static_cast<int> (getRaw (id)); };
+
+            // Root
+            juce::var root (new juce::DynamicObject());
+            auto* r = root.getDynamicObject();
+            r->setProperty ("version", juce::var ("2.5"));
+
+            // UI state
+            juce::var ui (new juce::DynamicObject());
+            ui.getDynamicObject()->setProperty ("basicMode", basicMode_);
+            ui.getDynamicObject()->setProperty ("lightMode",  lightMode_);
+            ui.getDynamicObject()->setProperty ("noteField",  noteField.getText());
+            r->setProperty ("ui", ui);
+
+            // APVTS scalar parameters
+            juce::var params (new juce::DynamicObject());
+            auto* p = params.getDynamicObject();
+            p->setProperty ("calOffset",           getRaw ("calOffset"));
+            p->setProperty ("peakHoldTime",         getRaw ("peakHoldTime"));
+            p->setProperty ("splTimeWeight",         getInt ("splTimeWeight"));
+            p->setProperty ("logDuration",           getRaw ("logDuration"));
+            p->setProperty ("fftGain",               getRaw ("fftGain"));
+            p->setProperty ("fftSmoothing",          getRaw ("fftSmoothing"));
+            p->setProperty ("monitorGain",           getRaw ("monitorGain"));
+            p->setProperty ("spectroGain",           getRaw ("spectroGain"));
+            p->setProperty ("fftPeakHold",           getBool ("fftPeakHold"));
+            p->setProperty ("fftDisplayMode",        getInt  ("fftDisplayMode"));
+            p->setProperty ("fftBandRes",            getInt  ("fftBandRes"));
+            p->setProperty ("fftWindowType",         getInt  ("fftWindowType"));
+            p->setProperty ("fftOverlap",            getInt  ("fftOverlap"));
+            p->setProperty ("fftRTAMode",            getBool ("fftRTAMode"));
+            p->setProperty ("bandpassEnabled",       getBool ("bandpassEnabled"));
+            p->setProperty ("line94Enabled",         getBool ("line94Enabled"));
+            p->setProperty ("correctionEnabled",     getBool ("correctionEnabled"));
+            p->setProperty ("graphOverlayEnabled",   getBool ("graphOverlayEnabled"));
+            p->setProperty ("graphOverlay2Enabled",  getBool ("graphOverlay2Enabled"));
+            p->setProperty ("fftLowerFreq",          getRaw ("fftLowerFreq"));
+            p->setProperty ("fftUpperFreq",          getRaw ("fftUpperFreq"));
+            r->setProperty ("parameters", params);
+
+            // Channel mutes & names
+            juce::Array<juce::var> mutes, names;
+            for (int i = 0; i < 32; ++i)
+            {
+                bool muted = audioProcessor.apvts.getRawParameterValue (
+                    "channelMute" + juce::String (i))->load() > 0.5f;
+                mutes.add (juce::var (muted));
+                names.add (juce::var (audioProcessor.getChannelName (i)));
+            }
+            r->setProperty ("channelMutes", juce::var (mutes));
+            r->setProperty ("channelNames", juce::var (names));
+
+            // MIDI CCs
+            juce::var midi (new juce::DynamicObject());
+            for (int i = 0; i < SPLMeterAudioProcessor::kNumMidiParams; ++i)
+                midi.getDynamicObject()->setProperty (
+                    SPLMeterAudioProcessor::kMidiParamIds[i],
+                    audioProcessor.getMidiCC (i));
+            r->setProperty ("midiCC", midi);
+
+            splmeterSaveLastFolder (file);
+            file.replaceWithText (juce::JSON::toString (root, true));
+        });
+}
+
+void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
+{
+    settingsJsonChooser_ = std::make_unique<juce::FileChooser> (
+        "Load Settings", splmeterLastFolder(), "*.json");
+
+    settingsJsonChooser_->launchAsync (
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this] (const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{}) return;
+
+            auto parsed = juce::JSON::parse (file.loadFileAsString());
+            if (!parsed.isObject()) return;
+
+            // Helper: set an APVTS parameter by denormalised value
+            auto setParam = [&] (const juce::String& id, float denorm)
+            {
+                if (auto* param = audioProcessor.apvts.getParameter (id))
+                    param->setValueNotifyingHost (param->convertTo0to1 (denorm));
+            };
+
+            // UI state
+            if (auto* ui = parsed["ui"].getDynamicObject())
+            {
+                noteField.setText (ui->getProperty ("noteField").toString(), false);
+                applyTheme (static_cast<bool> (ui->getProperty ("lightMode")));
+                basicModeButton.setToggleState (
+                    static_cast<bool> (ui->getProperty ("basicMode")),
+                    juce::sendNotification);
+            }
+
+            // APVTS scalar parameters
+            if (auto* p = parsed["parameters"].getDynamicObject())
+            {
+                auto applyF = [&] (const char* id)
+                {
+                    if (p->hasProperty (id))
+                        setParam (id, (float)(double) p->getProperty (id));
+                };
+                auto applyI = [&] (const char* id)
+                {
+                    if (p->hasProperty (id))
+                        setParam (id, (float)(int) p->getProperty (id));
+                };
+                auto applyB = [&] (const char* id)
+                {
+                    if (p->hasProperty (id))
+                        setParam (id, static_cast<bool> (p->getProperty (id)) ? 1.0f : 0.0f);
+                };
+
+                applyF ("calOffset");         applyF ("peakHoldTime");
+                applyI ("splTimeWeight");      applyF ("logDuration");
+                applyF ("fftGain");            applyF ("fftSmoothing");
+                applyF ("monitorGain");        applyF ("spectroGain");
+                applyB ("fftPeakHold");        applyI ("fftDisplayMode");
+                applyI ("fftBandRes");         applyI ("fftWindowType");
+                applyI ("fftOverlap");         applyB ("fftRTAMode");
+                applyB ("bandpassEnabled");    applyB ("line94Enabled");
+                applyB ("correctionEnabled");  applyB ("graphOverlayEnabled");
+                applyB ("graphOverlay2Enabled");
+                applyF ("fftLowerFreq");       applyF ("fftUpperFreq");
+            }
+
+            // Channel mutes
+            if (auto* mutes = parsed["channelMutes"].getArray())
+                for (int i = 0; i < juce::jmin (32, mutes->size()); ++i)
+                    setParam ("channelMute" + juce::String (i),
+                              static_cast<bool> ((*mutes)[i]) ? 1.0f : 0.0f);
+
+            // Channel names
+            if (auto* names = parsed["channelNames"].getArray())
+                for (int i = 0; i < juce::jmin (32, names->size()); ++i)
+                    audioProcessor.setChannelName (i, (*names)[i].toString());
+
+            // MIDI CCs
+            if (auto* midi = parsed["midiCC"].getDynamicObject())
+                for (int i = 0; i < SPLMeterAudioProcessor::kNumMidiParams; ++i)
+                {
+                    const char* id = SPLMeterAudioProcessor::kMidiParamIds[i];
+                    if (midi->hasProperty (id))
+                        audioProcessor.setMidiCC (i, (int) midi->getProperty (id));
+                }
+
+            // Refresh settings window channel names if open
+            if (settingsWindow != nullptr)
+                if (auto* sc = dynamic_cast<SettingsComponent*> (
+                        settingsWindow->getContentComponent()))
+                    sc->refreshChannelNames();
+
+            splmeterSaveLastFolder (file);
+            updateTimeWeightButtons();
+            saveSettings();  // persist to disk
+        });
+}
+
 //==============================================================================
+void SPLMeterAudioProcessorEditor::recordPauseStart()
+{
+    pendingPauseWallMs_    = juce::Time::currentTimeMillis();
+    pendingPauseAnalysisMs_ = pendingPauseWallMs_ - audioProcessor.getPauseOffsetMs();
+}
+
+void SPLMeterAudioProcessorEditor::recordPauseEnd()
+{
+    if (pendingPauseWallMs_ == 0) return;
+    const juce::int64 dur = juce::Time::currentTimeMillis() - pendingPauseWallMs_;
+    pauseEvents_.push_back (LogComponent::PauseEvent { pendingPauseAnalysisMs_, dur });
+    pendingPauseWallMs_ = 0;
+}
+
 bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
     if (key.getTextCharacter() == 'm' || key.getTextCharacter() == 'M')
     {
         const bool nowPaused = !audioProcessor.isPaused();
+        if (nowPaused) recordPauseStart();
+        else           recordPauseEnd();
         audioProcessor.setPaused (nowPaused);
         pauseButton.setToggleState (nowPaused, juce::dontSendNotification);
         return true;
@@ -679,13 +906,14 @@ void SPLMeterAudioProcessorEditor::timerCallback()
     if (!holdTimeLabel.isBeingEdited())
         holdTimeLabel.setText ("Hold time: " + juce::String (holdSecs, 1) + " s", juce::dontSendNotification);
 
-    // Update clock label once per second
+    // Update clock label — show wall-clock time of last recorded data point
     {
-        auto now = juce::Time::getCurrentTime();
-        if (now.getSeconds() != lastClockSecond_)
+        const juce::int64 wallMs = audioProcessor.getLastEntryWallMs();
+        const auto t = wallMs > 0 ? juce::Time (wallMs) : juce::Time::getCurrentTime();
+        if (t.getSeconds() != lastClockSecond_)
         {
-            lastClockSecond_ = now.getSeconds();
-            clockLabel.setText (now.toString (true, true, true, false),
+            lastClockSecond_ = t.getSeconds();
+            clockLabel.setText (t.toString (true, true, true, false),
                                 juce::dontSendNotification);
         }
     }
@@ -723,6 +951,17 @@ void SPLMeterAudioProcessorEditor::timerCallback()
             if (soundDetectiveWindow != nullptr && soundDetectiveWindow->isVisible())
                 soundDetectiveWindow->addEvents (newEvents);
         }
+    }
+
+    // Pass pause events to log (trim those older than the visible window)
+    {
+        const float logDuration = audioProcessor.apvts.getRawParameterValue ("logDuration")->load();
+        const juce::int64 nowAnalysis = juce::Time::currentTimeMillis() - audioProcessor.getPauseOffsetMs();
+        const juce::int64 cutoff = nowAnalysis - static_cast<juce::int64> (logDuration * 1000.0f);
+        pauseEvents_.erase (std::remove_if (pauseEvents_.begin(), pauseEvents_.end(),
+            [cutoff] (const LogComponent::PauseEvent& e) { return e.startMs < cutoff; }),
+            pauseEvents_.end());
+        log.setPauseEvents (pauseEvents_);
     }
 
     // Auto-return to Real Time when file playback finishes

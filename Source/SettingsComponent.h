@@ -3,11 +3,28 @@
 #include "PluginProcessor.h"
 
 //==============================================================================
-// Custom channel mute button: shows label with red X + strikethrough when muted
+// Custom channel mute button: shows label with red X + strikethrough when muted.
+// Double-click to rename inline.
 class ChannelMuteButton : public juce::Button
 {
 public:
-    ChannelMuteButton() : juce::Button ("") { setClickingTogglesState (true); }
+    std::function<void(const juce::String&)> onNameChanged;
+
+    ChannelMuteButton() : juce::Button ("")
+    {
+        setClickingTogglesState (true);
+
+        editor_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+        editor_.setColour (juce::TextEditor::backgroundColourId,     juce::Colour (0xff2a2a2c));
+        editor_.setColour (juce::TextEditor::textColourId,           juce::Colours::white);
+        editor_.setColour (juce::TextEditor::outlineColourId,        juce::Colour (0xff5ac8fa));
+        editor_.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff5ac8fa));
+        editor_.setJustification (juce::Justification::centred);
+        editor_.setReturnKeyStartsNewLine (false);
+        editor_.onReturnKey = [this] { commitEdit(); };
+        editor_.onFocusLost = [this] { commitEdit(); };
+        addChildComponent (editor_);  // starts hidden; addAndMakeVisible would override setVisible(false)
+    }
 
     void paintButton (juce::Graphics& g, bool isMouseOver, bool /*isButtonDown*/) override
     {
@@ -18,17 +35,20 @@ public:
         g.setColour (isMouseOver ? juce::Colour (0xff4a4a4e) : juce::Colour (0xff3a3a3c));
         g.fillRoundedRectangle (b, 4.0f);
 
-        // Label text
+        if (editor_.isVisible())
+            return; // TextEditor paints itself on top
+
+        const juce::String displayText = getButtonText();
         const juce::Colour textCol = muted ? juce::Colour (0xffff453a) : juce::Colours::white;
         g.setColour (textCol);
         const juce::Font font (juce::FontOptions().withHeight (13.0f));
         g.setFont (font);
-        g.drawText (getButtonText(), b.toNearestInt(), juce::Justification::centred, false);
+        g.drawText (displayText, b.toNearestInt(), juce::Justification::centred, false);
 
         if (muted)
         {
             // Strikethrough across the label text
-            const float textW = font.getStringWidthFloat (getButtonText());
+            const float textW = font.getStringWidthFloat (displayText);
             const float textX = b.getCentreX() - textW * 0.5f;
             const float midY  = b.getCentreY();
             g.setColour (juce::Colour (0xffff453a));
@@ -40,6 +60,95 @@ public:
             g.drawLine (b.getRight() - m, b.getY() + m, b.getX() + m, b.getBottom() - m, 1.5f);
         }
     }
+
+    void resized() override
+    {
+        editor_.setBounds (getLocalBounds().reduced (2));
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isRightButtonDown())
+        {
+            editor_.setText (getButtonText(), false);
+            editor_.setVisible (true);
+            editor_.grabKeyboardFocus();
+            editor_.selectAll();
+            repaint();
+        }
+        else
+        {
+            juce::Button::mouseDown (e);
+        }
+    }
+
+private:
+    void commitEdit()
+    {
+        if (!editor_.isVisible()) return;
+        editor_.setVisible (false);
+        const auto text = editor_.getText().trim();
+        if (text.isNotEmpty())
+            setButtonText (text);
+        if (onNameChanged)
+            onNameChanged (getButtonText());
+        repaint();
+    }
+
+    juce::TextEditor editor_;
+};
+
+//==============================================================================
+// Small panel shown in a CallOutBox when the FFT button is right-clicked
+class FftRangePanel  : public juce::Component
+{
+public:
+    explicit FftRangePanel (SPLMeterAudioProcessor& p)
+    {
+        auto setupSlider = [this] (juce::Slider& s, juce::Label& l, const juce::String& title)
+        {
+            s.setSliderStyle (juce::Slider::LinearHorizontal);
+            s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 20);
+            s.setTextValueSuffix (" Hz");
+            s.setColour (juce::Slider::trackColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::thumbColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::textBoxTextColourId,    juce::Colours::white);
+            s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            l.setText (title, juce::dontSendNotification);
+            l.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+            l.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+            l.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (s);
+            addAndMakeVisible (l);
+        };
+
+        setupSlider (lowerSlider_, lowerLabel_, "Lower");
+        setupSlider (upperSlider_, upperLabel_, "Upper");
+
+        lowerAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftLowerFreq", lowerSlider_);
+        upperAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftUpperFreq", upperSlider_);
+
+        setSize (300, 76);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8, 6);
+        auto row1 = b.removeFromTop (28);
+        b.removeFromTop (4);
+        auto row2 = b.removeFromTop (28);
+        lowerLabel_.setBounds (row1.removeFromLeft (52));
+        lowerSlider_.setBounds (row1);
+        upperLabel_.setBounds (row2.removeFromLeft (52));
+        upperSlider_.setBounds (row2);
+    }
+
+private:
+    juce::Slider lowerSlider_, upperSlider_;
+    juce::Label  lowerLabel_, upperLabel_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowerAttach_, upperAttach_;
 };
 
 //==============================================================================
@@ -76,9 +185,10 @@ public:
         setupKnob (fftGainSlider,    fftGainLabel,    "FFT Gain");
         setupKnob (fftSmoothSlider,  fftSmoothLabel,  "FFT Smooth");
 
-        calSlider.addMouseListener     (this, false);
-        holdSlider.addMouseListener    (this, false);
-        fftGainSlider.addMouseListener (this, false);
+        calSlider.addMouseListener       (this, false);
+        holdSlider.addMouseListener      (this, false);
+        fftGainSlider.addMouseListener   (this, false);
+        fftEnableButton.addMouseListener (this, false);
         holdSlider.setTooltip ("Hold time in seconds");
         fftSmoothSlider.setTooltip ("Spectral smoothing (0 = off, 0.95 = heavy)");
 
@@ -252,14 +362,15 @@ public:
         correctionLoadButton.onClick = [this, &p]
         {
             corrFileChooser_ = std::make_unique<juce::FileChooser> (
-                "Load correction filter", juce::File{}, "*.txt;*.csv");
+                "Load correction filter", lastUsedFolder(), "*.txt;*.csv");
             corrFileChooser_->launchAsync (
                 juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [&p] (const juce::FileChooser& fc)
                 {
                     auto file = fc.getResult();
-                    if (file != juce::File{})
-                        p.loadCorrectionFilter (file);
+                    if (file == juce::File{}) return;
+                    saveLastUsedFolder (file);
+                    p.loadCorrectionFilter (file);
                 });
         };
         addAndMakeVisible (correctionLoadButton);
@@ -289,14 +400,15 @@ public:
         graphOverlayLoadButton.onClick = [this, &p]
         {
             graphOverlayFileChooser_ = std::make_unique<juce::FileChooser> (
-                "Load Graph Overlay 1", juce::File{}, "*.txt;*.csv");
+                "Load Graph Overlay 1", lastUsedFolder(), "*.txt;*.csv");
             graphOverlayFileChooser_->launchAsync (
                 juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [&p] (const juce::FileChooser& fc)
                 {
                     auto file = fc.getResult();
-                    if (file != juce::File{})
-                        p.loadGraphOverlay (file);
+                    if (file == juce::File{}) return;
+                    saveLastUsedFolder (file);
+                    p.loadGraphOverlay (file);
                 });
         };
         addAndMakeVisible (graphOverlayLoadButton);
@@ -326,14 +438,15 @@ public:
         graphOverlay2LoadButton.onClick = [this, &p]
         {
             graphOverlay2FileChooser_ = std::make_unique<juce::FileChooser> (
-                "Load Graph Overlay 2", juce::File{}, "*.txt;*.csv");
+                "Load Graph Overlay 2", lastUsedFolder(), "*.txt;*.csv");
             graphOverlay2FileChooser_->launchAsync (
                 juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [&p] (const juce::FileChooser& fc)
                 {
                     auto file = fc.getResult();
-                    if (file != juce::File{})
-                        p.loadGraphOverlay2 (file);
+                    if (file == juce::File{}) return;
+                    saveLastUsedFolder (file);
+                    p.loadGraphOverlay2 (file);
                 });
         };
         addAndMakeVisible (graphOverlay2LoadButton);
@@ -346,12 +459,16 @@ public:
         // Channel mute checkboxes IN01..IN32
         for (int i = 0; i < 32; ++i)
         {
-            channelMuteButtons[i].setButtonText ("IN" + juce::String (i + 1).paddedLeft ('0', 2));
-            channelMuteButtons[i].setTooltip ("Mute input channel " + juce::String (i + 1));
+            channelMuteButtons[i].setButtonText (p.getChannelName (i));
+            channelMuteButtons[i].setTooltip ("Mute input channel " + juce::String (i + 1) + " — double-click to rename");
             channelMuteButtons[i].onClick = [this, &p, i]
             {
                 auto* param = p.apvts.getParameter ("channelMute" + juce::String (i));
                 param->setValueNotifyingHost (channelMuteButtons[i].getToggleState() ? 1.0f : 0.0f);
+            };
+            channelMuteButtons[i].onNameChanged = [&p, i] (const juce::String& name)
+            {
+                p.setChannelName (i, name);
             };
             addAndMakeVisible (channelMuteButtons[i]);
         }
@@ -384,7 +501,7 @@ public:
         setupSectionLabel (sectionGeneralLabel,  "GENERAL");
         setupSectionLabel (sectionFftLabel,       "FFT");
         setupSectionLabel (sectionAnalysisLabel,  "ANALYSIS");
-        setupSectionLabel (sectionChannelsLabel,  "INPUT CHANNELS");
+        setupSectionLabel (sectionChannelsLabel,  "INPUT CHANNELS  (right click to rename)");
         addAndMakeVisible (sectionGeneralLabel);
         addAndMakeVisible (sectionFftLabel);
         addAndMakeVisible (sectionAnalysisLabel);
@@ -533,6 +650,16 @@ public:
     {
         if (!e.mods.isRightButtonDown()) return;
 
+        if (e.eventComponent == &fftEnableButton)
+        {
+            auto panel = std::make_unique<FftRangePanel> (processor);
+            juce::CallOutBox::launchAsynchronously (
+                std::move (panel),
+                fftEnableButton.getScreenBounds(),
+                nullptr);
+            return;
+        }
+
         int paramIdx = -1;
         if      (e.eventComponent == &calSlider)     paramIdx = 0;
         else if (e.eventComponent == &holdSlider)    paramIdx = 1;
@@ -550,6 +677,37 @@ public:
                 if      (result == 1) processor.startMidiLearn (paramIdx);
                 else if (result == 2) processor.clearMidiCC (paramIdx);
             });
+    }
+
+    void refreshChannelNames()
+    {
+        for (int i = 0; i < 32; ++i)
+            channelMuteButtons[i].setButtonText (processor.getChannelName (i));
+    }
+
+    static juce::File lastUsedFolder()
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName     = "SPLMeter";
+        o.filenameSuffix      = "settings";
+        o.osxLibrarySubFolder = "Application Support";
+        juce::PropertiesFile prefs (o);
+        const auto path = prefs.getValue ("lastUsedFolder");
+        const juce::File f (path);
+        return (path.isNotEmpty() && f.isDirectory())
+                   ? f : juce::File::getSpecialLocation (juce::File::userDesktopDirectory);
+    }
+
+    static void saveLastUsedFolder (const juce::File& fileOrFolder)
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName     = "SPLMeter";
+        o.filenameSuffix      = "settings";
+        o.osxLibrarySubFolder = "Application Support";
+        juce::PropertiesFile prefs (o);
+        prefs.setValue ("lastUsedFolder",
+            (fileOrFolder.isDirectory() ? fileOrFolder
+                                        : fileOrFolder.getParentDirectory()).getFullPathName());
     }
 
 private:
@@ -756,7 +914,7 @@ private:
     juce::TextButton ovlp50Button { "50%" };
     juce::TextButton ovlp75Button { "75%" };
 
-    juce::TextButton fftEnableButton  { "FFT" };
+    juce::TextButton fftEnableButton  { "FFT (right click for f limits)" };
     juce::TextButton lightModeButton  { "Light Mode" };
     juce::TextButton bandpassButton   { "20-20k BP" };
     juce::TextButton line94Button     { "94 dB Line" };

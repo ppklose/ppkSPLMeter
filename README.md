@@ -409,4 +409,4 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## License
 
-© Philipp Paul Klose. All rights reserved.
+MIT License — © 2026 Philipp Paul Klose. See [LICENSE](LICENSE) for the full text.

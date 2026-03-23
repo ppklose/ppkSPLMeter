@@ -150,6 +150,8 @@ public:
     void setDawSync    (bool d) noexcept { dawSync_.store (d); }
     bool isDawSync     ()       const noexcept { return dawSync_.load(); }
     bool isDawPlaying  ()       const noexcept { return dawIsPlaying_.load(); }
+    juce::int64 getPauseOffsetMs    () const noexcept { return pauseOffsetMs_.load(); }
+    juce::int64 getLastEntryWallMs  () const noexcept { return lastEntryWallMs_.load(); }
 
     //==========================================================================
     // Monitor (pass-through)
@@ -209,8 +211,24 @@ public:
     void startMidiLearn  (int paramIndex) noexcept { midiLearnParamIndex.store (paramIndex); }
     void cancelMidiLearn ()               noexcept { midiLearnParamIndex.store (-1); }
     void clearMidiCC     (int paramIndex) noexcept { midiCC[paramIndex].store (-1); }
+    void setMidiCC       (int paramIndex, int cc) noexcept { midiCC[paramIndex].store (cc); }
     int  getMidiCC       (int paramIndex) const noexcept { return midiCC[paramIndex].load(); }
     bool isMidiLearning  (int paramIndex) const noexcept { return midiLearnParamIndex.load() == paramIndex; }
+
+    //==========================================================================
+    // Channel names (UI only, not used in audio thread)
+    juce::String getChannelName (int ch) const
+    {
+        jassert (ch >= 0 && ch < 32);
+        if (channelNames_[ch].isNotEmpty())
+            return channelNames_[ch];
+        return "IN" + juce::String (ch + 1).paddedLeft ('0', 2);
+    }
+    void setChannelName (int ch, const juce::String& name)
+    {
+        jassert (ch >= 0 && ch < 32);
+        channelNames_[ch] = name;
+    }
 
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
@@ -272,6 +290,7 @@ private:
     std::atomic<int>                   spectroReadPos_ { 0 };
 
 
+    std::atomic<juce::int64>  lastEntryWallMs_ { 0 };
     std::atomic<bool>         paused_         { false };
     std::atomic<bool>         dawSync_        { false };
     std::atomic<bool>         dawIsPlaying_   { true };
@@ -311,6 +330,8 @@ private:
     std::atomic<bool>                       graphOverlay2Loaded_ { false };
     juce::String                            graphOverlay2FileName_;
     std::vector<std::pair<float,float>>     graphOverlay2Points_; // (freq, spl)
+
+    juce::String channelNames_[32];
 
     // WAV circular buffer: stereo (Ch0 + Ch1), sized to logDuration at prepareToPlay
     std::vector<float>  wavCircBuf_[2];

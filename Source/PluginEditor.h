@@ -146,6 +146,8 @@ private:
     void doSaveWav();
     void doSaveJpg();
     void doSaveAll();
+    void doSaveSettingsJson();
+    void doLoadSettingsJson();
     static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&);
 
     SPLMeterAudioProcessor& audioProcessor;
@@ -157,7 +159,7 @@ private:
     juce::TextButton settingsButton      { "Settings..." };
     juce::TextButton toolsMenuButton    { "Tools..." };
     juce::TextButton resetButton     { "Reset" };
-    juce::TextButton saveMenuButton  { "Save..." };
+    juce::TextButton saveMenuButton  { "Ex-/Import..." };
     juce::TextButton basicModeButton { "Advanced Mode" };
     juce::TextButton fastButton      { "FAST" };
     juce::TextButton slowButton      { "SLOW" };
@@ -174,7 +176,15 @@ private:
     juce::TextButton fileButton     { "File" };
     bool fileMode = false;
     void updateModeButtons();
+
+    // Pause event tracking for timeline markers
+    std::vector<LogComponent::PauseEvent> pauseEvents_;
+    juce::int64 pendingPauseWallMs_     = 0;
+    juce::int64 pendingPauseAnalysisMs_ = 0;
+    void recordPauseStart();
+    void recordPauseEnd();
     std::unique_ptr<juce::FileChooser> fileChooser;
+    std::unique_ptr<juce::FileChooser> settingsJsonChooser_;
 
     void updateTimeWeightButtons();
     void applyTheme (bool light);

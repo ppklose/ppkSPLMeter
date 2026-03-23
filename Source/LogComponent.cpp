@@ -475,6 +475,63 @@ void LogComponent::paint (juce::Graphics& g)
         }
     }
 
+    // ---- Pause event markers (yellow dashed line + flag) ----
+    {
+        const juce::Colour pauseCol  (0xffffcc00);   // yellow
+        const juce::Colour pauseText (0xff1c1c1e);   // near-black text
+        const float dashLen = 4.0f, gapLen = 3.0f;
+        const float flagH   = 14.0f, flagPad = 4.0f;
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+
+        std::vector<float> usedFlagX;
+
+        for (const auto& ev : pauseEvents_)
+        {
+            if (ev.startMs < tMin || ev.startMs > tMax) continue;
+
+            float x = timeToX (ev.startMs);
+
+            // Yellow dashed vertical line spanning full plot height
+            g.setColour (pauseCol);
+            float y = plot.getY();
+            while (y < plot.getBottom())
+            {
+                float segEnd = std::min (y + dashLen, plot.getBottom());
+                g.drawLine (x, y, x, segEnd, 1.5f);
+                y += dashLen + gapLen;
+            }
+
+            // Build label: "⏸ Xs" or "⏸ M:SS"
+            const juce::int64 totalSecs = ev.durationMs / 1000;
+            juce::String label;
+            if (totalSecs < 60)
+                label = juce::String (totalSecs) + "s pause";
+            else
+                label = juce::String (totalSecs / 60) + ":"
+                      + juce::String (totalSecs % 60).paddedLeft ('0', 2) + " pause";
+
+            // Flag: inside the top of the plot to avoid overlapping SoundDetective flags above
+            float approxLabelW = std::min (110.0f, g.getCurrentFont().getStringWidthFloat (label) + 2.0f * flagPad);
+            float flagX = x - approxLabelW * 0.5f;
+            for (float used : usedFlagX)
+                if (std::fabs (flagX - used) < approxLabelW + 2.0f)
+                    flagX = used + approxLabelW + 3.0f;
+            flagX = juce::jlimit (plot.getX(), plot.getRight() - approxLabelW, flagX);
+            usedFlagX.push_back (flagX);
+
+            const float flagY = plot.getY() + 2.0f;
+
+            g.setColour (pauseCol);
+            g.fillRoundedRectangle (flagX, flagY, approxLabelW, flagH, 2.0f);
+
+            g.setColour (pauseText);
+            g.drawText (label,
+                        (int) flagX, (int) flagY, (int) approxLabelW, (int) flagH,
+                        juce::Justification::centred, true);
+        }
+    }
+
     // ---- 94 dB reference line ----
     if (processor.apvts.getRawParameterValue ("line94Enabled")->load() > 0.5f)
     {
@@ -587,8 +644,11 @@ void LogComponent::computeFftBands()
 
     const bool rtaMode = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
 
+    const float fftLo = processor.apvts.getRawParameterValue ("fftLowerFreq")->load();
+    const float fftHi = processor.apvts.getRawParameterValue ("fftUpperFreq")->load();
+
     currentNumBands_ = 0;
-    for (float fc = 20.0f; fc <= 20000.0f && currentNumBands_ < kMaxFftBands; fc *= stepFactor)
+    for (float fc = fftLo; fc <= fftHi && currentNumBands_ < kMaxFftBands; fc *= stepFactor)
     {
         const int b    = currentNumBands_++;
         const int binLo = std::max (1,            static_cast<int> (fc / halfBandFactor * kFftSize / sampleRate));
@@ -600,7 +660,7 @@ void LogComponent::computeFftBands()
 
         float dbSPL = 20.0f * std::log10 (peak / normFactor + 1e-10f) + calOffset;
         if (rtaMode)
-            dbSPL += 3.0f * std::log2 (fc / 20.0f);   // +3 dB/oct relative to 20 Hz
+            dbSPL += 3.0f * std::log2 (fc / fftLo);   // +3 dB/oct relative to lower limit
         fftBands_[b] = juce::jlimit (kYMin, kYMax, dbSPL);
     }
 
@@ -640,9 +700,9 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
     const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (N));
     const float halfBandFactor = std::sqrt (stepFactor);
 
-    // Fixed 20-20 kHz log-scale X mapping
-    const float fMin = 20.0f;
-    const float fMax = 20000.0f;
+    // Log-scale X mapping using current FFT frequency range
+    const float fMin = processor.apvts.getRawParameterValue ("fftLowerFreq")->load();
+    const float fMax = processor.apvts.getRawParameterValue ("fftUpperFreq")->load();
 
     auto freqToX = [&] (float freq) -> float
     {
@@ -664,8 +724,8 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
     const juce::Colour colSolid   { 0xff34c759 };
     const juce::Colour colPeak    { 0xffffcc00 };  // amber peak line
 
-    // Iterate bands: fc = 20 * stepFactor^b
-    float fc0 = 20.0f;
+    // Iterate bands starting from lower frequency limit
+    float fc0 = fMin;
 
     if (displayMode == 1)  // ---- Area ----
     {
@@ -807,13 +867,15 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         const juce::Colour gridCol  = lightMode_ ? juce::Colour (0x25000000) : juce::Colour (0x403a3a3c);
         const juce::Colour labelCol = lightMode_ ? juce::Colour (0xff48484a) : juce::Colour (0xff8e8e93);
 
-        const float labelFreqs[] = { 20.f, 50.f, 100.f, 200.f, 500.f,
+        const float labelFreqs[] = { 10.f, 20.f, 50.f, 100.f, 200.f, 500.f,
                                      1000.f, 2000.f, 5000.f, 10000.f, 20000.f };
 
         g.setFont (juce::Font (juce::FontOptions().withHeight (15.0f)));
 
         for (float freq : labelFreqs)
         {
+            if (freq < fMin * 0.99f || freq > fMax * 1.01f) continue;
+
             float x = freqToX (freq);
 
             // Vertical grid line across the plot

@@ -21,6 +21,10 @@ public:
     // Sound event markers on the timeline
     void setSoundEvents (const std::vector<SoundEvent>& events) { soundEvents_ = events; repaint(); }
 
+    // Pause event markers on the timeline
+    struct PauseEvent { juce::int64 startMs; juce::int64 durationMs; };
+    void setPauseEvents (const std::vector<PauseEvent>& events) { pauseEvents_ = events; }
+
 private:
     void timerCallback() override;
     void computeFftBands();
@@ -62,8 +66,9 @@ private:
     bool                            fftEnabled_ = false;
     bool                            lightMode_  = false;
 
-    std::vector<LogEntry>  rows;
+    std::vector<LogEntry>   rows;
     std::vector<SoundEvent> soundEvents_;
+    std::vector<PauseEvent> pauseEvents_;
 
     // Selected psychoacoustic metric
     enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Impulsiveness, Tonality, Off };
