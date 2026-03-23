@@ -170,10 +170,11 @@ if(SPLMETER_TFLITE)
     # (all fetched via GIT_REPOSITORY inside TFLite's OverridableFetchContent) all
     # exhibit this failure.  Setting per-content DISCONNECTED suppresses the update
     # step for each one individually without affecting the initial download.
-    set(FETCHCONTENT_UPDATE_DISCONNECTED_JUCE       ON CACHE BOOL "" FORCE)
-    set(FETCHCONTENT_UPDATE_DISCONNECTED_FARMHASH   ON CACHE BOOL "" FORCE)
-    set(FETCHCONTENT_UPDATE_DISCONNECTED_EIGEN      ON CACHE BOOL "" FORCE)
-    set(FETCHCONTENT_UPDATE_DISCONNECTED_ABSEIL-CPP ON CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_JUCE        ON CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_FARMHASH    ON CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_EIGEN       ON CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_ABSEIL-CPP  ON CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_NEON2SSE    ON CACHE BOOL "" FORCE)
 
     # Abseil's check_cxx_compiler_flag(-msse4.1) returns true on arm64-apple-darwin
     # because AppleClang accepts the flag syntactically, but actual compilation then
@@ -188,6 +189,10 @@ if(SPLMETER_TFLITE)
         set(ABSL_RANDOM_RANDEN_HWAES_IMPL_COPTS "" CACHE STRING
             "No x86 HWAES flags on ARM64" FORCE)
     endif()
+
+    # neon2sse sub-project uses cmake_minimum_required(VERSION 2.x) which was
+    # removed in CMake 3.31 — set the policy minimum floor to suppress the error.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
     FetchContent_Declare(
         tensorflow_lite
