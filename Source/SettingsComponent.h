@@ -205,44 +205,60 @@ private:
 };
 
 //==============================================================================
-// Small panel shown in a CallOutBox for the log duration control
+// Small panel shown in a CallOutBox for the log duration + FFT freq range
 class DurationPanel  : public juce::Component
 {
 public:
     explicit DurationPanel (SPLMeterAudioProcessor& p)
     {
-        slider_.setSliderStyle (juce::Slider::LinearHorizontal);
-        slider_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 20);
-        slider_.setTextValueSuffix (" s");
-        slider_.setColour (juce::Slider::trackColourId,          juce::Colour (0xff34c759));
-        slider_.setColour (juce::Slider::thumbColourId,          juce::Colour (0xff34c759));
-        slider_.setColour (juce::Slider::textBoxTextColourId,    juce::Colours::white);
-        slider_.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-        label_.setText ("Keep last", juce::dontSendNotification);
-        label_.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
-        label_.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-        label_.setJustificationType (juce::Justification::centredRight);
-        addAndMakeVisible (slider_);
-        addAndMakeVisible (label_);
+        auto setupSlider = [this] (juce::Slider& s, juce::Label& l,
+                                   const juce::String& title, const juce::String& suffix)
+        {
+            s.setSliderStyle (juce::Slider::LinearHorizontal);
+            s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 20);
+            s.setTextValueSuffix (suffix);
+            s.setColour (juce::Slider::trackColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::thumbColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::textBoxTextColourId,    juce::Colours::white);
+            s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            l.setText (title, juce::dontSendNotification);
+            l.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+            l.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+            l.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (s);
+            addAndMakeVisible (l);
+        };
 
-        attach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-            p.apvts, "logDuration", slider_);
+        setupSlider (durationSlider_, durationLabel_, "Keep last", " s");
+        setupSlider (lowerSlider_,    lowerLabel_,    "f Lower",   " Hz");
+        setupSlider (upperSlider_,    upperLabel_,    "f Upper",   " Hz");
 
-        setSize (300, 48);
+        durationAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "logDuration",  durationSlider_);
+        lowerAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftLowerFreq", lowerSlider_);
+        upperAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftUpperFreq", upperSlider_);
+
+        setSize (300, 104);
     }
 
     void resized() override
     {
         auto b = getLocalBounds().reduced (8, 6);
-        auto row = b.removeFromTop (28);
-        label_.setBounds (row.removeFromLeft (72));
-        slider_.setBounds (row);
+        auto row1 = b.removeFromTop (28);  b.removeFromTop (4);
+        auto row2 = b.removeFromTop (28);  b.removeFromTop (4);
+        auto row3 = b.removeFromTop (28);
+        durationLabel_.setBounds (row1.removeFromLeft (52));  durationSlider_.setBounds (row1);
+        lowerLabel_.setBounds    (row2.removeFromLeft (52));  lowerSlider_.setBounds    (row2);
+        upperLabel_.setBounds    (row3.removeFromLeft (52));  upperSlider_.setBounds    (row3);
     }
 
 private:
-    juce::Slider slider_;
-    juce::Label  label_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attach_;
+    juce::Slider durationSlider_, lowerSlider_, upperSlider_;
+    juce::Label  durationLabel_,  lowerLabel_,  upperLabel_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        durationAttach_, lowerAttach_, upperAttach_;
 };
 
 //==============================================================================
