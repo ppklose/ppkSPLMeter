@@ -423,7 +423,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.6.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.6.1   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -736,6 +736,8 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             p->setProperty ("graphOverlay2Enabled",  getBool ("graphOverlay2Enabled"));
             p->setProperty ("fftLowerFreq",          getRaw ("fftLowerFreq"));
             p->setProperty ("fftUpperFreq",          getRaw ("fftUpperFreq"));
+            p->setProperty ("splYMin",               getRaw ("splYMin"));
+            p->setProperty ("splYMax",               getRaw ("splYMax"));
             r->setProperty ("parameters", params);
 
             // Channel mutes & names
@@ -825,6 +827,7 @@ void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
                 applyB ("correctionEnabled");  applyB ("graphOverlayEnabled");
                 applyB ("graphOverlay2Enabled");
                 applyF ("fftLowerFreq");       applyF ("fftUpperFreq");
+                applyF ("splYMin");            applyF ("splYMax");
             }
 
             // Channel mutes

@@ -1,4 +1,5 @@
 #include "LogComponent.h"
+#include "SettingsComponent.h"
 
 // Resolution index → subdivisions per octave
 static const int kBandNForRes[5] = { 1, 3, 6, 12, 24 };
@@ -24,17 +25,6 @@ const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime gree
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     : processor (p)
 {
-    durationLabel.setText ("Keep last (s):", juce::dontSendNotification);
-    durationLabel.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
-    durationLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
-    addAndMakeVisible (durationLabel);
-
-    durationSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    durationSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 100, 36);
-    durationSlider.setColour (juce::Slider::textBoxTextColourId,    juce::Colours::white);
-    durationSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    addAndMakeVisible (durationSlider);
-
     durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "logDuration", durationSlider);
 
@@ -89,6 +79,34 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupPsychoBtn (impulsivenessVisButton,  colImpulsiveness,  PsychoMetric::Impulsiveness);
     setupPsychoBtn (tonalityVisButton,       colTonality,       PsychoMetric::Tonality);
 
+    // Y-axis zoom button (magnifying glass — opens SPL range panel)
+    yZoomButton_.setButtonText ("");
+    yZoomButton_.setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+    yZoomButton_.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+    yZoomButton_.onClick = [this]
+    {
+        auto panel = std::make_unique<SplRangePanel> (processor);
+        juce::CallOutBox::launchAsynchronously (
+            std::move (panel),
+            yZoomButton_.getScreenBounds(),
+            nullptr);
+    };
+    addAndMakeVisible (yZoomButton_);
+
+    // X-axis zoom button (magnifying glass — opens log duration panel)
+    xZoomButton_.setButtonText ("");
+    xZoomButton_.setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+    xZoomButton_.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+    xZoomButton_.onClick = [this]
+    {
+        auto panel = std::make_unique<DurationPanel> (processor);
+        juce::CallOutBox::launchAsynchronously (
+            std::move (panel),
+            xZoomButton_.getScreenBounds(),
+            nullptr);
+    };
+    addAndMakeVisible (xZoomButton_);
+
     // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
         windowCoeffs_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
@@ -123,16 +141,10 @@ void LogComponent::setLightMode (bool light) noexcept
 //==============================================================================
 void LogComponent::resized()
 {
-    auto area = getLocalBounds().reduced (4);
-    auto controlRow = area.removeFromBottom (48);
-
-    durationLabel.setBounds  (controlRow.removeFromLeft (200));
-    durationSlider.setBounds (controlRow);
-
     // Uniform 4-column grid for all checkbox rows
     const float marginL  = 80.0f;
     const float marginR  = 75.0f;
-    const float controlH = 52.0f;
+    const float controlH = 0.0f;
     auto graphBounds = getLocalBounds().reduced (4).withTrimmedBottom (static_cast<int> (controlH));
     const float plotX  = graphBounds.getX() + marginL;
     const float plotW  = graphBounds.getWidth() - marginL - marginR;
@@ -158,6 +170,29 @@ void LogComponent::resized()
     annoyanceVisButton.setBounds     (juce::Rectangle<float> (plotX,          row3Y, colW, btnH).toNearestInt());
     impulsivenessVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   row3Y, colW, btnH).toNearestInt());
     tonalityVisButton.setBounds      (juce::Rectangle<float> (plotX + colW*2, row3Y, colW, btnH).toNearestInt());
+
+    // Shared geometry for zoom buttons
+    {
+        const float marginT  = 116.0f;
+        const float marginB  = 50.0f;
+        auto fullArea  = getLocalBounds().toFloat().reduced (4.0f);
+        float graphH   = fullArea.getHeight() - controlH;
+        float plotBottom  = fullArea.getY() + graphH - marginB;
+        float plotCentreY = fullArea.getY() + marginT + (graphH - marginT - marginB) / 2.0f;
+        float plotCentreX = fullArea.getX() + marginL
+                            + (fullArea.getWidth() - marginL - marginR) / 2.0f;
+
+        // Y-axis zoom button: just below the rotated "dB SPL" label
+        float labelX = fullArea.getX() + 18.0f;
+        yZoomButton_.setBounds (static_cast<int> (labelX - 14.0f),
+                                static_cast<int> (plotCentreY + 64.0f),
+                                28, 28);
+
+        // X-axis zoom button: centred horizontally in the bottom margin
+        xZoomButton_.setBounds (static_cast<int> (plotCentreX - 14.0f),
+                                static_cast<int> (plotBottom + 8.0f),
+                                28, 28);
+    }
 }
 
 void LogComponent::timerCallback()
@@ -173,10 +208,9 @@ void LogComponent::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (4.0f);
 
-    const float controlH = 52.0f;
     const juce::Rectangle<float> graphArea (
         bounds.getX(), bounds.getY(),
-        bounds.getWidth(), bounds.getHeight() - controlH);
+        bounds.getWidth(), bounds.getHeight());
 
     const float marginL = 80.0f;
     const float marginR = 75.0f;   // right axis labels
@@ -205,8 +239,11 @@ void LogComponent::paint (juce::Graphics& g)
         drawFftOverlay (g, plot);
 
     // ---- Left Y-axis mapping (dB SPL) ----
+    const float yDispMin = processor.apvts.getRawParameterValue ("splYMin")->load();
+    const float yDispMax = processor.apvts.getRawParameterValue ("splYMax")->load();
+
     auto splToY = [&] (float spl) -> float {
-        float t = (spl - kYMin) / (kYMax - kYMin);
+        float t = (spl - yDispMin) / (yDispMax - yDispMin);
         t = juce::jlimit (0.0f, 1.0f, t);
         return plot.getBottom() - t * plot.getHeight();
     };
@@ -250,16 +287,33 @@ void LogComponent::paint (juce::Graphics& g)
 
     // ---- Left Y-axis grid + labels ----
     g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
-    for (float db = kYMin; db <= kYMax; db += 10.0f)
     {
-        float y = splToY (db);
-        g.setColour (gridColour);
-        g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
+        // Draw ticks at every 10 dB within the current display range
+        float firstTick = std::ceil (yDispMin / 10.0f) * 10.0f;
+        for (float db = firstTick; db <= yDispMax + 0.5f; db += 10.0f)
+        {
+            float y = splToY (db);
+            g.setColour (gridColour);
+            g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
+            g.setColour (textSecond);
+            g.drawText (juce::String (static_cast<int>(db)),
+                        static_cast<int>(graphArea.getX()), static_cast<int>(y) - 14,
+                        static_cast<int>(marginL) - 6, 28,
+                        juce::Justification::centredRight, false);
+        }
+    }
+
+    // Draw magnifying glass icon on the zoom button
+    {
+        auto ib = yZoomButton_.getBounds().toFloat().reduced (3.0f);
+        const float r  = ib.getWidth() * 0.32f;
+        const float cx = ib.getCentreX() - r * 0.15f;
+        const float cy = ib.getCentreY() - r * 0.15f;
+        const float angle = juce::MathConstants<float>::pi * 0.785f;
         g.setColour (textSecond);
-        g.drawText (juce::String (static_cast<int>(db)),
-                    static_cast<int>(graphArea.getX()), static_cast<int>(y) - 14,
-                    static_cast<int>(marginL) - 6, 28,
-                    juce::Justification::centredRight, false);
+        g.drawEllipse (cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+        g.drawLine (cx + std::cos (angle) * r, cy + std::sin (angle) * r,
+                    cx + std::cos (angle) * r * 1.9f, cy + std::sin (angle) * r * 1.9f, 1.5f);
     }
 
     // Left Y-axis label
@@ -368,6 +422,19 @@ void LogComponent::paint (juce::Graphics& g)
                         static_cast<int>(plot.getBottom()) + 26,
                         140, 22, juce::Justification::centred, false);
         }
+    }
+
+    // Draw magnifying glass icon on the x-axis zoom button
+    {
+        auto ib = xZoomButton_.getBounds().toFloat().reduced (3.0f);
+        const float r  = ib.getWidth() * 0.32f;
+        const float cx = ib.getCentreX() - r * 0.15f;
+        const float cy = ib.getCentreY() - r * 0.15f;
+        const float angle = juce::MathConstants<float>::pi * 0.785f;
+        g.setColour (textSecond);
+        g.drawEllipse (cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+        g.drawLine (cx + std::cos (angle) * r, cy + std::sin (angle) * r,
+                    cx + std::cos (angle) * r * 1.9f, cy + std::sin (angle) * r * 1.9f, 1.5f);
     }
 
     // ---- SPL series (left axis) ----
@@ -710,9 +777,12 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         return plot.getX() + juce::jlimit (0.0f, 1.0f, t) * plot.getWidth();
     };
 
+    const float yDispMin = processor.apvts.getRawParameterValue ("splYMin")->load();
+    const float yDispMax = processor.apvts.getRawParameterValue ("splYMax")->load();
+
     auto splToY = [&] (float spl) -> float
     {
-        float t = (spl - kYMin) / (kYMax - kYMin);
+        float t = (spl - yDispMin) / (yDispMax - yDispMin);
         return plot.getBottom() - juce::jlimit (0.0f, 1.0f, t) * plot.getHeight();
     };
 

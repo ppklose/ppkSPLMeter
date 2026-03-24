@@ -713,7 +713,7 @@
 			name = "Update manifest";
 			alwaysOutOfDate = 1;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\n\necho Running codesign --verbose=4 --force --sign - \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\\\"\ncodesign --verbose=4 --force --sign - \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\"\n\necho Running \\\"${CONFIGURATION_BUILD_DIR}/juce_vst3_helper\\\" -create -version \\\"2.5.0\\\" -path \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\\\" -output \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources/moduleinfo.json\\\"\n\"${CONFIGURATION_BUILD_DIR}/juce_vst3_helper\" -create -version \"2.5.0\" -path \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\" -output \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources/moduleinfo.json\"\n";
+			shellScript = "set -euo pipefail\n\necho Running codesign --verbose=4 --force --sign - \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\\\"\ncodesign --verbose=4 --force --sign - \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\"\n\necho Running \\\"${CONFIGURATION_BUILD_DIR}/juce_vst3_helper\\\" -create -version \\\"2.6.1\\\" -path \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\\\" -output \\\"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources/moduleinfo.json\\\"\n\"${CONFIGURATION_BUILD_DIR}/juce_vst3_helper\" -create -version \"2.6.1\" -path \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}\" -output \"${CONFIGURATION_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources/moduleinfo.json\"\n";
 		};
 		6F31A1C32F0EB0E8C1E9FA15 /* Plugin Copy Step */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -910,7 +910,7 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -957,7 +957,7 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -1004,7 +1004,7 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -1060,7 +1060,7 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
@@ -1111,7 +1111,7 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -1207,7 +1207,7 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
@@ -1255,7 +1255,7 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -1308,7 +1308,7 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",
@@ -1360,7 +1360,7 @@
 					"_DEBUG=1",
 					"DEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=0",
@@ -1412,7 +1412,7 @@
 					"_NDEBUG=1",
 					"NDEBUG=1",
 					"JUCER_XCODE_MAC_F6D2F4CF=1",
-					"JUCE_APP_VERSION=2.5.0",
+					"JUCE_APP_VERSION=2.6.1",
 					"JUCE_APP_VERSION_HEX=0x20500",
 					"JucePlugin_Build_VST=0",
 					"JucePlugin_Build_VST3=1",

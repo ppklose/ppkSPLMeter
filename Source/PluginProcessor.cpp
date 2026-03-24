@@ -93,6 +93,14 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftUpperFreq", "FFT Upper Freq (Hz)",
         juce::NormalisableRange<float> (100.0f, 20000.0f, 1.0f, 0.4f), 20000.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "splYMin", "SPL Y-axis Min (dB)",
+        juce::NormalisableRange<float> (20.0f, 120.0f, 1.0f), 20.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "splYMax", "SPL Y-axis Max (dB)",
+        juce::NormalisableRange<float> (30.0f, 130.0f, 1.0f), 130.0f));
+
     for (int i = 0; i < 32; ++i)
         params.push_back (std::make_unique<juce::AudioParameterBool> (
             "channelMute" + juce::String (i),

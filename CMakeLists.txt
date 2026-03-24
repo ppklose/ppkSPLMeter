@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.5.0)
+project(SPLMeter VERSION 2.6.1)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     2.5.0
+    VERSION                     2.6.1
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
@@ -162,6 +162,12 @@ if(SPLMETER_TFLITE)
 
     set(TFLITE_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
     set(TFLITE_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+
+    # flatbuffers' CMakeLists tries to install 'flatc' as MACOSX_BUNDLE which
+    # requires BUNDLE DESTINATION — fails on iOS.  We only need the runtime lib.
+    set(FLATBUFFERS_BUILD_FLATC  OFF CACHE BOOL "" FORCE)
+    set(FLATBUFFERS_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+    set(FLATBUFFERS_INSTALL      OFF CACHE BOOL "" FORCE)
 
     # CMake 3.31 tightened the git update step: it now runs "git rev-parse HEAD"
     # before updating, which fails for any FetchContent git source that was cloned

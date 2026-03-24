@@ -17,6 +17,8 @@ BUILD_DIR="$SCRIPT_DIR/build-ios"
 TARGET="${1:-simulator}"
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+# Propagate to all cmake sub-builds (FP16/psimd/neon2sse use cmake_minimum_required < 3.5)
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 if [ "$TARGET" = "device" ]; then
     echo "==> Configuring for iPad device (arm64)..."

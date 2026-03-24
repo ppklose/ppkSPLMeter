@@ -75,7 +75,10 @@ private:
     PsychoMetric selectedMetric = PsychoMetric::Roughness;
 
 
-    // Graph constants
+    juce::TextButton yZoomButton_;
+    juce::TextButton xZoomButton_;
+
+    // Graph constants (absolute physical limits, used for FFT data clamping)
     static constexpr float kYMin = 20.0f;
     static constexpr float kYMax = 130.0f;
 
