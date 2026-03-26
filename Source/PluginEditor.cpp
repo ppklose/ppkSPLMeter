@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include <map>
 
 static juce::PropertiesFile::Options splmeterPropsOptions()
 {
@@ -239,6 +240,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
         toolsMenuButton.setVisible (!basicMode_);
+        markerButton.setVisible (!basicMode_);
+        pauseButton.setVisible (!basicMode_);
+        dawSyncToggle.setVisible (!basicMode_);
         if (basicMode_ && spectrogramWindow != nullptr)
             spectrogramWindow->setVisible (false);
         if (basicMode_)
@@ -368,6 +372,10 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     noteField.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff5ac8fa));
     addAndMakeVisible (noteField);
 
+    markerButton.setTooltip ("Add a marker to the timeline (Shift+M)");
+    markerButton.onClick = [this] { triggerMarker(); };
+    addAndMakeVisible (markerButton);
+
     setResizable (true, true);
     // Restore all persisted settings
     loadSettings();
@@ -379,6 +387,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         : "You are currently in advanced mode, click to go to basic mode.");
     log.setVisible (!basicMode_);
     toolsMenuButton.setVisible (!basicMode_);
+    markerButton.setVisible (!basicMode_);
+    pauseButton.setVisible (!basicMode_);
+    dawSyncToggle.setVisible (!basicMode_);
     meter.setPsychoVisible (!basicMode_);
     const int basicH = 100 + 215 + 24;
     if (basicMode_)
@@ -423,7 +434,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.6.1   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.7.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -451,6 +462,8 @@ void SPLMeterAudioProcessorEditor::resized()
         auto noteCol = titleBar.removeFromRight (juce::roundToInt (160 * ts)).reduced (4, 4);
         clockLabel.setBounds (noteCol.removeFromTop (20));
         noteField.setBounds  (noteCol);
+        auto markerCol = titleBar.removeFromRight (juce::roundToInt (50 * ts)).reduced (4, 22);
+        markerButton.setBounds (markerCol);
     }
 
     // Real Time / File / Monitor buttons — centred below the title text
@@ -550,15 +563,51 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 // Save helpers
 //==============================================================================
 void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
-                                                  const std::vector<LogEntry>& rows)
+                                                  const std::vector<LogEntry>& rows,
+                                                  const std::vector<LogComponent::MarkerEvent>& markers)
 {
     stream.writeText ("Timestamp,Peak dB SPL,Peak dBA SPL,Peak dBC SPL,"
                       "RMS dB SPL,RMS dBA SPL,RMS dBC SPL,"
+                      "LAeq,LCeq,"
                       "Roughness (%),Fluctuation (%),Sharpness (acum),"
-                      "Specific Loudness (sone),Psychoacoustic Annoyance\n",
+                      "Specific Loudness (sone),Psychoacoustic Annoyance,Marker\n",
                       false, false, nullptr);
+
+    // Build a lookup: for each marker, find the closest log entry timestamp
+    // (within 200 ms) and assign the marker text to it.
+    std::map<juce::int64, juce::String> markerByTs;
+    for (const auto& mk : markers)
+    {
+        juce::int64 bestTs = 0;
+        juce::int64 bestDist = 200; // max 200 ms snap distance
+        for (const auto& e : rows)
+        {
+            juce::int64 dist = std::abs (e.timestampMs - mk.timestampMs);
+            if (dist < bestDist) { bestDist = dist; bestTs = e.timestampMs; }
+        }
+        if (bestTs != 0)
+            markerByTs[bestTs] = mk.text.isEmpty() ? juce::String ("*") : mk.text;
+    }
+
+    // Running energy sums for LAeq / LCeq
+    double cumSumA = 0.0, cumSumC = 0.0;
+    int cumCount = 0;
+
     for (const auto& e : rows)
     {
+        cumSumA += std::pow (10.0, static_cast<double> (e.rmsDBASPL) / 10.0);
+        cumSumC += std::pow (10.0, static_cast<double> (e.rmsDBCSPL) / 10.0);
+        ++cumCount;
+        float laeq = static_cast<float> (10.0 * std::log10 (cumSumA / cumCount));
+        float lceq = static_cast<float> (10.0 * std::log10 (cumSumC / cumCount));
+
+        auto it = markerByTs.find (e.timestampMs);
+        juce::String markerText = (it != markerByTs.end()) ? it->second : juce::String();
+
+        // Escape CSV: if marker text contains commas or quotes, wrap in quotes
+        if (markerText.containsAnyOf (",\""))
+            markerText = "\"" + markerText.replace ("\"", "\"\"") + "\"";
+
         juce::String line =
             juce::Time (e.timestampMs).toString (true, true, true, true) + ","
             + juce::String (e.peakSPL,         2) + ","
@@ -567,11 +616,14 @@ void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
             + juce::String (e.rmsSPL,           2) + ","
             + juce::String (e.rmsDBASPL,        2) + ","
             + juce::String (e.rmsDBCSPL,        2) + ","
+            + juce::String (laeq,               2) + ","
+            + juce::String (lceq,               2) + ","
             + juce::String (e.roughness,        2) + ","
             + juce::String (e.fluctuation,      2) + ","
             + juce::String (e.sharpness,        3) + ","
             + juce::String (e.loudnessSone,     3) + ","
-            + juce::String (e.psychoAnnoyance,  3) + "\n";
+            + juce::String (e.psychoAnnoyance,  3) + ","
+            + markerText + "\n";
         stream.writeText (line, false, false, nullptr);
     }
 }
@@ -584,9 +636,10 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
         "Save log as CSV",
         splmeterLastFolder().getChildFile ("SPLMeter.csv"),
         "*.csv");
+    auto markers = markerEvents_;   // snapshot for async lambda
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [rows] (const juce::FileChooser& fc)
+        [rows, markers] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
@@ -594,7 +647,7 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
             juce::FileOutputStream stream (file);
             if (!stream.openedOk()) return;
             stream.setPosition (0); stream.truncate();
-            writeCsvRows (stream, rows);
+            writeCsvRows (stream, rows, markers);
         });
 }
 
@@ -641,12 +694,13 @@ void SPLMeterAudioProcessorEditor::doSaveJpg()
 void SPLMeterAudioProcessorEditor::doSaveAll()
 {
     auto rows     = audioProcessor.copyLog();
+    auto markers  = markerEvents_;
     auto snapshot = createComponentSnapshot (getLocalBounds());
     fileChooser = std::make_unique<juce::FileChooser> (
         "Choose destination folder", splmeterLastFolder());
     fileChooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-        [this, rows, snapshot] (const juce::FileChooser& fc)
+        [this, rows, markers, snapshot] (const juce::FileChooser& fc)
         {
             auto folder = fc.getResult();
             if (folder == juce::File{} || !folder.isDirectory()) return;
@@ -659,7 +713,7 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
             if (!rows.empty())
             {
                 juce::FileOutputStream csv (base.withFileExtension ("csv"));
-                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows); }
+                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows, markers); }
             }
 
             // WAV
@@ -703,7 +757,7 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             // Root
             juce::var root (new juce::DynamicObject());
             auto* r = root.getDynamicObject();
-            r->setProperty ("version", juce::var ("2.6"));
+            r->setProperty ("version", juce::var ("2.7"));
 
             // UI state
             juce::var ui (new juce::DynamicObject());
@@ -877,9 +931,47 @@ void SPLMeterAudioProcessorEditor::recordPauseEnd()
     pendingPauseWallMs_ = 0;
 }
 
+void SPLMeterAudioProcessorEditor::triggerMarker()
+{
+    const juce::int64 nowMs = juce::Time::currentTimeMillis() - audioProcessor.getPauseOffsetMs();
+
+    auto* aw = new juce::AlertWindow ("Add Marker", "Enter marker text (or leave empty):",
+                                       juce::MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("markerText", "", "Label:");
+    aw->addButton ("OK",     1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [this, nowMs, aw] (int result)
+        {
+            juce::String text;
+            if (result == 1)
+                text = aw->getTextEditorContents ("markerText").trim();
+
+            markerEvents_.push_back (LogComponent::MarkerEvent { nowMs, text });
+            log.setMarkerEvents (markerEvents_);
+            delete aw;
+        }), false);
+
+    // Defer focus until after the window is on screen
+    juce::Timer::callAfterDelay (50, [aw]
+    {
+        if (auto* te = aw->getTextEditor ("markerText"))
+            te->grabKeyboardFocus();
+    });
+}
+
 bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
-    if (key.getTextCharacter() == 'm' || key.getTextCharacter() == 'M')
+    // Shift+M → add marker
+    if (key.getTextCharacter() == 'M' && key.getModifiers().isShiftDown())
+    {
+        triggerMarker();
+        return true;
+    }
+
+    // m (without shift) → toggle pause
+    if (key.getTextCharacter() == 'm' && !key.getModifiers().isShiftDown())
     {
         const bool nowPaused = !audioProcessor.isPaused();
         if (nowPaused) recordPauseStart();
@@ -904,6 +996,26 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getPsychoAnnoyance(),
                      audioProcessor.getImpulsiveness(),
                      audioProcessor.getTonality());
+
+    // Compute LAeq / LCeq from log entries (energy average over logDuration)
+    {
+        auto logEntries = audioProcessor.copyLog();
+        float laeq = 0.0f, lceq = 0.0f;
+        if (!logEntries.empty())
+        {
+            double sumA = 0.0, sumC = 0.0;
+            for (const auto& e : logEntries)
+            {
+                sumA += std::pow (10.0, static_cast<double> (e.rmsDBASPL) / 10.0);
+                sumC += std::pow (10.0, static_cast<double> (e.rmsDBCSPL) / 10.0);
+            }
+            double n = static_cast<double> (logEntries.size());
+            laeq = static_cast<float> (10.0 * std::log10 (sumA / n));
+            lceq = static_cast<float> (10.0 * std::log10 (sumC / n));
+        }
+        meter.setLeq (laeq, lceq);
+    }
+
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
     meter.setHoldDuration (static_cast<double> (holdSecs) * 1000.0);
     if (!holdTimeLabel.isBeingEdited())
@@ -965,6 +1077,10 @@ void SPLMeterAudioProcessorEditor::timerCallback()
             [cutoff] (const LogComponent::PauseEvent& e) { return e.startMs < cutoff; }),
             pauseEvents_.end());
         log.setPauseEvents (pauseEvents_);
+        markerEvents_.erase (std::remove_if (markerEvents_.begin(), markerEvents_.end(),
+            [cutoff] (const LogComponent::MarkerEvent& e) { return e.timestampMs < cutoff; }),
+            markerEvents_.end());
+        log.setMarkerEvents (markerEvents_);
     }
 
     // Auto-return to Real Time when file playback finishes

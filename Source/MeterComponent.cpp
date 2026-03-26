@@ -82,6 +82,40 @@ void MeterComponent::paint (juce::Graphics& g)
             }
         }
 
+        // ---- LAeq / LCeq after a double-pipe separator ----
+        {
+            const int dpW = 32;   // width of "  ‖  " separator
+            g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+            g.setColour (juce::Colour (0xff48484a));
+            g.drawText (juce::String::charToString (0x2016),  // ‖
+                        curX, static_cast<int> (peakReadoutY),
+                        dpW, static_cast<int> (readoutH), juce::Justification::centred, false);
+            curX += dpW;
+
+            const int leqW = 170;
+            auto drawLeq = [&] (const char* unit, float value)
+            {
+                g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+                g.setColour (textSecond);
+                g.drawText (juce::String (value, 1) + " " + unit,
+                            curX, static_cast<int> (peakReadoutY),
+                            leqW, static_cast<int> (readoutH),
+                            juce::Justification::centredLeft, false);
+                curX += leqW;
+            };
+
+            drawLeq ("LAeq", laeq_);
+
+            // thin pipe between LAeq and LCeq
+            g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+            g.setColour (juce::Colour (0xff48484a));
+            g.drawText ("  |  ", curX, static_cast<int> (peakReadoutY),
+                        sepW, static_cast<int> (readoutH), juce::Justification::centred, false);
+            curX += sepW;
+
+            drawLeq ("LCeq", lceq_);
+        }
+
         // background track
         g.setColour (bgBar);
         g.fillRoundedRectangle (barAreaX, peakY, barAreaW, barH, 4.0f);

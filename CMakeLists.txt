@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.6.1)
+project(SPLMeter VERSION 2.7.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     2.6.1
+    VERSION                     2.7.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
@@ -274,4 +274,55 @@ if(_VISQOL_LIB AND EXISTS "${_VISQOL_LIB}")
     endif()
 else()
     message(STATUS "ViSQOL disabled (pre-built lib not found at ${_VISQOL_LIB})")
+endif()
+
+# ---------------------------------------------------------------------------
+# Unit tests (Catch2)
+# ---------------------------------------------------------------------------
+option(SPLMETER_BUILD_TESTS "Build unit tests" OFF)
+
+if(SPLMETER_BUILD_TESTS)
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.7.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(Catch2)
+
+    add_executable(SPLMeterTests
+        Tests/TestMain.cpp
+        Tests/AWeightingFilterTests.cpp
+        Tests/CWeightingFilterTests.cpp
+        Tests/RoughnessEstimatorTests.cpp
+        Tests/SharpnessEstimatorTests.cpp
+        Tests/FluctuationEstimatorTests.cpp
+        Tests/ImpulsivenessEstimatorTests.cpp
+        Tests/TonalityEstimatorTests.cpp
+        Tests/SPLCalculationTests.cpp
+        Tests/LoudnessAnnoyanceTests.cpp
+        Tests/StateSerializationTests.cpp
+        Tests/MarkerTests.cpp
+        Tests/LeqTests.cpp
+    )
+
+    target_include_directories(SPLMeterTests PRIVATE Source)
+    target_link_libraries(SPLMeterTests PRIVATE Catch2::Catch2WithMain)
+
+    # State serialization tests need JUCE
+    target_link_libraries(SPLMeterTests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+    )
+    target_compile_definitions(SPLMeterTests PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STANDALONE_APPLICATION=1
+        JUCE_UNIT_TESTS=1
+    )
+
+    include(CTest)
+    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+    include(Catch)
+    catch_discover_tests(SPLMeterTests)
 endif()

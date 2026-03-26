@@ -126,6 +126,37 @@ public:
 };
 
 //==============================================================================
+// Marker button - draws a red diamond icon
+class MarkerButton : public juce::Button
+{
+public:
+    MarkerButton() : juce::Button ("Marker") {}
+
+    void paintButton (juce::Graphics& g, bool isMouseOver, bool /*isButtonDown*/) override
+    {
+        const auto b = getLocalBounds().toFloat();
+
+        const juce::Colour bg = isMouseOver ? juce::Colour (0xff4a4a4e) : juce::Colour (0xff3a3a3c);
+        g.setColour (bg);
+        g.fillRoundedRectangle (b, 4.0f);
+
+        const float cx = b.getCentreX();
+        const float cy = b.getCentreY();
+        const float r  = b.getHeight() * 0.3f;
+
+        juce::Path diamond;
+        diamond.startNewSubPath (cx, cy - r);
+        diamond.lineTo (cx + r * 0.7f, cy);
+        diamond.lineTo (cx, cy + r);
+        diamond.lineTo (cx - r * 0.7f, cy);
+        diamond.closeSubPath();
+
+        g.setColour (juce::Colour (0xffff453a));
+        g.fillPath (diamond);
+    }
+};
+
+//==============================================================================
 class SPLMeterAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                       private juce::Timer
 {
@@ -148,7 +179,8 @@ private:
     void doSaveAll();
     void doSaveSettingsJson();
     void doLoadSettingsJson();
-    static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&);
+    static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&,
+                              const std::vector<LogComponent::MarkerEvent>&);
 
     SPLMeterAudioProcessor& audioProcessor;
 
@@ -194,6 +226,9 @@ private:
     juce::Label       clockLabel;
     int               lastClockSecond_ = -1;
     juce::TextEditor  noteField;
+    MarkerButton      markerButton;
+    std::vector<LogComponent::MarkerEvent> markerEvents_;
+    void triggerMarker();
     std::unique_ptr<SettingsWindow>       settingsWindow;
     std::unique_ptr<SpectrogramWindow>    spectrogramWindow;
     std::unique_ptr<SoundDetectiveWindow> soundDetectiveWindow;

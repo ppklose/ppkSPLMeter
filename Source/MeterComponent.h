@@ -23,6 +23,8 @@ public:
                     float sharpness, float sone, float psychoAnnoyance,
                     float impulsiveness, float tonality);
 
+    void setLeq (float laeq, float lceq) noexcept { laeq_ = laeq; lceq_ = lceq; }
+
     void setPsychoVisible (bool v) noexcept
     {
         if (psychoVisible_ != v) { psychoVisible_ = v; repaint(); }
@@ -33,6 +35,7 @@ public:
         peakSPL_ = peakDBASPL_ = peakDBCSPL_ = kMin;
         roughness_ = fluctuation_ = sharpness_ = sone_ = psychoAnnoyance_ = 0.0f;
         impulsiveness_ = tonality_ = 0.0f;
+        laeq_ = lceq_ = 0.0f;
         holdVal_ = kMin;
         holdTimestampMs_ = 0.0;
         repaint();
@@ -56,6 +59,8 @@ private:
     float psychoAnnoyance_  = 0.0f;
     float impulsiveness_    = 0.0f;
     float tonality_         = 0.0f;
+    float laeq_             = 0.0f;
+    float lceq_             = 0.0f;
 
     bool  lightMode_        = false;
     bool  psychoVisible_    = true;

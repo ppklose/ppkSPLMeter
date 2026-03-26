@@ -599,6 +599,68 @@ void LogComponent::paint (juce::Graphics& g)
         }
     }
 
+    // ---- User marker events (red diamond + dashed red vertical line) ----
+    {
+        const juce::Colour markerCol (0xffff453a);    // red
+        const float dashLen = 4.0f, gapLen = 3.0f;
+        const float diamondR = 6.0f;
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (10.0f)));
+
+        std::vector<float> usedFlagX;
+
+        for (const auto& mk : markerEvents_)
+        {
+            if (mk.timestampMs < tMin || mk.timestampMs > tMax) continue;
+
+            float x = timeToX (mk.timestampMs);
+
+            // Dashed red vertical line spanning full plot height
+            g.setColour (markerCol);
+            float y = plot.getY();
+            while (y < plot.getBottom())
+            {
+                float segEnd = std::min (y + dashLen, plot.getBottom());
+                g.drawLine (x, y, x, segEnd, 1.5f);
+                y += dashLen + gapLen;
+            }
+
+            // Red diamond at the top of the dashed line
+            float dY = plot.getY() - diamondR - 2.0f;
+            juce::Path diamond;
+            diamond.startNewSubPath (x, dY - diamondR);
+            diamond.lineTo (x + diamondR * 0.7f, dY);
+            diamond.lineTo (x, dY + diamondR);
+            diamond.lineTo (x - diamondR * 0.7f, dY);
+            diamond.closeSubPath();
+            g.setColour (markerCol);
+            g.fillPath (diamond);
+
+            // Text label (if provided) below the diamond, inside the plot
+            if (mk.text.isNotEmpty())
+            {
+                const float flagH = 13.0f, flagPad = 3.0f;
+                float approxLabelW = std::min (
+                    120.0f,
+                    g.getCurrentFont().getStringWidthFloat (mk.text) + 2.0f * flagPad);
+                float flagX = x - approxLabelW * 0.5f;
+                for (float used : usedFlagX)
+                    if (std::fabs (flagX - used) < approxLabelW + 2.0f)
+                        flagX = used + approxLabelW + 3.0f;
+                flagX = juce::jlimit (plot.getX(), plot.getRight() - approxLabelW, flagX);
+                usedFlagX.push_back (flagX);
+
+                const float flagY = plot.getY() + 2.0f;
+                g.setColour (markerCol);
+                g.fillRoundedRectangle (flagX, flagY, approxLabelW, flagH, 2.0f);
+                g.setColour (juce::Colours::white);
+                g.drawText (mk.text,
+                            (int) flagX, (int) flagY, (int) approxLabelW, (int) flagH,
+                            juce::Justification::centred, true);
+            }
+        }
+    }
+
     // ---- 94 dB reference line ----
     if (processor.apvts.getRawParameterValue ("line94Enabled")->load() > 0.5f)
     {
