@@ -1,6 +1,6 @@
 # SPLMeter
 
-A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows standalone app and as VST3 / AU plugin.
+A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows/Linux standalone app and as VST3 / AU plugin.
 
 ![SPLMeter v2.6 screenshot](screenShot.png)
 
