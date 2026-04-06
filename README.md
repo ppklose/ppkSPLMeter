@@ -317,6 +317,18 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v2.8.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.8.0)
+- **Fix crash when loading correction filter** — the convolution engine was prepared for 8 channels but the audio buffer could have 18+, causing a null-pointer dereference on the audio thread; also fixed a race condition where the IR was used before async background processing completed
+- **FFT crosshair cursor** — click in the FFT plot to show a crosshair snapping to the nearest octave band with frequency and level readout; follows the mouse, adapts to light/dark mode
+- **Right Y-axis zoom for psychoacoustic metrics** — each of the 7 metrics has independent min/max range parameters; magnifying glass icon next to the unit label opens a popup to adjust the displayed range; ranges saved/restored with plugin state
+- **Pause button tooltip** — shows "Pause / Resume (M)" on hover
+
+### [v2.7.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.7.0)
+- **Marker system** — red diamond button in the title bar (Shift+M shortcut) to place named markers on the timeline; markers included in CSV export
+- **LAeq / LCeq** — energy-averaged dBA/dBC over the log duration window, displayed in the meter readout and CSV export
+- **Unit test infrastructure** — Catch2 v3.7.1 with 93 test cases covering DSP filters, psychoacoustic estimators, SPL calculations, state serialization, markers, and Leq
+- **Pause button & DAW sync** moved to advanced-mode only
+
 ### [v2.6.1](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.6.1)
 - **SPL Y-axis zoom** — magnifying glass icon below the "dB SPL" label opens a callout to set the minimum and maximum displayed dB SPL range; grid lines and labels update dynamically
 - **X-axis duration & FFT freq popup** — the "Keep last (s)" bottom control is replaced by a magnifying glass at the centre of the time axis; clicking it opens a combined callout with time range (s), FFT lower frequency (Hz), and FFT upper frequency (Hz)
