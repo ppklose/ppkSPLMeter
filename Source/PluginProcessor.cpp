@@ -101,6 +101,28 @@ SPLMeterAudioProcessor::createParameterLayout()
         "splYMax", "SPL Y-axis Max (dB)",
         juce::NormalisableRange<float> (30.0f, 130.0f, 1.0f), 130.0f));
 
+    // Per-metric right-axis zoom ranges
+    // { paramPrefix, label, absMin, absMax, defaultMin, defaultMax, step }
+    struct MetricRange { const char* id; const char* name; float lo; float hi; float defMin; float defMax; float step; };
+    const MetricRange metricRanges[] = {
+        { "roughness",      "Roughness",      0, 100, 0, 100, 1  },
+        { "fluctuation",    "Fluctuation",    0, 100, 0, 100, 1  },
+        { "sharpness",      "Sharpness",      0,  10, 0,   5, 0.1f },
+        { "loudness",       "Loudness",       0, 200, 0, 100, 1  },
+        { "annoyance",      "Annoyance",      0, 200, 0, 100, 1  },
+        { "impulsiveness",  "Impulsiveness",  0,  60, 0,  40, 1  },
+        { "tonality",       "Tonality",       0, 100, 0, 100, 1  },
+    };
+    for (const auto& m : metricRanges)
+    {
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::String (m.id) + "YMin", juce::String (m.name) + " Y Min",
+            juce::NormalisableRange<float> (m.lo, m.hi, m.step), m.defMin));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            juce::String (m.id) + "YMax", juce::String (m.name) + " Y Max",
+            juce::NormalisableRange<float> (m.lo, m.hi, m.step), m.defMax));
+    }
+
     for (int i = 0; i < 32; ++i)
         params.push_back (std::make_unique<juce::AudioParameterBool> (
             "channelMute" + juce::String (i),
@@ -171,7 +193,9 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     }
 
     // Correction filter convolution engine
-    correctionConv_.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 8 });
+    correctionPreparedCh_ = juce::jmax (getTotalNumInputChannels(), 2);
+    correctionConv_.prepare ({ sampleRate, (juce::uint32) samplesPerBlock,
+                               (juce::uint32) correctionPreparedCh_ });
     correctionConv_.reset();
     if (!correctionPoints_.empty())
         rebuildCorrectionFIR();
@@ -320,12 +344,30 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // Correction filter (applied after bandpass, before metering)
-    if (correctionLoaded_.load() && apvts.getRawParameterValue ("correctionEnabled")->load() > 0.5f)
+    if (apvts.getRawParameterValue ("correctionEnabled")->load() > 0.5f)
     {
-        auto& src = fileMode ? fileReadBuffer : buffer;
-        juce::dsp::AudioBlock<float> block (src);
-        juce::dsp::ProcessContextReplacing<float> ctx (block);
-        correctionConv_.process (ctx);
+        // loadImpulseResponse() is async — give the background thread a few
+        // blocks to finish before we route real audio through the convolution.
+        if (correctionPending_.load() && !correctionLoaded_.load())
+        {
+            if (--correctionWarmupLeft_ <= 0)
+            {
+                correctionLoaded_.store (true);
+                correctionPending_.store (false);
+            }
+        }
+
+        if (correctionLoaded_.load())
+        {
+            auto& src = fileMode ? fileReadBuffer : buffer;
+            juce::dsp::AudioBlock<float> block (src);
+            // Clamp to the channel count the convolution was prepared for
+            const auto chClamped = juce::jmin (block.getNumChannels(),
+                                               (size_t) correctionPreparedCh_);
+            auto sub = block.getSubsetChannelBlock (0, chClamped);
+            juce::dsp::ProcessContextReplacing<float> ctx (sub);
+            correctionConv_.process (ctx);
+        }
     }
 
     // Count channels that actually carry signal.
@@ -667,6 +709,7 @@ void SPLMeterAudioProcessor::clearCorrectionFilter()
 {
     correctionPoints_.clear();
     correctionFileName_ = {};
+    correctionPending_.store (false);
     correctionLoaded_.store (false);
     correctionConv_.reset();
     correctionSerno_ = {};
@@ -735,7 +778,11 @@ void SPLMeterAudioProcessor::rebuildCorrectionFIR()
                                          juce::dsp::Convolution::Stereo::no,
                                          juce::dsp::Convolution::Trim::no,
                                          juce::dsp::Convolution::Normalise::no);
-    correctionLoaded_.store (true);
+    // Don't set correctionLoaded_ here — loadImpulseResponse() is async.
+    // Let the audio thread warm up the convolution for a few blocks first
+    // so the CrossoverMixer has valid internal state before we use its output.
+    correctionWarmupLeft_ = 8;
+    correctionPending_.store (true);
 }
 
 //==============================================================================

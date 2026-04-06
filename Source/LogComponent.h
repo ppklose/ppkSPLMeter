@@ -14,6 +14,10 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override;
 
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
     bool isOff()        const noexcept { return selectedMetric == PsychoMetric::Off; }
     void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
     void setLightMode  (bool light) noexcept;
@@ -70,6 +74,10 @@ private:
     bool                            fftEnabled_ = false;
     bool                            lightMode_  = false;
 
+    // FFT crosshair
+    bool                            fftCrosshairActive_ = false;
+    juce::Point<float>              fftCrosshairPos_;
+
     std::vector<LogEntry>   rows;
     std::vector<SoundEvent> soundEvents_;
     std::vector<PauseEvent> pauseEvents_;
@@ -82,6 +90,7 @@ private:
 
     juce::TextButton yZoomButton_;
     juce::TextButton xZoomButton_;
+    juce::TextButton rightZoomButton_;
 
     // Graph constants (absolute physical limits, used for FFT data clamping)
     static constexpr float kYMin = 20.0f;

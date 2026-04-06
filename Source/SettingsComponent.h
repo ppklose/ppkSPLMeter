@@ -262,6 +262,71 @@ private:
 };
 
 //==============================================================================
+// Small panel shown in a CallOutBox for the right-axis (psychoacoustic) range
+class PsychoRangePanel  : public juce::Component
+{
+public:
+    PsychoRangePanel (SPLMeterAudioProcessor& p,
+                      const juce::String& metricParamPrefix,
+                      const juce::String& metricLabel,
+                      const juce::String& unit)
+    {
+        auto setupSlider = [this, &unit] (juce::Slider& s, juce::Label& l, const juce::String& title)
+        {
+            s.setSliderStyle (juce::Slider::LinearHorizontal);
+            s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 20);
+            s.setTextValueSuffix (" " + unit);
+            s.setColour (juce::Slider::trackColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::thumbColourId,          juce::Colour (0xff34c759));
+            s.setColour (juce::Slider::textBoxTextColourId,    juce::Colours::white);
+            s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            l.setText (title, juce::dontSendNotification);
+            l.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+            l.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+            l.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (s);
+            addAndMakeVisible (l);
+        };
+
+        setupSlider (minSlider_, minLabel_, "Min");
+        setupSlider (maxSlider_, maxLabel_, "Max");
+
+        titleLabel_.setText (metricLabel, juce::dontSendNotification);
+        titleLabel_.setFont (juce::Font (juce::FontOptions().withHeight (15.0f).withStyle ("Bold")));
+        titleLabel_.setColour (juce::Label::textColourId, juce::Colours::white);
+        titleLabel_.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (titleLabel_);
+
+        minAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, metricParamPrefix + "YMin", minSlider_);
+        maxAttach_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, metricParamPrefix + "YMax", maxSlider_);
+
+        setSize (300, 100);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().reduced (8, 6);
+        titleLabel_.setBounds (b.removeFromTop (22));
+        b.removeFromTop (2);
+        auto row1 = b.removeFromTop (28);
+        b.removeFromTop (4);
+        auto row2 = b.removeFromTop (28);
+        minLabel_.setBounds (row1.removeFromLeft (52));
+        minSlider_.setBounds (row1);
+        maxLabel_.setBounds (row2.removeFromLeft (52));
+        maxSlider_.setBounds (row2);
+    }
+
+private:
+    juce::Label  titleLabel_;
+    juce::Slider minSlider_, maxSlider_;
+    juce::Label  minLabel_,  maxLabel_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> minAttach_, maxAttach_;
+};
+
+//==============================================================================
 class SettingsComponent  : public juce::Component,
                            private juce::Timer
 {

@@ -316,6 +316,9 @@ private:
     // Correction filter
     juce::dsp::Convolution                  correctionConv_;
     std::atomic<bool>                       correctionLoaded_ { false };
+    std::atomic<bool>                       correctionPending_ { false };
+    int                                     correctionWarmupLeft_ { 0 };
+    int                                     correctionPreparedCh_ { 0 };
     juce::String                            correctionFileName_;
     std::vector<std::pair<float,float>>     correctionPoints_; // (freq, spl)
     void rebuildCorrectionFIR();

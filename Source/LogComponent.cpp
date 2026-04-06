@@ -107,6 +107,35 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     };
     addAndMakeVisible (xZoomButton_);
 
+    // Right Y-axis zoom button (magnifying glass — opens psychoacoustic range panel)
+    rightZoomButton_.setButtonText ("");
+    rightZoomButton_.setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+    rightZoomButton_.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+    rightZoomButton_.onClick = [this]
+    {
+        // Map selected metric → param prefix, label, unit
+        struct MetricInfo { const char* prefix; const char* label; const char* unit; };
+        const MetricInfo info[] = {
+            { "roughness",     "Roughness",      "%"    },
+            { "fluctuation",   "Fluctuation",    "%"    },
+            { "sharpness",     "Sharpness",      "acum" },
+            { "loudness",      "Loudness",       "sone" },
+            { "annoyance",     "Annoyance",      "PA"   },
+            { "impulsiveness", "Impulsiveness",  "dB"   },
+            { "tonality",      "Tonality",       "%"    },
+        };
+        int idx = static_cast<int> (selectedMetric);
+        if (idx < 0 || idx >= 7) return;
+        const auto& m = info[idx];
+        auto panel = std::make_unique<PsychoRangePanel> (
+            processor, m.prefix, m.label, m.unit);
+        juce::CallOutBox::launchAsynchronously (
+            std::move (panel),
+            rightZoomButton_.getScreenBounds(),
+            nullptr);
+    };
+    addAndMakeVisible (rightZoomButton_);
+
     // Default: Hann window (index 0)
     for (int i = 0; i < kFftSize; ++i)
         windowCoeffs_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
@@ -192,6 +221,12 @@ void LogComponent::resized()
         xZoomButton_.setBounds (static_cast<int> (plotCentreX - 14.0f),
                                 static_cast<int> (plotBottom + 8.0f),
                                 28, 28);
+
+        // Right Y-axis zoom button: just below the rotated unit label
+        float rx = fullArea.getX() + fullArea.getWidth() - marginR + marginR - 18.0f;
+        rightZoomButton_.setBounds (static_cast<int> (rx - 14.0f),
+                                    static_cast<int> (plotCentreY + 50.0f),
+                                    28, 28);
     }
 }
 
@@ -248,35 +283,29 @@ void LogComponent::paint (juce::Graphics& g)
         return plot.getBottom() - t * plot.getHeight();
     };
 
-    // ---- Right Y-axis range per metric ----
-    float rightMin = 0.0f, rightMax = 100.0f;
+    // ---- Right Y-axis range per metric (user-adjustable) ----
+    juce::String rightParamPrefix;
     juce::String rightUnit;
     juce::Colour psychoColour;
 
     switch (selectedMetric)
     {
-        case PsychoMetric::Roughness:
-            rightMin = 0; rightMax = 100; rightUnit = "%";
-            psychoColour = colRoughness; break;
-        case PsychoMetric::Fluctuation:
-            rightMin = 0; rightMax = 100; rightUnit = "%";
-            psychoColour = colFluctuation; break;
-        case PsychoMetric::Sharpness:
-            rightMin = 0; rightMax = 5; rightUnit = "acum";
-            psychoColour = colSharpness; break;
-        case PsychoMetric::Loudness:
-            rightMin = 0; rightMax = 100; rightUnit = "sone";
-            psychoColour = colLoudness; break;
-        case PsychoMetric::Annoyance:
-            rightMin = 0; rightMax = 100; rightUnit = "PA";
-            psychoColour = colAnnoyance; break;
-        case PsychoMetric::Impulsiveness:
-            rightMin = 0; rightMax = 40; rightUnit = "dB";
-            psychoColour = colImpulsiveness; break;
-        case PsychoMetric::Tonality:
-            rightMin = 0; rightMax = 100; rightUnit = "%";
-            psychoColour = colTonality; break;
+        case PsychoMetric::Roughness:     rightParamPrefix = "roughness";     rightUnit = "%";    psychoColour = colRoughness;      break;
+        case PsychoMetric::Fluctuation:   rightParamPrefix = "fluctuation";   rightUnit = "%";    psychoColour = colFluctuation;    break;
+        case PsychoMetric::Sharpness:     rightParamPrefix = "sharpness";     rightUnit = "acum"; psychoColour = colSharpness;      break;
+        case PsychoMetric::Loudness:      rightParamPrefix = "loudness";      rightUnit = "sone"; psychoColour = colLoudness;       break;
+        case PsychoMetric::Annoyance:     rightParamPrefix = "annoyance";     rightUnit = "PA";   psychoColour = colAnnoyance;      break;
+        case PsychoMetric::Impulsiveness: rightParamPrefix = "impulsiveness"; rightUnit = "dB";   psychoColour = colImpulsiveness;  break;
+        case PsychoMetric::Tonality:      rightParamPrefix = "tonality";      rightUnit = "%";    psychoColour = colTonality;       break;
         default: break;
+    }
+
+    float rightMin = 0.0f, rightMax = 100.0f;
+    if (rightParamPrefix.isNotEmpty())
+    {
+        rightMin = processor.apvts.getRawParameterValue (rightParamPrefix + "YMin")->load();
+        rightMax = processor.apvts.getRawParameterValue (rightParamPrefix + "YMax")->load();
+        if (rightMax <= rightMin) rightMax = rightMin + 1.0f;
     }
 
     auto rightToY = [&] (float val) -> float {
@@ -341,9 +370,10 @@ void LogComponent::paint (juce::Graphics& g)
             g.setColour (gridColour);
             g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
             g.setColour (psychoColour.withAlpha (0.8f));
-            juce::String label = (rightUnit == "acum")
+            const float range = rightMax - rightMin;
+            juce::String label = (range < 10.0f)
                                  ? juce::String (val, 1)
-                                 : juce::String (static_cast<int>(val));
+                                 : juce::String (static_cast<int>(val + 0.5f));
             g.drawText (label,
                         static_cast<int>(plot.getRight()) + 4, static_cast<int>(y) - 14,
                         static_cast<int>(marginR) - 8, 28,
@@ -432,6 +462,20 @@ void LogComponent::paint (juce::Graphics& g)
         const float cy = ib.getCentreY() - r * 0.15f;
         const float angle = juce::MathConstants<float>::pi * 0.785f;
         g.setColour (textSecond);
+        g.drawEllipse (cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+        g.drawLine (cx + std::cos (angle) * r, cy + std::sin (angle) * r,
+                    cx + std::cos (angle) * r * 1.9f, cy + std::sin (angle) * r * 1.9f, 1.5f);
+    }
+
+    // Draw magnifying glass icon on the right Y-axis zoom button
+    if (selectedMetric != PsychoMetric::Off)
+    {
+        auto ib = rightZoomButton_.getBounds().toFloat().reduced (3.0f);
+        const float r  = ib.getWidth() * 0.32f;
+        const float cx = ib.getCentreX() - r * 0.15f;
+        const float cy = ib.getCentreY() - r * 0.15f;
+        const float angle = juce::MathConstants<float>::pi * 0.785f;
+        g.setColour (psychoColour.withAlpha (0.8f));
         g.drawEllipse (cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
         g.drawLine (cx + std::cos (angle) * r, cy + std::sin (angle) * r,
                     cx + std::cos (angle) * r * 1.9f, cy + std::sin (angle) * r * 1.9f, 1.5f);
@@ -683,6 +727,82 @@ void LogComponent::paint (juce::Graphics& g)
                     static_cast<int> (y94) - 12,
                     static_cast<int> (marginL) - 4, 22,
                     juce::Justification::centredRight, false);
+    }
+
+    // ---- FFT crosshair ----
+    if (fftEnabled_ && fftCrosshairActive_ && currentNumBands_ > 0
+        && plot.contains (fftCrosshairPos_))
+    {
+        const float fMin = processor.apvts.getRawParameterValue ("fftLowerFreq")->load();
+        const float fMax = processor.apvts.getRawParameterValue ("fftUpperFreq")->load();
+
+        // Pixel → frequency (log scale)
+        const float frac = (fftCrosshairPos_.x - plot.getX()) / plot.getWidth();
+        const float freq = fMin * std::pow (fMax / fMin, frac);
+
+        // Find nearest FFT band
+        const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
+        static constexpr int kBandN[] = { 1, 3, 6, 12, 24 };
+        const int N = kBandN[juce::jlimit (0, 4, resIdx)];
+        const float stepFactor = std::pow (2.0f, 1.0f / static_cast<float> (N));
+
+        float fc = fMin;
+        int bestBand = 0;
+        float bestDist = 1e30f;
+        for (int b = 0; b < currentNumBands_; ++b, fc *= stepFactor)
+        {
+            float dist = std::abs (std::log2 (freq) - std::log2 (fc));
+            if (dist < bestDist) { bestDist = dist; bestBand = b; }
+        }
+
+        const float bandFreq = fMin * std::pow (stepFactor, static_cast<float> (bestBand));
+        const float bandDB   = fftBandsSmoothed_[bestBand];
+
+        // Frequency → pixel X (log scale)
+        const float crossX = plot.getX() + juce::jlimit (0.0f, 1.0f,
+            std::log2 (bandFreq / fMin) / std::log2 (fMax / fMin)) * plot.getWidth();
+
+        // dB → pixel Y
+        const float crossY = plot.getBottom()
+            - juce::jlimit (0.0f, 1.0f, (bandDB - yDispMin) / (yDispMax - yDispMin))
+              * plot.getHeight();
+
+        const juce::Colour crossCol = lightMode_ ? juce::Colour (0xcc000000)
+                                                  : juce::Colour (0xccffffff);
+
+        // Vertical line
+        g.setColour (crossCol.withAlpha (0.4f));
+        g.drawVerticalLine (static_cast<int> (crossX), plot.getY(), plot.getBottom());
+
+        // Horizontal line
+        g.drawHorizontalLine (static_cast<int> (crossY), plot.getX(), plot.getRight());
+
+        // Small dot at intersection
+        g.setColour (crossCol);
+        g.fillEllipse (crossX - 4.0f, crossY - 4.0f, 8.0f, 8.0f);
+
+        // Label: frequency + level
+        juce::String freqStr = (bandFreq >= 1000.0f)
+            ? juce::String (bandFreq / 1000.0f, 2) + " kHz"
+            : juce::String (static_cast<int> (bandFreq + 0.5f)) + " Hz";
+        juce::String label = freqStr + "  " + juce::String (bandDB, 1) + " dB";
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f).withStyle ("Bold")));
+        const float tw = g.getCurrentFont().getStringWidthFloat (label) + 12.0f;
+        const float th = 22.0f;
+
+        // Position label: prefer upper-right of crosshair, flip if near edges
+        float lx = crossX + 10.0f;
+        float ly = crossY - th - 6.0f;
+        if (lx + tw > plot.getRight())  lx = crossX - tw - 10.0f;
+        if (ly < plot.getY())           ly = crossY + 6.0f;
+
+        g.setColour ((lightMode_ ? juce::Colour (0xe0f2f2f7) : juce::Colour (0xe01c1c1e)));
+        g.fillRoundedRectangle (lx, ly, tw, th, 4.0f);
+        g.setColour (crossCol);
+        g.drawText (label, static_cast<int> (lx), static_cast<int> (ly),
+                    static_cast<int> (tw), static_cast<int> (th),
+                    juce::Justification::centred, false);
     }
 }
 
@@ -1035,4 +1155,48 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
     }
 }
 
+//==============================================================================
+void LogComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (! fftEnabled_) return;
+
+    const auto bounds = getLocalBounds().toFloat().reduced (4.0f);
+    const juce::Rectangle<float> plot (
+        bounds.getX() + 80.0f,
+        bounds.getY() + 116.0f,
+        bounds.getWidth()  - 80.0f - 75.0f,
+        bounds.getHeight() - 116.0f - 50.0f);
+
+    if (plot.contains (e.position))
+    {
+        fftCrosshairActive_ = ! fftCrosshairActive_;
+        fftCrosshairPos_ = e.position;
+        repaint();
+    }
+    else
+    {
+        if (fftCrosshairActive_)
+        {
+            fftCrosshairActive_ = false;
+            repaint();
+        }
+    }
+}
+
+void LogComponent::mouseMove (const juce::MouseEvent& e)
+{
+    if (! fftCrosshairActive_ || ! fftEnabled_) return;
+
+    fftCrosshairPos_ = e.position;
+    repaint();
+}
+
+void LogComponent::mouseExit (const juce::MouseEvent&)
+{
+    if (fftCrosshairActive_)
+    {
+        fftCrosshairActive_ = false;
+        repaint();
+    }
+}
 
