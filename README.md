@@ -317,6 +317,16 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v2.9.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.9.0)
+- **L_FFT spectrum analyzer** — new sub-app (Tools menu) showing a real-time 1/N octave band spectrum with log-frequency axis and dB SPL y-axis; reads all FFT settings from the Settings pane (window type, band resolution, smoothing, gain, RTA mode, display mode, peak hold, freq range)
+- **FFT snapshot storage** — capture the current spectrum with the ✎ button; snapshots are listed in a sidebar with timestamp names, colour dots, and visibility toggles; click a snapshot to show/hide, right-click or Delete to remove; Cmd+Z undoes deletions
+- **Per-snapshot styling** — gear icon on each snapshot opens a settings panel to change the overlay colour (10 swatches) and line style (solid, dashed, dotted, dash-dot)
+- **FFT cycle averaging** — editable "Avg N" field (1–999) in the Settings FFT section; averages N consecutive FFT frames before computing band energies for a smoother display; applied in both the main FFT view and L_FFT
+- **FFT frequency range in Settings** — f Lower / f Upper sliders moved from the right-click callout into the FFT section as vertical sliders; upper frequency limit extended to 100 kHz
+- **L_FFT Y-axis zoom** — magnifying glass opens a callout to set the dB SPL display range (own parameters, independent of the main SPL plot)
+- **Hold time editing** — clicking the hold time label in the title bar now shows only the numeric value in the editor (not the full "Hold time: X s" text)
+- **Settings pane widened** to 720px; bandpass button renamed to "20Hz–20kHz Bandpass"
+
 ### [v2.8.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.8.0)
 - **Fix crash when loading correction filter** — the convolution engine was prepared for 8 channels but the audio buffer could have 18+, causing a null-pointer dereference on the audio thread; also fixed a race condition where the IR was used before async background processing completed
 - **FFT crosshair cursor** — click in the FFT plot to show a crosshair snapping to the nearest octave band with frequency and level readout; follows the mouse, adapts to light/dark mode
