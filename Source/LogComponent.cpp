@@ -872,6 +872,31 @@ void LogComponent::computeFftBands()
     fft_.performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
     // fftBuffer_[0..kFftSize/2] now holds magnitudes
 
+    // --- Accumulate for cycle averaging ---
+    const int avgCycles = juce::jlimit (1, 999,
+        static_cast<int> (processor.apvts.getRawParameterValue ("fftAvgCycles")->load()));
+
+    if (static_cast<int> (fftAvgAccum_.size()) != kFftSize / 2)
+    {
+        fftAvgAccum_.assign (kFftSize / 2, 0.0f);
+        fftAvgCount_ = 0;
+    }
+
+    for (int k = 0; k < kFftSize / 2; ++k)
+        fftAvgAccum_[k] += fftBuffer_[k];
+
+    ++fftAvgCount_;
+
+    if (fftAvgCount_ < avgCycles)
+        return;
+
+    const float invAvg = 1.0f / static_cast<float> (fftAvgCount_);
+    for (int k = 0; k < kFftSize / 2; ++k)
+        fftBuffer_[k] = fftAvgAccum_[k] * invAvg;
+
+    fftAvgAccum_.assign (kFftSize / 2, 0.0f);
+    fftAvgCount_ = 0;
+
     const float normFactor = static_cast<float> (kFftSize);
 
     // Determine resolution (N = subdivisions per octave)

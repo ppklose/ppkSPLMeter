@@ -67,6 +67,10 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftOverlap", "FFT Overlap",
         juce::StringArray { "0%", "25%", "50%", "75%" }, 2));
 
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "fftAvgCycles", "FFT Avg Cycles",
+        1, 999, 1));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftRTAMode", "FFT RTA +3dB/oct", false));
 
@@ -91,7 +95,15 @@ SPLMeterAudioProcessor::createParameterLayout()
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "fftUpperFreq", "FFT Upper Freq (Hz)",
-        juce::NormalisableRange<float> (100.0f, 20000.0f, 1.0f, 0.4f), 20000.0f));
+        juce::NormalisableRange<float> (100.0f, 100000.0f, 1.0f, 0.3f), 20000.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "lfftYMin", "L_FFT Y-axis Min (dB)",
+        juce::NormalisableRange<float> (0.0f, 120.0f, 1.0f), 20.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "lfftYMax", "L_FFT Y-axis Max (dB)",
+        juce::NormalisableRange<float> (30.0f, 150.0f, 1.0f), 130.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "splYMin", "SPL Y-axis Min (dB)",

@@ -363,7 +363,6 @@ public:
         calSlider.addMouseListener       (this, false);
         holdSlider.addMouseListener      (this, false);
         fftGainSlider.addMouseListener   (this, false);
-        fftEnableButton.addMouseListener (this, false);
         holdSlider.setTooltip ("Hold time in seconds");
         fftSmoothSlider.setTooltip ("Spectral smoothing (0 = off, 0.95 = heavy)");
 
@@ -476,6 +475,33 @@ public:
         ovlp50Button.onClick = [this, &p] { setChoiceParam (p, "fftOverlap", 2); };
         ovlp75Button.onClick = [this, &p] { setChoiceParam (p, "fftOverlap", 3); };
 
+        // FFT averaging cycles (editable label)
+        avgCyclesLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+        avgCyclesLabel.setJustificationType (juce::Justification::centred);
+        avgCyclesLabel.setColour (juce::Label::backgroundColourId,       juce::Colour (0xff3a3a3c));
+        avgCyclesLabel.setColour (juce::Label::textColourId,             juce::Colours::white);
+        avgCyclesLabel.setColour (juce::Label::outlineColourId,          juce::Colour (0xff48484a));
+        avgCyclesLabel.setColour (juce::Label::outlineWhenEditingColourId, juce::Colour (0xff5ac8fa));
+        avgCyclesLabel.setEditable (true, true);
+        avgCyclesLabel.setTooltip ("Number of FFT frames to average (1-999)");
+        avgCyclesLabel.onEditorShow = [this]
+        {
+            if (auto* ed = avgCyclesLabel.getCurrentTextEditor())
+            {
+                int val = static_cast<int> (processor.apvts.getRawParameterValue ("fftAvgCycles")->load());
+                ed->setText (juce::String (val), false);
+                ed->selectAll();
+                ed->setInputRestrictions (3, "0123456789");
+            }
+        };
+        avgCyclesLabel.onTextChange = [this]
+        {
+            int val = juce::jlimit (1, 999, avgCyclesLabel.getText().trim().getIntValue());
+            auto* param = processor.apvts.getParameter ("fftAvgCycles");
+            param->setValueNotifyingHost (param->convertTo0to1 (static_cast<float> (val)));
+        };
+        addAndMakeVisible (avgCyclesLabel);
+
         bandRes11Button.onClick  = [this, &p] { setChoiceParam (p, "fftBandRes", 0); };
         bandRes13Button.onClick  = [this, &p] { setChoiceParam (p, "fftBandRes", 1); };
         bandRes16Button.onClick  = [this, &p] { setChoiceParam (p, "fftBandRes", 2); };
@@ -516,6 +542,18 @@ public:
             param->setValueNotifyingHost (fftRTAButton.getToggleState() ? 1.0f : 0.0f);
         };
         addAndMakeVisible (fftRTAButton);
+
+        // FFT frequency range sliders
+        setupKnob (fftLowerFreqSlider, fftLowerFreqLabel, "f Lower");
+        setupKnob (fftUpperFreqSlider, fftUpperFreqLabel, "f Upper");
+        fftLowerFreqSlider.setTextValueSuffix (" Hz");
+        fftUpperFreqSlider.setTextValueSuffix (" Hz");
+        addAndMakeVisible (fftLowerFreqSlider);  addAndMakeVisible (fftLowerFreqLabel);
+        addAndMakeVisible (fftUpperFreqSlider);  addAndMakeVisible (fftUpperFreqLabel);
+        fftLowerFreqAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftLowerFreq", fftLowerFreqSlider);
+        fftUpperFreqAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            p.apvts, "fftUpperFreq", fftUpperFreqSlider);
 
         // Correction filter row
         correctionEnableButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
@@ -730,19 +768,30 @@ public:
         // === FFT ===
         sectionFftLabel.setBounds (row (16)); gap (5);
         {
-            auto r = row (28); gap (5);
+            auto r = row (95); gap (5);
+
+            // Right side: two vertical freq-range sliders
+            const int sliderW = 70;
+            auto upperSect = r.removeFromRight (sliderW);
+            auto lowerSect = r.removeFromRight (sliderW);
+            fftLowerFreqLabel.setBounds  (lowerSect.removeFromTop (22));
+            fftLowerFreqSlider.setBounds (lowerSect);
+            fftUpperFreqLabel.setBounds  (upperSect.removeFromTop (22));
+            fftUpperFreqSlider.setBounds (upperSect);
+
+            // Left side: FFT + BP buttons (top), Gain + Smooth sliders (bottom)
+            auto btnRow = r.removeFromTop (28);
             const int bw = r.getWidth() / 2;
-            fftEnableButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            bandpassButton.setBounds  (r.reduced (2, 0));
-        }
-        {
-            auto faderRow = row (95); gap (5);
-            const int fw = faderRow.getWidth() / 2;
-            auto gainSect = faderRow.removeFromLeft (fw);
+            fftEnableButton.setBounds (btnRow.removeFromLeft (bw).reduced (2, 0));
+            bandpassButton.setBounds  (btnRow.reduced (2, 0));
+
+            r.removeFromTop (5);
+            const int fw = r.getWidth() / 2;
+            auto gainSect = r.removeFromLeft (fw);
             fftGainLabel.setBounds    (gainSect.removeFromTop (22));
             fftGainSlider.setBounds   (gainSect);
-            fftSmoothLabel.setBounds  (faderRow.removeFromTop (22));
-            fftSmoothSlider.setBounds (faderRow);
+            fftSmoothLabel.setBounds  (r.removeFromTop (22));
+            fftSmoothSlider.setBounds (r);
         }
         {
             auto r = row (28); gap (5);
@@ -773,11 +822,12 @@ public:
         }
         {
             auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 4;
-            ovlp0Button.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp25Button.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp50Button.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp75Button.setBounds (r.reduced (2, 0));
+            const int bw = r.getWidth() / 5;
+            ovlp0Button.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
+            ovlp25Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
+            ovlp50Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
+            ovlp75Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
+            avgCyclesLabel.setBounds (r.reduced (2, 0));
         }
 
         gap (10); // section gap
@@ -824,16 +874,6 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (!e.mods.isRightButtonDown()) return;
-
-        if (e.eventComponent == &fftEnableButton)
-        {
-            auto panel = std::make_unique<FftRangePanel> (processor);
-            juce::CallOutBox::launchAsynchronously (
-                std::move (panel),
-                fftEnableButton.getScreenBounds(),
-                nullptr);
-            return;
-        }
 
         int paramIdx = -1;
         if      (e.eventComponent == &calSlider)     paramIdx = 0;
@@ -936,14 +976,14 @@ private:
         graphOverlay2LoadButton.setColour  (juce::TextButton::textColourOffId, textOff);
         graphOverlay2ClearButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
 
-        for (auto* label : { &calLabel, &holdLabel, &fftGainLabel, &fftSmoothLabel })
+        for (auto* label : { &calLabel, &holdLabel, &fftGainLabel, &fftSmoothLabel, &fftLowerFreqLabel, &fftUpperFreqLabel })
             label->setColour (juce::Label::textColourId, textLbl);
 
         const juce::Colour sectionCol = light ? juce::Colour (0xff6c6c70) : juce::Colour (0xff8e8e93);
         for (auto* lbl : { &sectionGeneralLabel, &sectionFftLabel, &sectionAnalysisLabel, &sectionChannelsLabel })
             lbl->setColour (juce::Label::textColourId, sectionCol);
 
-        for (auto* s : { &calSlider, &holdSlider, &fftGainSlider, &fftSmoothSlider })
+        for (auto* s : { &calSlider, &holdSlider, &fftGainSlider, &fftSmoothSlider, &fftLowerFreqSlider, &fftUpperFreqSlider })
         {
             s->setColour (juce::Slider::textBoxTextColourId, textOff);
             s->setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
@@ -990,6 +1030,10 @@ private:
         ovlp25Button.setToggleState (overlapI == 1, juce::dontSendNotification);
         ovlp50Button.setToggleState (overlapI == 2, juce::dontSendNotification);
         ovlp75Button.setToggleState (overlapI == 3, juce::dontSendNotification);
+
+        int avgCyc = static_cast<int> (processor.apvts.getRawParameterValue ("fftAvgCycles")->load());
+        if (! avgCyclesLabel.isBeingEdited())
+            avgCyclesLabel.setText ("Avg " + juce::String (avgCyc), juce::dontSendNotification);
 
         bandRes11Button.setToggleState  (bandRes == 0, juce::dontSendNotification);
         bandRes13Button.setToggleState  (bandRes == 1, juce::dontSendNotification);
@@ -1056,9 +1100,12 @@ private:
 
     juce::Slider calSlider, holdSlider, fftGainSlider, fftSmoothSlider;
     juce::Label  calLabel,  holdLabel,  fftGainLabel,  fftSmoothLabel;
+    juce::Slider fftLowerFreqSlider, fftUpperFreqSlider;
+    juce::Label  fftLowerFreqLabel,  fftUpperFreqLabel;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        calAttachment, holdAttachment, fftGainAttachment, fftSmoothAttachment;
+        calAttachment, holdAttachment, fftGainAttachment, fftSmoothAttachment,
+        fftLowerFreqAttachment, fftUpperFreqAttachment;
 
     // Band resolution
     juce::TextButton bandRes11Button  { "1/1 Oct"  };
@@ -1083,15 +1130,16 @@ private:
     juce::TextButton winFlatButton    { "Flat-top" };
     juce::TextButton winRectButton    { "Rect"     };
 
-    // Overlap
+    // Overlap + averaging
     juce::TextButton ovlp0Button  { "0%"  };
     juce::TextButton ovlp25Button { "25%" };
     juce::TextButton ovlp50Button { "50%" };
     juce::TextButton ovlp75Button { "75%" };
+    juce::Label      avgCyclesLabel;
 
-    juce::TextButton fftEnableButton  { "FFT (right click for f limits)" };
+    juce::TextButton fftEnableButton  { "FFT" };
     juce::TextButton lightModeButton  { "Light Mode" };
-    juce::TextButton bandpassButton   { "20-20k BP" };
+    juce::TextButton bandpassButton   { "20Hz-20kHz Bandpass" };
     juce::TextButton line94Button     { "94 dB Line" };
     juce::TextButton fullscreenButton { "Full Screen" };
 
@@ -1137,7 +1185,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (620, 796);
+        content->setSize (720, 796);
         setContentOwned (content, true);
         setResizable (false, false);
     }

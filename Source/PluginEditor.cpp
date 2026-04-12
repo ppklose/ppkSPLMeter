@@ -167,10 +167,18 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     holdTimeLabel.setColour (juce::Label::outlineWhenEditingColourId, juce::Colour (0xff5ac8fa));
     holdTimeLabel.setEditable (true, true);
     holdTimeLabel.setTooltip ("Peak hold time (s) - click to edit");
+    holdTimeLabel.onEditorShow = [this]
+    {
+        if (auto* ed = holdTimeLabel.getCurrentTextEditor())
+        {
+            float val = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
+            ed->setText (juce::String (val, 1), false);
+            ed->selectAll();
+        }
+    };
     holdTimeLabel.onTextChange = [this]
     {
         float val = holdTimeLabel.getText()
-                        .upToFirstOccurrenceOf (" s", false, false)
                         .trim()
                         .getFloatValue();
         val = juce::jlimit (0.1f, 5.0f, val);
@@ -294,6 +302,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     {
         juce::PopupMenu menu;
         menu.addItem (1, "Spectrogram");
+        menu.addItem (4, "L_FFT");
         menu.addItem (3, "SoundDetective...");
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
         menu.addItem (2, "ViSQOL");
@@ -321,6 +330,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                 if (result == 1)
                     openWindow (spectrogramWindow,
                                 [this] { return std::make_unique<SpectrogramWindow> (audioProcessor); });
+                else if (result == 4)
+                    openWindow (lfftWindow,
+                                [this] { return std::make_unique<LFFTWindow> (audioProcessor); });
                 else if (result == 3)
                 {
                     openWindow (soundDetectiveWindow,
@@ -434,7 +446,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.8.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v2.9.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }

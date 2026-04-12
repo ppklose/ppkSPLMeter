@@ -68,6 +68,8 @@ private:
     float                           fftBandsSmoothed_[kMaxFftBands] {};
     float                           fftPeakBands_[kMaxFftBands] {};
     double                          fftPeakTimestamps_[kMaxFftBands] {};
+    std::vector<float>              fftAvgAccum_;
+    int                             fftAvgCount_        = 0;
     int                             currentNumBands_    = 0;
     int                             currentBandN_       = -1;
     int                             currentWindowType_  = -1;

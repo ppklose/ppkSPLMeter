@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 2.8.0)
+project(SPLMeter VERSION 2.9.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     2.8.0
+    VERSION                     2.9.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
