@@ -32,12 +32,13 @@ jobs:
           path: |
             build/_deps
             build/CMakeCache.txt
+            build/flatbuffers
             build/flatbuffers-*
             build/fft2d
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v6-macos
+          key: juce-8.0.7-tflite-2.16.2-v7-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -174,12 +175,13 @@ jobs:
           path: |
             build/_deps
             build/CMakeCache.txt
+            build/flatbuffers
             build/flatbuffers-*
             build/fft2d
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-v6-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-v7-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -233,12 +235,13 @@ jobs:
           path: |
             build/_deps
             build/CMakeCache.txt
+            build/flatbuffers
             build/flatbuffers-*
             build/fft2d
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v6-linux
+          key: juce-8.0.7-tflite-2.16.2-v7-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
