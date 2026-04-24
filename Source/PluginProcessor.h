@@ -165,6 +165,10 @@ public:
     bool isFileModeActive() const noexcept { return fileModeActive.load(); }
     double getFilePosition() const { return transportSource.getCurrentPosition(); }
     double getFileLength()   const { return transportSource.getLengthInSeconds(); }
+    bool isFilePlaying()     const { return transportSource.isPlaying(); }
+    void seekTo (double positionSeconds)    { transportSource.setPosition (positionSeconds); }
+    void startPlayback()                    { transportSource.start(); fileModeActive.store (true); }
+    void stopPlayback()                     { transportSource.stop(); }
 
     //==========================================================================
     // Correction filter
@@ -196,6 +200,15 @@ public:
     //==========================================================================
     // WAV recorder
     bool saveWavToFile (const juce::File& destFile);
+
+    //==========================================================================
+    // Impulse Fidelity
+    void startImpulseFidelityTest (const juce::AudioBuffer<float>& signal);
+    void stopImpulseFidelityTest();
+    bool isImpulseFidelityActive()     const noexcept { return impFidActive_.load(); }
+    int  getImpulseFidelityPosition()  const noexcept { return impFidPos_.load(); }
+    int  getImpulseFidelitySignalLength() const noexcept { return impFidSignalLen_; }
+    std::vector<float> getImpulseFidelityCapture();
 
     //==========================================================================
     // SoundDetective
@@ -340,6 +353,13 @@ private:
     std::vector<float>  wavCircBuf_[2];
     std::atomic<int>    wavWritePos_ { 0 };
     int                 wavBufSize_  { 0 };
+
+    // Impulse Fidelity test signal generator + capture
+    juce::AudioBuffer<float>  impFidTestSignal_;
+    std::vector<float>        impFidCapture_;
+    std::atomic<bool>         impFidActive_    { false };
+    std::atomic<int>          impFidPos_       { 0 };
+    int                       impFidSignalLen_ { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessor)
 };

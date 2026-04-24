@@ -304,6 +304,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (1, "Spectrogram");
         menu.addItem (4, "L_FFT");
         menu.addItem (3, "SoundDetective...");
+        menu.addItem (5, "Long-term SPL");
+        menu.addItem (6, "Impulse Fidelity");
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
         menu.addItem (2, "ViSQOL");
 #endif
@@ -343,6 +345,12 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                         log.setSoundEvents ({});
                     };
                 }
+                else if (result == 5)
+                    openWindow (longTermSPLWindow,
+                                [this] { return std::make_unique<LongTermSPLWindow> (audioProcessor); });
+                else if (result == 6)
+                    openWindow (impulseFidelityWindow,
+                                [this] { return std::make_unique<ImpulseFidelityWindow> (audioProcessor); });
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
                 else if (result == 2)
                 {
@@ -446,7 +454,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v2.9.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.0.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -1049,6 +1057,9 @@ void SPLMeterAudioProcessorEditor::timerCallback()
 
     // Pause button: keep toggle state in sync with processor (may be changed externally)
     pauseButton.setToggleState (audioProcessor.isPaused(), juce::dontSendNotification);
+
+    // Monitor button: keep in sync with processor (may be toggled from Long-term SPL window)
+    monitorButton.setToggleState (audioProcessor.isMonitorEnabled(), juce::dontSendNotification);
 
     // DAW sync indicator: dim the dawSyncToggle when synced but DAW is stopped
     if (audioProcessor.isDawSync())

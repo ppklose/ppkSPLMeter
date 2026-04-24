@@ -7,6 +7,8 @@
 #include "SpectrogramComponent.h"
 #include "SoundDetectiveComponent.h"
 #include "LFFTComponent.h"
+#include "LongTermSPLComponent.h"
+#include "ImpulseFidelityComponent.h"
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
  #include "VisqolComponent.h"
 #endif
@@ -234,6 +236,8 @@ private:
     std::unique_ptr<SpectrogramWindow>    spectrogramWindow;
     std::unique_ptr<SoundDetectiveWindow> soundDetectiveWindow;
     std::unique_ptr<LFFTWindow>           lfftWindow;
+    std::unique_ptr<LongTermSPLWindow>    longTermSPLWindow;
+    std::unique_ptr<ImpulseFidelityWindow> impulseFidelityWindow;
     std::vector<SoundEvent>               allSoundEvents_;
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;

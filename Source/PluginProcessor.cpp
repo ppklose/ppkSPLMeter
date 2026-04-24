@@ -486,6 +486,21 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // Impulse Fidelity: capture input BEFORE monitor mute
+    const bool impFidRunning = impFidActive_.load (std::memory_order_acquire);
+    if (impFidRunning)
+    {
+        int pos = impFidPos_.load (std::memory_order_relaxed);
+        for (int s = 0; s < numSamples && pos < impFidSignalLen_; ++s, ++pos)
+        {
+            float monoIn = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                monoIn += buffer.getReadPointer (ch)[s];
+            monoIn /= static_cast<float> (juce::jmax (1, numChannels));
+            impFidCapture_[static_cast<size_t> (pos)] = monoIn;
+        }
+    }
+
     // Apply monitor gain or mute output
     if (monitorEnabled.load())
     {
@@ -496,6 +511,23 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     else
     {
         buffer.clear();
+    }
+
+    // Impulse Fidelity: inject test signal AFTER monitor (always reaches output)
+    if (impFidRunning)
+    {
+        int pos = impFidPos_.load (std::memory_order_relaxed);
+        const float* testData = impFidTestSignal_.getReadPointer (0);
+        for (int s = 0; s < numSamples; ++s)
+        {
+            const float sample = (pos < impFidSignalLen_) ? testData[pos] : 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.getWritePointer (ch)[s] = sample;
+            ++pos;
+        }
+        impFidPos_.store (pos, std::memory_order_release);
+        if (pos >= impFidSignalLen_)
+            impFidActive_.store (false, std::memory_order_release);
     }
 }
 
@@ -930,6 +962,30 @@ bool SPLMeterAudioProcessor::saveWavToFile (const juce::File& destFile)
 
     std::unique_ptr<juce::AudioFormatWriter> writerOwner (writer);
     return writerOwner->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
+}
+
+//==============================================================================
+// Impulse Fidelity
+void SPLMeterAudioProcessor::startImpulseFidelityTest (const juce::AudioBuffer<float>& signal)
+{
+    impFidActive_.store (false, std::memory_order_seq_cst);
+
+    impFidSignalLen_ = signal.getNumSamples();
+    impFidTestSignal_.makeCopyOf (signal);
+    impFidCapture_.assign (static_cast<size_t> (impFidSignalLen_), 0.0f);
+    impFidPos_.store (0, std::memory_order_relaxed);
+
+    impFidActive_.store (true, std::memory_order_release);
+}
+
+void SPLMeterAudioProcessor::stopImpulseFidelityTest()
+{
+    impFidActive_.store (false, std::memory_order_release);
+}
+
+std::vector<float> SPLMeterAudioProcessor::getImpulseFidelityCapture()
+{
+    return impFidCapture_;
 }
 
 //==============================================================================
