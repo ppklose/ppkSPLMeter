@@ -186,8 +186,98 @@ void MeterComponent::paint (juce::Graphics& g)
         }
     }
 
+    // ---- DIN 15905-5 strip: LAeq,30min + LCpeak with compliance status ----
+    const float dinY = peakY + barH + 8.0f;
+    const float dinH = 22.0f;
+    {
+        const bool laeqValid   = laeq30Min_ > -100.0f;
+        const bool lcpeakValid = lcPeak_    > -100.0f;
+
+        // Threshold colours per DIN 15905-5 (LAeq,30min ≤ 99, LCpeak ≤ 135)
+        auto laeqCol = [&] () -> juce::Colour
+        {
+            if (! laeqValid)               return textSecond;
+            if (laeq30Min_ >= 99.0f)        return juce::Colour (0xffff3b30); // red
+            if (laeq30Min_ >= 95.0f)        return juce::Colour (0xffffd60a); // yellow
+            return juce::Colour (0xff34c759);                                  // green
+        }();
+        auto lcpkCol = [&] () -> juce::Colour
+        {
+            if (! lcpeakValid)             return textSecond;
+            if (lcPeak_   >= 135.0f)        return juce::Colour (0xffff3b30);
+            if (lcPeak_   >= 130.0f)        return juce::Colour (0xffffd60a);
+            return juce::Colour (0xff34c759);
+        }();
+
+        const bool overLimit = (laeqValid   && laeq30Min_ >= 99.0f)
+                            || (lcpeakValid && lcPeak_    >= 135.0f);
+        const bool warn      = ! overLimit
+                            && ((laeqValid   && laeq30Min_ >= 95.0f)
+                             || (lcpeakValid && lcPeak_    >= 130.0f));
+        const juce::Colour statusCol = overLimit ? juce::Colour (0xffff3b30)
+                                     : warn      ? juce::Colour (0xffffd60a)
+                                                 : juce::Colour (0xff34c759);
+        const char* statusText = overLimit ? "LIMIT" : warn ? "WARN" : "OK";
+
+        // Header label
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        g.setColour (textSecond);
+        int curX = static_cast<int> (barAreaX);
+        const int hdrW = 110;
+        g.drawText ("DIN 15905-5",
+                    curX, static_cast<int> (dinY),
+                    hdrW, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += hdrW;
+
+        // LAeq,30min readout
+        const int laeqW = 240;
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setColour (textSecond);
+        g.drawText ("LAeq,30min:",
+                    curX, static_cast<int> (dinY),
+                    104, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
+        g.setColour (laeqCol);
+        g.drawText (laeqValid ? juce::String (laeq30Min_, 1) + " dB(A)" : juce::String ("-- dB(A)"),
+                    curX + 104, static_cast<int> (dinY),
+                    laeqW - 104, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += laeqW;
+
+        // LCpeak readout
+        const int lcpkW = 220;
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setColour (textSecond);
+        g.drawText ("LCpeak:",
+                    curX, static_cast<int> (dinY),
+                    72, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
+        g.setColour (lcpkCol);
+        g.drawText (lcpeakValid ? juce::String (lcPeak_, 1) + " dB(C)" : juce::String ("-- dB(C)"),
+                    curX + 72, static_cast<int> (dinY),
+                    lcpkW - 72, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += lcpkW;
+
+        // Compliance status pill
+        const int pillW = 64;
+        auto pill = juce::Rectangle<float> (static_cast<float> (curX),
+                                            dinY + 2.0f,
+                                            static_cast<float> (pillW),
+                                            dinH - 4.0f);
+        g.setColour (statusCol);
+        g.fillRoundedRectangle (pill, 4.0f);
+        g.setColour (lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
+        g.drawText (statusText, pill.toNearestInt(),
+                    juce::Justification::centred, false);
+    }
+
     // ---- Psychoacoustic table (2-column grid, 4 rows) ----
-    const float tableY   = peakY + barH + 12.0f;
+    const float tableY   = dinY + dinH + 8.0f;
     const float rowH     = 20.0f;
     const float rowGap   = 6.0f;
     const float colW     = barAreaW / 2.0f;

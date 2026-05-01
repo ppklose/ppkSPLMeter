@@ -317,6 +317,11 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.2.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.2.0)
+- **DIN 15905-5 compliance readout** — new strip in the main meter showing the sliding 30-min A-weighted equivalent continuous level (LAeq,30min) and the session-long C-weighted peak (LCpeak), each color-coded against the standard's thresholds (green / yellow at 95 dB(A) / 130 dB(C) / red at 99 dB(A) / 135 dB(C)) plus an OK / WARN / LIMIT compliance pill
+- **DIN 15905-5 in Long-term SPL** — after offline file analysis, the worst-case sliding-30-min LAeq and the overall LCpeak (max |x_C|) are computed and shown beneath the existing stats line, with the same color-coded compliance status
+- **Session LCpeak** — `peakDBCSPL` is now also accumulated as a session-long maximum (independent of the regular peak-hold time) and reset by the Reset button or a FAST/SLOW switch
+
 ### [v3.1.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.1.0)
 - **Output VU meter** — vertical L/R peak bargraph next to the master volume control; -60..+6 dBFS scale with green / yellow / orange / red zones, fast attack and ~250 ms release smoothing, 0 dBFS reference tick
 - **Master volume as 270° rotary knob** — replaces the linear fader in the title bar; maximum gain raised from +12 dB to **+32 dB**

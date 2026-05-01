@@ -62,6 +62,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     resetButton.onClick = [this]
     {
         audioProcessor.resetPeak();
+        audioProcessor.resetSessionPeak();
         audioProcessor.clearLog();
         meter.reset();
     };
@@ -263,7 +264,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
-            const int basicH = 100 + 215 + 24;  // title + meter + build strip
+            const int basicH = 100 + 245 + 24;  // title + meter + build strip
             setResizeLimits (480, basicH, 3840, 2160);
             setSize (getWidth(), basicH);
         }
@@ -461,7 +462,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.1.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.2.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -503,7 +504,7 @@ void SPLMeterAudioProcessorEditor::resized()
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 8, 60, 80);
     outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 78);
 
-    const int meterHeight = 240;
+    const int meterHeight = 270;
     auto meterArea = area.removeFromTop (meterHeight);
     meter.setBounds (meterArea);
 
@@ -1042,9 +1043,11 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getTonality());
 
     // Compute LAeq / LCeq from log entries (energy average over logDuration)
+    // and DIN 15905-5 LAeq,30min (sliding 30-min window over the available log)
     {
         auto logEntries = audioProcessor.copyLog();
         float laeq = 0.0f, lceq = 0.0f;
+        float laeq30 = -999.0f;
         if (!logEntries.empty())
         {
             double sumA = 0.0, sumC = 0.0;
@@ -1056,8 +1059,24 @@ void SPLMeterAudioProcessorEditor::timerCallback()
             double n = static_cast<double> (logEntries.size());
             laeq = static_cast<float> (10.0 * std::log10 (sumA / n));
             lceq = static_cast<float> (10.0 * std::log10 (sumC / n));
+
+            // DIN 15905-5: LAeq over the last 30 min (1 800 000 ms)
+            const juce::int64 latestMs = logEntries.back().timestampMs;
+            constexpr juce::int64 kWindowMs = 30 * 60 * 1000;
+            double sumA30 = 0.0;
+            int    n30    = 0;
+            for (auto it = logEntries.rbegin(); it != logEntries.rend(); ++it)
+            {
+                if (latestMs - it->timestampMs > kWindowMs)
+                    break;
+                sumA30 += std::pow (10.0, static_cast<double> (it->rmsDBASPL) / 10.0);
+                ++n30;
+            }
+            if (n30 > 0)
+                laeq30 = static_cast<float> (10.0 * std::log10 (sumA30 / n30));
         }
         meter.setLeq (laeq, lceq);
+        meter.setDinValues (laeq30, audioProcessor.getSessionPeakDBCSPL());
     }
 
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();

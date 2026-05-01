@@ -576,6 +576,12 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.peakSPL      = linearToDBFS (rawPk)  + calOffset;
     e.peakDBASPL   = linearToDBFS (aPk)    + calOffset;
     e.peakDBCSPL   = linearToDBFS (cPk)    + calOffset;
+    {
+        // DIN 15905-5 LCpeak: session-long maximum (audio thread only writer)
+        const float prev = sessionPeakDBCSPL_.load (std::memory_order_relaxed);
+        if (e.peakDBCSPL > prev)
+            sessionPeakDBCSPL_.store (e.peakDBCSPL, std::memory_order_relaxed);
+    }
     e.rmsSPL       = linearToDBFS (rawRms) + calOffset;
     e.rmsDBASPL    = linearToDBFS (aRms)   + calOffset;
     e.rmsDBCSPL    = linearToDBFS (cRms)   + calOffset;

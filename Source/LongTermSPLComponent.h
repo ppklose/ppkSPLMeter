@@ -320,6 +320,12 @@ class LongTermSPLWindow : public juce::DocumentWindow
             statsLabel.setJustificationType (juce::Justification::centredLeft);
             addAndMakeVisible (statsLabel);
 
+            dinStatsLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New")
+                                                                  .withHeight (12.0f).withStyle ("Bold")));
+            dinStatsLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8e8e93));
+            dinStatsLabel.setJustificationType (juce::Justification::centredLeft);
+            addAndMakeVisible (dinStatsLabel);
+
             statusLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
             statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8e8e93));
             statusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -427,6 +433,11 @@ class LongTermSPLWindow : public juce::DocumentWindow
             lzfToggle.setBounds (row3.removeFromLeft (60));
             row3.removeFromLeft (8);
             statsLabel.setBounds (row3);
+
+            // Row 3b: DIN 15905-5 stats
+            auto row3b = r.removeFromTop (20).reduced (0, 1);
+            row3b.removeFromLeft (188);  // align with stats text (after toggle buttons + gap)
+            dinStatsLabel.setBounds (row3b);
             r.removeFromTop (4);
 
             // Bottom: status
@@ -845,6 +856,7 @@ class LongTermSPLWindow : public juce::DocumentWindow
             const double alpha = 1.0 - std::exp (-1.0 / (tau * sr));
 
             double rmsA = 0.0, rmsC = 0.0, rmsZ = 0.0;
+            double maxAbsC = 0.0;   // for DIN 15905-5 LCpeak (overall max of |C-weighted sample|)
 
             const int logInterval = std::max (1, static_cast<int> (0.125 * sr));
             int sampleCounter = 0;
@@ -884,6 +896,9 @@ class LongTermSPLWindow : public juce::DocumentWindow
                     float aSample = aWeight.processSample (raw);
                     float cSample = cWeight.processSample (raw);
 
+                    const double absC = std::fabs (static_cast<double> (cSample));
+                    if (absC > maxAbsC) maxAbsC = absC;
+
                     rmsA += alpha * (static_cast<double> (aSample) * aSample - rmsA);
                     rmsC += alpha * (static_cast<double> (cSample) * cSample - rmsC);
                     rmsZ += alpha * (static_cast<double> (raw)     * raw     - rmsZ);
@@ -907,6 +922,11 @@ class LongTermSPLWindow : public juce::DocumentWindow
             for (const auto& wb : waveformOverview)
                 waveformPeak = std::max (waveformPeak,
                                          std::max (std::fabs (wb.minVal), std::fabs (wb.maxVal)));
+
+            // DIN 15905-5: LCpeak = 20·log10(max|x_C|) + calOffset
+            lcPeak_ = (maxAbsC > 0.0)
+                      ? static_cast<float> (20.0 * std::log10 (maxAbsC)) + calOffset
+                      : -999.0f;
 
             computeStats();
 
@@ -960,6 +980,35 @@ class LongTermSPLWindow : public juce::DocumentWindow
                 lcfMin = minC;
             }
 
+            // DIN 15905-5: max sliding 30-min LAeq across the file (or full-file LAeq
+            // if shorter than 30 min, per the standard's wording).
+            maxLAeq30_ = -999.0f;
+            {
+                constexpr double kWindow = 30.0 * 60.0;
+                double sumA30 = 0.0;
+                int    head   = skip;
+                for (int i = skip; i < static_cast<int> (data.size()); ++i)
+                {
+                    sumA30 += std::pow (10.0, data[i].lafDB / 10.0);
+                    while (head < i && (data[i].timeSeconds - data[head].timeSeconds) > kWindow)
+                    {
+                        sumA30 -= std::pow (10.0, data[head].lafDB / 10.0);
+                        ++head;
+                    }
+                    const int n = i - head + 1;
+                    if (n > 0)
+                    {
+                        const float leq = static_cast<float> (10.0 * std::log10 (sumA30 / n));
+                        if (leq > maxLAeq30_) maxLAeq30_ = leq;
+                    }
+                }
+            }
+
+            const bool overLimit = (maxLAeq30_ >= 99.0f) || (lcPeak_ >= 135.0f);
+            const bool warn      = ! overLimit
+                                && ((maxLAeq30_ >= 95.0f) || (lcPeak_ >= 130.0f));
+            const juce::String dinStatus = overLimit ? "LIMIT" : warn ? "WARN" : "OK";
+
             statsLabel.setText (
                 "LAeq=" + juce::String (laeq, 1)
                 + "  LAFmax=" + juce::String (lafMax, 1)
@@ -967,6 +1016,19 @@ class LongTermSPLWindow : public juce::DocumentWindow
                 + "  |  LCeq=" + juce::String (lceq, 1)
                 + "  LCFmax=" + juce::String (lcfMax, 1),
                 juce::dontSendNotification);
+
+            dinStatsLabel.setText (
+                "DIN 15905-5:  LAeq,30min(max)="
+                + (maxLAeq30_ > -100.0f ? juce::String (maxLAeq30_, 1) : juce::String ("--"))
+                + " dB(A)    LCpeak="
+                + (lcPeak_    > -100.0f ? juce::String (lcPeak_,    1) : juce::String ("--"))
+                + " dB(C)    [" + dinStatus + "]",
+                juce::dontSendNotification);
+            const juce::Colour okCol   (0xff34c759);
+            const juce::Colour warnCol (0xffffd60a);
+            const juce::Colour limCol  (0xffff3b30);
+            dinStatsLabel.setColour (juce::Label::textColourId,
+                                     overLimit ? limCol : warn ? warnCol : okCol);
         }
 
         //----------------------------------------------------------------------
@@ -1061,6 +1123,7 @@ class LongTermSPLWindow : public juce::DocumentWindow
         juce::ToggleButton lcfToggle;
         juce::ToggleButton lzfToggle;
         juce::Label        statsLabel;
+        juce::Label        dinStatsLabel;
         juce::Label        statusLabel;
 
         juce::TextButton   yZoomButton_;
@@ -1074,6 +1137,9 @@ class LongTermSPLWindow : public juce::DocumentWindow
         float  laeq   = 0.0f, lceq   = 0.0f;
         float  lafMax  = 0.0f, lafMin  = 0.0f;
         float  lcfMax  = 0.0f, lcfMin  = 0.0f;
+        // DIN 15905-5 results
+        float  lcPeak_     = -999.0f;   // overall C-weighted peak (max |x_C|), dB SPL
+        float  maxLAeq30_  = -999.0f;   // worst-case sliding 30-min LAeq, dB(A)
 
         // Axis ranges
         float  yMin_ = 20.0f, yMax_ = 130.0f;

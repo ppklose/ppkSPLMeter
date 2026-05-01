@@ -121,6 +121,7 @@ public:
         atomicRMSSPL.store (-999.0f);
         atomicRMSDBASPL.store (-999.0f);
         atomicRMSDBCSPL.store (-999.0f);
+        sessionPeakDBCSPL_.store (-999.0f);
         clearLog();
     }
 
@@ -161,6 +162,10 @@ public:
     // Output VU level (linear peak per channel, post monitor gain & impulse-fidelity inject)
     float getOutputPeakL () const noexcept { return outputPeakL_.load (std::memory_order_relaxed); }
     float getOutputPeakR () const noexcept { return outputPeakR_.load (std::memory_order_relaxed); }
+
+    // DIN 15905-5: session-long C-weighted peak (does not decay with peakHoldTime)
+    float getSessionPeakDBCSPL () const noexcept { return sessionPeakDBCSPL_.load (std::memory_order_relaxed); }
+    void  resetSessionPeak     ()       noexcept { sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed); }
 
     //==========================================================================
     // File mode
@@ -325,6 +330,9 @@ private:
     // Output VU peak values (linear |x|, sampled per processBlock at the output stage)
     std::atomic<float> outputPeakL_ { 0.0f };
     std::atomic<float> outputPeakR_ { 0.0f };
+
+    // DIN 15905-5: session-long max C-weighted peak (in dB SPL, with calOffset applied)
+    std::atomic<float> sessionPeakDBCSPL_ { -999.0f };
 
     void pushLogEntry (float rawPeak, float aPeak, float cPeak,
                        float rawRms,  float aRms,  float cRms,
