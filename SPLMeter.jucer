@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="a3f8b2c1" name="SPLMeter" projectType="audioplug" version="3.0.0"
+<JUCERPROJECT id="a3f8b2c1" name="SPLMeter" projectType="audioplug" version="3.1.0"
               jucePath="/Applications/JUCE" displaySplashScreen="0" reportAppUsage="0"
               splashScreenColour="Dark" projectLineFeed="&#10;" companyName="Philipp Paul Klose Audio Engineering"
               companyCopyright="2025 Philipp Paul Klose Audio Engineering"

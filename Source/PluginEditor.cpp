@@ -217,19 +217,26 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     };
     addAndMakeVisible (monitorButton);
 
-    // Monitor gain fader (volume, dB) - same style as calibration fader
-    monitorGainSlider.setSliderStyle (juce::Slider::LinearVertical);
+    // Monitor gain knob (volume, dB) — 270° rotary
+    monitorGainSlider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    monitorGainSlider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
+                                           juce::MathConstants<float>::pi * 2.75f,
+                                           true);
     monitorGainSlider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 52, 16);
     monitorGainSlider.setTextValueSuffix (" dB");
-    monitorGainSlider.setColour (juce::Slider::trackColourId,            juce::Colour (0xff5ac8fa));
-    monitorGainSlider.setColour (juce::Slider::thumbColourId,            juce::Colour (0xff5ac8fa));
-    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId,      juce::Colours::white);
-    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId,   juce::Colours::transparentBlack);
-    monitorGainSlider.setColour (juce::Slider::textBoxHighlightColourId, juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::rotarySliderFillColourId,    juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff3a3a3c));
+    monitorGainSlider.setColour (juce::Slider::thumbColourId,               juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId,         juce::Colours::white);
+    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId,      juce::Colours::transparentBlack);
+    monitorGainSlider.setColour (juce::Slider::textBoxHighlightColourId,    juce::Colour (0xff5ac8fa));
     monitorGainSlider.setTooltip ("Monitor output volume");
     addAndMakeVisible (monitorGainSlider);
     monitorGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         audioProcessor.apvts, "monitorGain", monitorGainSlider);
+
+    outputVUMeter.setTooltip ("Monitor output level (peak, dBFS)");
+    addAndMakeVisible (outputVUMeter);
 
     // Basic / Extended mode toggle
     basicModeButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xffff453a));  // red when Advanced
@@ -454,7 +461,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.0.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.1.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -493,7 +500,8 @@ void SPLMeterAudioProcessorEditor::resized()
     realTimeButton.setBounds (getWidth() / 2 - modeBtnW - 2, modeY, modeBtnW, modeBtnH);
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
-    monitorGainSlider.setBounds (monitorButton.getRight() + 4, 2, 52, 96);
+    monitorGainSlider.setBounds (monitorButton.getRight() + 4, 8, 60, 80);
+    outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 78);
 
     const int meterHeight = 240;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -547,10 +555,12 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 
     dawSyncToggle.setColour (juce::ToggleButton::textColourId, textOff);
 
-    monitorGainSlider.setColour (juce::Slider::trackColourId,       juce::Colour (0xff5ac8fa));
-    monitorGainSlider.setColour (juce::Slider::thumbColourId,       juce::Colour (0xff5ac8fa));
-    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId, textOff);
-    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    monitorGainSlider.setColour (juce::Slider::rotarySliderFillColourId,    juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::rotarySliderOutlineColourId,
+                                 light ? juce::Colour (0xffc7c7cc) : juce::Colour (0xff3a3a3c));
+    monitorGainSlider.setColour (juce::Slider::thumbColourId,               juce::Colour (0xff5ac8fa));
+    monitorGainSlider.setColour (juce::Slider::textBoxTextColourId,         textOff);
+    monitorGainSlider.setColour (juce::Slider::textBoxOutlineColourId,      juce::Colours::transparentBlack);
     // Reset button keeps red text regardless of theme
     resetButton.setColour (juce::TextButton::buttonColourId,  bgBtn);
     resetButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffff453a));
@@ -983,15 +993,29 @@ void SPLMeterAudioProcessorEditor::triggerMarker()
 
 bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
+    const auto mods = key.getModifiers();
+
+    // Ctrl/Cmd+M → toggle monitor (output) mute
+    if (key.getKeyCode() == 'M'
+        && (mods.isCtrlDown() || mods.isCommandDown())
+        && ! mods.isShiftDown())
+    {
+        const bool newOn = ! audioProcessor.isMonitorEnabled();
+        audioProcessor.setMonitorEnabled (newOn);
+        monitorButton.setToggleState (newOn, juce::dontSendNotification);
+        return true;
+    }
+
     // Shift+M → add marker
-    if (key.getTextCharacter() == 'M' && key.getModifiers().isShiftDown())
+    if (key.getTextCharacter() == 'M' && mods.isShiftDown())
     {
         triggerMarker();
         return true;
     }
 
-    // m (without shift) → toggle pause
-    if (key.getTextCharacter() == 'm' && !key.getModifiers().isShiftDown())
+    // m (without shift / ctrl / cmd) → toggle pause
+    if (key.getTextCharacter() == 'm' && ! mods.isShiftDown()
+        && ! mods.isCtrlDown() && ! mods.isCommandDown())
     {
         const bool nowPaused = !audioProcessor.isPaused();
         if (nowPaused) recordPauseStart();
@@ -1060,6 +1084,10 @@ void SPLMeterAudioProcessorEditor::timerCallback()
 
     // Monitor button: keep in sync with processor (may be toggled from Long-term SPL window)
     monitorButton.setToggleState (audioProcessor.isMonitorEnabled(), juce::dontSendNotification);
+
+    // Output VU meter: linear peak per channel from audio thread
+    outputVUMeter.setLevels (audioProcessor.getOutputPeakL(),
+                             audioProcessor.getOutputPeakR());
 
     // DAW sync indicator: dim the dawSyncToggle when synced but DAW is stopped
     if (audioProcessor.isDawSync())

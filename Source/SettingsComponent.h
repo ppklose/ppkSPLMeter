@@ -425,6 +425,60 @@ public:
         };
         addAndMakeVisible (lightModeButton);
 
+        // "Cal to Input" — one-click calibration: take the energy-averaged RMS SPL
+        // over the last ~2 s and set calOffset so the result equals 94 dB SPL.
+        // Useful when input gain cannot be set in hardware.
+        calToInputButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+        calToInputButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        calToInputButton.setTooltip ("Calibrate to a 94 dB reference: averages the last ~2 s of input "
+                                     "and adjusts the Calibration offset so it reads 94 dB SPL.");
+        calToInputButton.onClick = [this, &p]
+        {
+            auto entries = p.copyLog();
+            if (entries.empty())
+            {
+                juce::NativeMessageBox::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Cal to Input",
+                    "No measurement data available. Make sure input is running.");
+                return;
+            }
+
+            // Take entries within the last 2 s of the most recent timestamp
+            const juce::int64 latestMs = entries.back().timestampMs;
+            constexpr juce::int64 windowMs = 2000;
+            constexpr int kMinEntries = 4;  // ≥ 500 ms at 125 ms log interval
+
+            double sumPower = 0.0;
+            int n = 0;
+            for (auto it = entries.rbegin(); it != entries.rend(); ++it)
+            {
+                if (latestMs - it->timestampMs > windowMs)
+                    break;
+                sumPower += std::pow (10.0, static_cast<double> (it->rmsSPL) / 10.0);
+                ++n;
+            }
+
+            if (n < kMinEntries)
+            {
+                juce::NativeMessageBox::showMessageBoxAsync (
+                    juce::AlertWindow::WarningIcon, "Cal to Input",
+                    "Not enough recent data. Please wait at least 2 s with the calibrator running.");
+                return;
+            }
+
+            const float currentLeq    = static_cast<float> (10.0 * std::log10 (sumPower / n));
+            const float currentOffset = p.apvts.getRawParameterValue ("calOffset")->load();
+            const float delta         = 94.0f - currentLeq;
+            const float newOffset     = juce::jlimit (80.0f, 180.0f, currentOffset + delta);
+
+            if (auto* param = p.apvts.getParameter ("calOffset"))
+            {
+                const auto& range = param->getNormalisableRange();
+                param->setValueNotifyingHost (range.convertTo0to1 (newOffset));
+            }
+        };
+        addAndMakeVisible (calToInputButton);
+
         calAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             p.apvts, "calOffset", calSlider);
         holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -757,6 +811,12 @@ public:
             holdSlider.setBounds (faderRow);
         }
         {
+            // "Cal to Input" sits directly below the Calibration fader (left half)
+            auto r = row (28); gap (5);
+            const int bw = r.getWidth() / 2;
+            calToInputButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
+        }
+        {
             auto r = row (28); gap (5);
             const int bw = r.getWidth() / 2;
             lightModeButton.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
@@ -942,6 +1002,7 @@ private:
         };
         styleBtn (fftEnableButton,   juce::Colour (0xff34c759));
         styleBtn (fullscreenButton,  juce::Colour (0xff5ac8fa));
+        styleBtn (calToInputButton,  juce::Colour (0xff5ac8fa));
         styleBtn (winHannButton,    juce::Colour (0xffbf5af2));
         styleBtn (winHammingButton, juce::Colour (0xffbf5af2));
         styleBtn (winBlackButton,   juce::Colour (0xffbf5af2));
@@ -1142,6 +1203,7 @@ private:
     juce::TextButton bandpassButton   { "20Hz-20kHz Bandpass" };
     juce::TextButton line94Button     { "94 dB Line" };
     juce::TextButton fullscreenButton { "Full Screen" };
+    juce::TextButton calToInputButton { "Cal to Input" };
 
     // Correction filter
     juce::TextButton correctionEnableButton { "Enable" };
@@ -1185,7 +1247,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (720, 796);
+        content->setSize (720, 829);
         setContentOwned (content, true);
         setResizable (false, false);
     }

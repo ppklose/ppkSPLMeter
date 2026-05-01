@@ -158,6 +158,10 @@ public:
     void setMonitorEnabled (bool e) noexcept { monitorEnabled.store (e); }
     bool isMonitorEnabled  ()       noexcept { return monitorEnabled.load(); }
 
+    // Output VU level (linear peak per channel, post monitor gain & impulse-fidelity inject)
+    float getOutputPeakL () const noexcept { return outputPeakL_.load (std::memory_order_relaxed); }
+    float getOutputPeakR () const noexcept { return outputPeakR_.load (std::memory_order_relaxed); }
+
     //==========================================================================
     // File mode
     void loadFile   (const juce::File& file);
@@ -317,6 +321,10 @@ private:
     std::atomic<bool>                                fileModeActive  { false };
     std::atomic<bool>                                monitorEnabled  { false };
     juce::AudioBuffer<float>                         fileReadBuffer;
+
+    // Output VU peak values (linear |x|, sampled per processBlock at the output stage)
+    std::atomic<float> outputPeakL_ { 0.0f };
+    std::atomic<float> outputPeakR_ { 0.0f };
 
     void pushLogEntry (float rawPeak, float aPeak, float cPeak,
                        float rawRms,  float aRms,  float cRms,

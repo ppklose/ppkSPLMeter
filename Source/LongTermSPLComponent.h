@@ -279,6 +279,17 @@ class LongTermSPLWindow : public juce::DocumentWindow
             loadButton.onClick = [this] { doLoadFile(); };
             addAndMakeVisible (loadButton);
 
+            refreshButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+            refreshButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            refreshButton.setTooltip ("Re-run the analysis with the current Calibration value.");
+            refreshButton.onClick = [this]
+            {
+                if (loadedFile_ != juce::File{} && loadedFile_.existsAsFile())
+                    analyseFile (loadedFile_);
+            };
+            refreshButton.setEnabled (false);
+            addAndMakeVisible (refreshButton);
+
             exportCsvButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
             exportCsvButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
             exportCsvButton.onClick = [this] { doExportCsv(); };
@@ -341,10 +352,40 @@ class LongTermSPLWindow : public juce::DocumentWindow
             };
             addAndMakeVisible (xZoomButton_);
 
+            setWantsKeyboardFocus (true);
+            // Keep focus on the Content so spacebar always toggles play/pause
+            for (juce::Component* c : { (juce::Component*) &playPauseButton,
+                                        (juce::Component*) &stopButton,
+                                        (juce::Component*) &loadButton,
+                                        (juce::Component*) &refreshButton,
+                                        (juce::Component*) &exportCsvButton,
+                                        (juce::Component*) &speakerButton,
+                                        (juce::Component*) &yZoomButton_,
+                                        (juce::Component*) &xZoomButton_ })
+                c->setMouseClickGrabsKeyboardFocus (false);
+
             startTimerHz (30);
         }
 
         ~Content() override { stopTimer(); }
+
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            // Spacebar → toggle play / pause
+            if (key == juce::KeyPress::spaceKey)
+            {
+                if (! fileLoaded_) return true;
+                playPauseButton.triggerClick();
+                return true;
+            }
+            return false;
+        }
+
+        void visibilityChanged() override
+        {
+            if (isVisible())
+                grabKeyboardFocus();
+        }
 
         //----------------------------------------------------------------------
         void resized() override
@@ -368,9 +409,11 @@ class LongTermSPLWindow : public juce::DocumentWindow
 
             r.removeFromTop (4);
 
-            // Row 2: load + export + file info
+            // Row 2: load + refresh + export + file info
             auto row2 = r.removeFromTop (28).reduced (0, 2);
             loadButton.setBounds      (row2.removeFromLeft (160));
+            row2.removeFromLeft (8);
+            refreshButton.setBounds   (row2.removeFromLeft (90));
             row2.removeFromLeft (8);
             exportCsvButton.setBounds (row2.removeFromLeft (120));
             row2.removeFromLeft (8);
@@ -875,6 +918,8 @@ class LongTermSPLWindow : public juce::DocumentWindow
             playPauseButton.setToggleState (false, juce::dontSendNotification);
 
             exportCsvButton.setEnabled (true);
+            refreshButton.setEnabled (true);
+            loadedFile_ = file;
             statusLabel.setText ("Analysis complete: " + juce::String (static_cast<int> (data.size()))
                                  + " data points over " + formatDuration (fileDuration),
                                  juce::dontSendNotification);
@@ -1008,7 +1053,9 @@ class LongTermSPLWindow : public juce::DocumentWindow
 
         // File / analysis controls
         juce::TextButton   loadButton       { "Load Audio File..." };
+        juce::TextButton   refreshButton    { "Refresh" };
         juce::TextButton   exportCsvButton  { "Export CSV..." };
+        juce::File         loadedFile_;
         juce::Label        fileInfoLabel;
         juce::ToggleButton lafToggle;
         juce::ToggleButton lcfToggle;

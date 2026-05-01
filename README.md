@@ -317,6 +317,19 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.1.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.1.0)
+- **Output VU meter** — vertical L/R peak bargraph next to the master volume control; -60..+6 dBFS scale with green / yellow / orange / red zones, fast attack and ~250 ms release smoothing, 0 dBFS reference tick
+- **Master volume as 270° rotary knob** — replaces the linear fader in the title bar; maximum gain raised from +12 dB to **+32 dB**
+- **Ctrl/Cmd+M shortcut** — toggles the monitor (output) mute from anywhere in the main window
+- **Cal to Input button** *(Settings → General)* — one-click calibration: averages the energy of the last ~2 s of input and sets the Calibration offset so it reads 94 dB SPL; intended for users without adjustable hardware input gain or who prefer not to use the Calibration slider directly
+- **Long-term SPL: Refresh button** — re-runs the analysis on the loaded file with the current Calibration value, without reloading the file
+- **Long-term SPL: Spacebar toggles play/pause** — works regardless of which transport button was last clicked
+- **Long-term SPL: file audio routed to the device output** — pressing Play in the Long-term SPL window now actually plays the loaded file through the configured output (previously the live input was sent to the output during file analysis)
+
+### [v3.0.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.0.0)
+- **Long-term SPL** — new sub-app (Tools menu) for offline analysis of WAV / BWF files; computes A-, C-, and Z-weighted IEC 61672 FAST SPL across the full file with a waveform overview, zoomable time and dB axes, transport with playhead, click-to-seek, BWF timecode support, and CSV export; shares the main monitor controls
+- **Impulse Fidelity** — new sub-app (Tools menu) for testing the transient response of a device under test using 1/3-octave tone bursts (100 Hz – 10 kHz); shows envelope comparison plots and computes attack, release, and overshoot metrics with a rating system
+
 ### [v2.9.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v2.9.0)
 - **L_FFT spectrum analyzer** — new sub-app (Tools menu) showing a real-time 1/N octave band spectrum with log-frequency axis and dB SPL y-axis; reads all FFT settings from the Settings pane (window type, band resolution, smoothing, gain, RTA mode, display mode, peak hold, freq range)
 - **FFT snapshot storage** — capture the current spectrum with the ✎ button; snapshots are listed in a sidebar with timestamp names, colour dots, and visibility toggles; click a snapshot to show/hide, right-click or Delete to remove; Cmd+Z undoes deletions

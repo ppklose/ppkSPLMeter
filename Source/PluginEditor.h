@@ -129,6 +129,97 @@ public:
 };
 
 //==============================================================================
+// Vertical L/R bargraph VU meter (peak, -60..0 dBFS) with green/yellow/red zones
+class OutputVUMeter : public juce::Component,
+                      public juce::SettableTooltipClient
+{
+public:
+    OutputVUMeter() = default;
+
+    // Linear peak values in [0, ~1+]; smoothed in setLevels() so callers can poll directly
+    void setLevels (float linL, float linR) noexcept
+    {
+        levelL_ = applyBallistics (levelL_, linL);
+        levelR_ = applyBallistics (levelR_, linR);
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0xff1c1c1e));
+        g.fillRoundedRectangle (b, 2.0f);
+
+        const float gap   = 2.0f;
+        const float barW  = (b.getWidth() - gap * 3.0f) * 0.5f;
+        auto barL = juce::Rectangle<float> (b.getX() + gap, b.getY() + gap,
+                                            barW, b.getHeight() - gap * 2.0f);
+        auto barR = barL.withX (barL.getRight() + gap);
+
+        drawBar (g, barL, levelL_);
+        drawBar (g, barR, levelR_);
+    }
+
+private:
+    static float linearToDb (float lin) noexcept
+    {
+        return juce::Decibels::gainToDecibels (juce::jmax (lin, 1.0e-6f), -120.0f);
+    }
+
+    static float dbToFraction (float dB) noexcept
+    {
+        // Map -60..+6 dBFS to 0..1 along the bar
+        return juce::jlimit (0.0f, 1.0f, (dB + 60.0f) / 66.0f);
+    }
+
+    static float applyBallistics (float prev, float target) noexcept
+    {
+        // 30 Hz tick: fast attack (~one tick), exponential release (~250 ms 20-dB decay)
+        constexpr float kRelease = 0.78f;
+        return (target >= prev) ? target : prev * kRelease + target * (1.0f - kRelease);
+    }
+
+    void drawBar (juce::Graphics& g, juce::Rectangle<float> r, float lin) const
+    {
+        g.setColour (juce::Colour (0xff0d0d0e));
+        g.fillRect (r);
+
+        const float frac = dbToFraction (linearToDb (lin));
+        if (frac > 0.0f)
+        {
+            const float thresh18 = dbToFraction (-18.0f);
+            const float thresh6  = dbToFraction (-6.0f);
+            const float thresh0  = dbToFraction (0.0f);
+            const float h = r.getHeight();
+
+            auto fillSegment = [&] (float fracLo, float fracHi, juce::Colour col)
+            {
+                const float fHi = juce::jmin (fracHi, frac);
+                if (fHi <= fracLo)
+                    return;
+                const float yLo = r.getBottom() - fracLo * h;
+                const float yHi = r.getBottom() - fHi    * h;
+                g.setColour (col);
+                g.fillRect (juce::Rectangle<float> (r.getX(), yHi, r.getWidth(), yLo - yHi));
+            };
+
+            fillSegment (0.0f,     thresh18, juce::Colour (0xff34c759));  // green
+            fillSegment (thresh18, thresh6,  juce::Colour (0xffffd60a));  // yellow
+            fillSegment (thresh6,  thresh0,  juce::Colour (0xffff9500));  // orange
+            fillSegment (thresh0,  1.0f,     juce::Colour (0xffff453a));  // red (clip)
+        }
+
+        // 0 dBFS reference tick
+        const float y0 = r.getBottom() - dbToFraction (0.0f) * r.getHeight();
+        g.setColour (juce::Colour (0x80ffffff));
+        g.drawLine (r.getX(), y0, r.getRight(), y0, 1.0f);
+    }
+
+    float levelL_ = 0.0f;
+    float levelR_ = 0.0f;
+};
+
+//==============================================================================
 // Marker button - draws a red diamond icon
 class MarkerButton : public juce::Button
 {
@@ -205,6 +296,7 @@ private:
     int  extendedHeight_ = 900;
     MonitorButton    monitorButton;
     juce::Slider     monitorGainSlider;
+    OutputVUMeter    outputVUMeter;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> monitorGainAttachment;
 
     juce::TextButton realTimeButton { "Real Time" };

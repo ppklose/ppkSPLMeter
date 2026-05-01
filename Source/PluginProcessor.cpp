@@ -42,7 +42,7 @@ SPLMeterAudioProcessor::createParameterLayout()
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "monitorGain", "Monitor Gain (dB)",
-        juce::NormalisableRange<float> (-60.0f, 12.0f, 0.5f), 0.0f));
+        juce::NormalisableRange<float> (-60.0f, 32.0f, 0.5f), 0.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "spectroGain", "Spectrogram Gain (dB)",
@@ -501,6 +501,22 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // File mode: route the file audio to the device output. fileReadBuffer was
+    // filled at the top of processBlock and is the source for metering; without
+    // this copy the live input would still reach the output during file playback.
+    if (fileMode)
+    {
+        const int srcCh = fileReadBuffer.getNumChannels();
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            if (srcCh > 0)
+                buffer.copyFrom (ch, 0, fileReadBuffer,
+                                 juce::jmin (ch, srcCh - 1), 0, numSamples);
+            else
+                buffer.clear (ch, 0, numSamples);
+        }
+    }
+
     // Apply monitor gain or mute output
     if (monitorEnabled.load())
     {
@@ -528,6 +544,20 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         impFidPos_.store (pos, std::memory_order_release);
         if (pos >= impFidSignalLen_)
             impFidActive_.store (false, std::memory_order_release);
+    }
+
+    // Output VU sampling: per-channel block peak for L (ch 0) and R (ch 1, falls back to L)
+    if (numSamples > 0 && numChannels > 0)
+    {
+        const auto magL = buffer.getMagnitude (0, 0, numSamples);
+        const auto magR = (numChannels > 1) ? buffer.getMagnitude (1, 0, numSamples) : magL;
+        outputPeakL_.store (magL, std::memory_order_relaxed);
+        outputPeakR_.store (magR, std::memory_order_relaxed);
+    }
+    else
+    {
+        outputPeakL_.store (0.0f, std::memory_order_relaxed);
+        outputPeakR_.store (0.0f, std::memory_order_relaxed);
     }
 }
 
