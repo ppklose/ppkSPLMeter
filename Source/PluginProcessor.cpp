@@ -585,6 +585,17 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.rmsSPL       = linearToDBFS (rawRms) + calOffset;
     e.rmsDBASPL    = linearToDBFS (aRms)   + calOffset;
     e.rmsDBCSPL    = linearToDBFS (cRms)   + calOffset;
+
+    // NIOSH REL: accumulate noise-dose contribution for this 125 ms tick.
+    // Criterion 85 dB(A) for 8 h, 3 dB exchange rate, 80 dB(A) threshold.
+    if (e.rmsDBASPL >= 80.0f)
+    {
+        const double tAllowedSec = 28800.0
+                                 / std::pow (2.0, (static_cast<double> (e.rmsDBASPL) - 85.0) / 3.0);
+        const double contribPct  = (0.125 / tAllowedSec) * 100.0;
+        const float prev = noiseDosePct_.load (std::memory_order_relaxed);
+        noiseDosePct_.store (prev + static_cast<float> (contribPct), std::memory_order_relaxed);
+    }
     e.roughness      = roughness;
     e.fluctuation    = fluctuation;
     e.sharpness      = sharpness;

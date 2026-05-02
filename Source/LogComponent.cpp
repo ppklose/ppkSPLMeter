@@ -29,18 +29,19 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
         processor.apvts, "logDuration", durationSlider);
 
     // SPL series visibility checkboxes
-    auto setupVisBtn = [this] (juce::ToggleButton& btn, juce::Colour colour)
+    auto setupVisBtn = [this] (juce::ToggleButton& btn, juce::Colour colour, bool defaultOn)
     {
-        btn.setToggleState (true, juce::dontSendNotification);
+        btn.setToggleState (defaultOn, juce::dontSendNotification);
         btn.setColour (juce::ToggleButton::textColourId,         juce::Colours::white);
         btn.setColour (juce::ToggleButton::tickColourId,         colour);
         btn.setColour (juce::ToggleButton::tickDisabledColourId, colour.darker (0.5f));
         btn.onClick = [this] { repaint(); };
         addAndMakeVisible (btn);
     };
-    setupVisBtn (splVisButton, colPeakSPL);
-    setupVisBtn (dbaVisButton, colPeakDBA);
-    setupVisBtn (dbcVisButton, colPeakDBC);
+    // First-launch defaults: only dBA visible; psychoacoustic overlay off.
+    setupVisBtn (splVisButton, colPeakSPL, false);
+    setupVisBtn (dbaVisButton, colPeakDBA, true);
+    setupVisBtn (dbcVisButton, colPeakDBC, false);
 
     // Psychoacoustic visibility checkboxes (radio-button behaviour)
     auto setupPsychoBtn = [this] (juce::ToggleButton& btn, juce::Colour colour,
@@ -70,7 +71,7 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
         };
         addAndMakeVisible (btn);
     };
-    roughnessVisButton.setToggleState   (true, juce::dontSendNotification);  // default on
+    // First-launch default: psychoacoustic overlay off.
     setupPsychoBtn (roughnessVisButton,      colRoughness,      PsychoMetric::Roughness);
     setupPsychoBtn (fluctuationVisButton,    colFluctuation,    PsychoMetric::Fluctuation);
     setupPsychoBtn (sharpnessVisButton,      colSharpness,      PsychoMetric::Sharpness);

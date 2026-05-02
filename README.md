@@ -317,6 +317,16 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.3.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.3.0)
+- **Main meter now displays time-weighted RMS** (IEC 61672 SPL) instead of held sample peak. Bargraph hold tick captures the maximum recent RMS reading (Lmax-style). Calibration with a 94 dB / 1 kHz reference now reads 94 dB on the meter as expected
+- **NIOSH REL readout** alongside DIN 15905-5 in the same meter strip — cumulative 8-hour noise dose (3 dB exchange rate, 85 dB(A) criterion, 80 dB(A) threshold) with its own OK / WARN / LIMIT pill (50 % WARN, 100 % LIMIT, plus 140 dB(C) LCpeak ceiling); same dose readout in the Long-term SPL window after offline analysis
+- **DIN 15905-5 strip is Advanced-mode only** and now sits below the Annoyance row of the psychoacoustic table; "LAeq,30min" relabelled to **"LAeq(30min)"**
+- **"Cal to Input" mirrored in the Long-term SPL window** — calibrates `calOffset` so the loaded file's LAeq reads 94 dB(A) and auto-runs Refresh
+- **Long-term SPL: spacebar play/pause** kept (now also closes file mode cleanly when window is dismissed): closing the window stops playback and reverts the meter to the live input
+- **Title-bar Real Time / File buttons reflect file-mode state** — light up automatically when Long-term SPL playback starts, revert to Real Time on stop, window close, or end-of-file
+- **First-launch defaults**: only **dBA SPL** trace selected; psychoacoustic overlay starts off
+- **Output VU meter** vertically aligned to the volume knob's textbox baseline
+
 ### [v3.2.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.2.0)
 - **DIN 15905-5 compliance readout** — new strip in the main meter showing the sliding 30-min A-weighted equivalent continuous level (LAeq,30min) and the session-long C-weighted peak (LCpeak), each color-coded against the standard's thresholds (green / yellow at 95 dB(A) / 130 dB(C) / red at 99 dB(A) / 135 dB(C)) plus an OK / WARN / LIMIT compliance pill
 - **DIN 15905-5 in Long-term SPL** — after offline file analysis, the worst-case sliding-30-min LAeq and the overall LCpeak (max |x_C|) are computed and shown beneath the existing stats line, with the same color-coded compliance status

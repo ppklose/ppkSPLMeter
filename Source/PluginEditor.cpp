@@ -63,6 +63,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     {
         audioProcessor.resetPeak();
         audioProcessor.resetSessionPeak();
+        audioProcessor.resetNoiseDose();
         audioProcessor.clearLog();
         meter.reset();
     };
@@ -255,6 +256,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
             : "You are currently in advanced mode, click to go to basic mode.");
         log.setVisible (!basicMode_);
         meter.setPsychoVisible (!basicMode_);
+        meter.setDinVisible (!basicMode_);
         toolsMenuButton.setVisible (!basicMode_);
         markerButton.setVisible (!basicMode_);
         pauseButton.setVisible (!basicMode_);
@@ -264,7 +266,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
-            const int basicH = 100 + 245 + 24;  // title + meter + build strip
+            const int basicH = 100 + 215 + 24;  // title + meter + build strip
             setResizeLimits (480, basicH, 3840, 2160);
             setSize (getWidth(), basicH);
         }
@@ -419,6 +421,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     pauseButton.setVisible (!basicMode_);
     dawSyncToggle.setVisible (!basicMode_);
     meter.setPsychoVisible (!basicMode_);
+    meter.setDinVisible (!basicMode_);
     const int basicH = 100 + 215 + 24;
     if (basicMode_)
     {
@@ -462,7 +465,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.2.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.3.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -502,7 +505,7 @@ void SPLMeterAudioProcessorEditor::resized()
     fileButton.setBounds     (getWidth() / 2 + 2,            modeY, modeBtnW, modeBtnH);
     monitorButton.setBounds  (getWidth() / 2 + 2 + modeBtnW + 6, modeY, modeBtnH, modeBtnH);
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 8, 60, 80);
-    outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 78);
+    outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 84);
 
     const int meterHeight = 270;
     auto meterArea = area.removeFromTop (meterHeight);
@@ -1031,9 +1034,11 @@ bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 //==============================================================================
 void SPLMeterAudioProcessorEditor::timerCallback()
 {
-    meter.setValues (audioProcessor.getPeakSPL(),
-                     audioProcessor.getPeakDBASPL(),
-                     audioProcessor.getPeakDBCSPL(),
+    // IEC 61672 SPL = time-weighted RMS (FAST/SLOW). The bargraph follows this;
+    // the in-meter hold tick captures the maximum recent reading (Lmax-style).
+    meter.setValues (audioProcessor.getRMSSPL(),
+                     audioProcessor.getRMSDBASPL(),
+                     audioProcessor.getRMSDBCSPL(),
                      audioProcessor.getRoughness(),
                      audioProcessor.getFluctuation(),
                      audioProcessor.getSharpness(),
@@ -1077,6 +1082,7 @@ void SPLMeterAudioProcessorEditor::timerCallback()
         }
         meter.setLeq (laeq, lceq);
         meter.setDinValues (laeq30, audioProcessor.getSessionPeakDBCSPL());
+        meter.setNioshDose (audioProcessor.getNoiseDosePct());
     }
 
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();
@@ -1103,6 +1109,17 @@ void SPLMeterAudioProcessorEditor::timerCallback()
 
     // Monitor button: keep in sync with processor (may be toggled from Long-term SPL window)
     monitorButton.setToggleState (audioProcessor.isMonitorEnabled(), juce::dontSendNotification);
+
+    // Real Time / File buttons: reflect the processor's file-mode state. This picks
+    // up Long-term SPL playback start/stop, window close, and end-of-file auto-stop.
+    {
+        const bool procFileMode = audioProcessor.isFileModeActive();
+        if (fileMode != procFileMode)
+        {
+            fileMode = procFileMode;
+            updateModeButtons();
+        }
+    }
 
     // Output VU meter: linear peak per channel from audio thread
     outputVUMeter.setLevels (audioProcessor.getOutputPeakL(),

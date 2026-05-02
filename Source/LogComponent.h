@@ -87,7 +87,7 @@ private:
 
     // Selected psychoacoustic metric
     enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Impulsiveness, Tonality, Off };
-    PsychoMetric selectedMetric = PsychoMetric::Roughness;
+    PsychoMetric selectedMetric = PsychoMetric::Off;
 
 
     juce::TextButton yZoomButton_;

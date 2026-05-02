@@ -290,6 +290,48 @@ class LongTermSPLWindow : public juce::DocumentWindow
             refreshButton.setEnabled (false);
             addAndMakeVisible (refreshButton);
 
+            calToInputButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
+            calToInputButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            calToInputButton.setTooltip ("Calibrate to a 94 dB reference: adjusts the Calibration "
+                                         "offset so the loaded file's LAeq reads 94 dB(A), then "
+                                         "re-runs the analysis. Use with a 94 dB / 1 kHz calibrator "
+                                         "recording.");
+            calToInputButton.onClick = [this]
+            {
+                if (loadedFile_ == juce::File{} || ! loadedFile_.existsAsFile() || data.empty())
+                {
+                    juce::NativeMessageBox::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon, "Cal to Input",
+                        "Load an audio file first.");
+                    return;
+                }
+
+                // Use the file's LAeq (already energy-averaged in computeStats()) as
+                // the reference. For a 1 kHz calibrator dB(A) == dB.
+                if (laeq < -100.0f)
+                {
+                    juce::NativeMessageBox::showMessageBoxAsync (
+                        juce::AlertWindow::WarningIcon, "Cal to Input",
+                        "No usable level in the file.");
+                    return;
+                }
+
+                const float currentOffset = processor.apvts.getRawParameterValue ("calOffset")->load();
+                const float delta         = 94.0f - laeq;
+                const float newOffset     = juce::jlimit (80.0f, 180.0f, currentOffset + delta);
+
+                if (auto* param = processor.apvts.getParameter ("calOffset"))
+                {
+                    const auto& range = param->getNormalisableRange();
+                    param->setValueNotifyingHost (range.convertTo0to1 (newOffset));
+                }
+
+                // Re-analyse so all displayed values pick up the new offset
+                analyseFile (loadedFile_);
+            };
+            calToInputButton.setEnabled (false);
+            addAndMakeVisible (calToInputButton);
+
             exportCsvButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
             exportCsvButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
             exportCsvButton.onClick = [this] { doExportCsv(); };
@@ -415,15 +457,17 @@ class LongTermSPLWindow : public juce::DocumentWindow
 
             r.removeFromTop (4);
 
-            // Row 2: load + refresh + export + file info
+            // Row 2: load + refresh + cal + export + file info
             auto row2 = r.removeFromTop (28).reduced (0, 2);
-            loadButton.setBounds      (row2.removeFromLeft (160));
+            loadButton.setBounds        (row2.removeFromLeft (160));
             row2.removeFromLeft (8);
-            refreshButton.setBounds   (row2.removeFromLeft (90));
+            refreshButton.setBounds     (row2.removeFromLeft (90));
             row2.removeFromLeft (8);
-            exportCsvButton.setBounds (row2.removeFromLeft (120));
+            calToInputButton.setBounds  (row2.removeFromLeft (110));
             row2.removeFromLeft (8);
-            fileInfoLabel.setBounds   (row2);
+            exportCsvButton.setBounds   (row2.removeFromLeft (120));
+            row2.removeFromLeft (8);
+            fileInfoLabel.setBounds     (row2);
             r.removeFromTop (4);
 
             // Row 3: toggles + stats
@@ -939,6 +983,7 @@ class LongTermSPLWindow : public juce::DocumentWindow
 
             exportCsvButton.setEnabled (true);
             refreshButton.setEnabled (true);
+            calToInputButton.setEnabled (true);
             loadedFile_ = file;
             statusLabel.setText ("Analysis complete: " + juce::String (static_cast<int> (data.size()))
                                  + " data points over " + formatDuration (fileDuration),
@@ -1009,6 +1054,27 @@ class LongTermSPLWindow : public juce::DocumentWindow
                                 && ((maxLAeq30_ >= 95.0f) || (lcPeak_ >= 130.0f));
             const juce::String dinStatus = overLimit ? "LIMIT" : warn ? "WARN" : "OK";
 
+            // NIOSH REL: integrate dose across the file (3 dB exchange rate, 80 dB(A)
+            // threshold, 85 dB(A) for 8 h = 100 % criterion).
+            double nioshDose = 0.0;
+            if (data.size() > 1)
+            {
+                for (int i = skip; i < static_cast<int> (data.size()); ++i)
+                {
+                    const float laeqA = data[i].lafDB;
+                    if (laeqA < 80.0f) continue;
+                    const double prevT = (i > 0) ? data[i - 1].timeSeconds : 0.0;
+                    const double dt    = juce::jlimit (0.0, 1.0, data[i].timeSeconds - prevT);
+                    const double tAllowed = 28800.0
+                                          / std::pow (2.0, (static_cast<double> (laeqA) - 85.0) / 3.0);
+                    nioshDose += (dt / tAllowed) * 100.0;
+                }
+            }
+            const bool nioshOver = (nioshDose >= 100.0) || (lcPeak_ >= 140.0f);
+            const bool nioshWarn = ! nioshOver
+                                && ((nioshDose >= 50.0)  || (lcPeak_ >= 135.0f));
+            const juce::String nioshStatus = nioshOver ? "LIMIT" : nioshWarn ? "WARN" : "OK";
+
             statsLabel.setText (
                 "LAeq=" + juce::String (laeq, 1)
                 + "  LAFmax=" + juce::String (lafMax, 1)
@@ -1018,17 +1084,23 @@ class LongTermSPLWindow : public juce::DocumentWindow
                 juce::dontSendNotification);
 
             dinStatsLabel.setText (
-                "DIN 15905-5:  LAeq,30min(max)="
+                "DIN 15905-5: LAeq(30min) max="
                 + (maxLAeq30_ > -100.0f ? juce::String (maxLAeq30_, 1) : juce::String ("--"))
-                + " dB(A)    LCpeak="
+                + " dB(A)  LCpeak="
                 + (lcPeak_    > -100.0f ? juce::String (lcPeak_,    1) : juce::String ("--"))
-                + " dB(C)    [" + dinStatus + "]",
+                + " dB(C)  [" + dinStatus + "]"
+                + "    \xe2\x80\x96    NIOSH: Dose="
+                + juce::String (nioshDose, nioshDose < 10.0 ? 2 : 1) + " %  ["
+                + nioshStatus + "]",
                 juce::dontSendNotification);
             const juce::Colour okCol   (0xff34c759);
             const juce::Colour warnCol (0xffffd60a);
             const juce::Colour limCol  (0xffff3b30);
+            // Pick the worst status colour across the two standards
+            const bool worstOver = overLimit || nioshOver;
+            const bool worstWarn = warn      || nioshWarn;
             dinStatsLabel.setColour (juce::Label::textColourId,
-                                     overLimit ? limCol : warn ? warnCol : okCol);
+                                     worstOver ? limCol : worstWarn ? warnCol : okCol);
         }
 
         //----------------------------------------------------------------------
@@ -1116,6 +1188,7 @@ class LongTermSPLWindow : public juce::DocumentWindow
         // File / analysis controls
         juce::TextButton   loadButton       { "Load Audio File..." };
         juce::TextButton   refreshButton    { "Refresh" };
+        juce::TextButton   calToInputButton { "Cal to Input" };
         juce::TextButton   exportCsvButton  { "Export CSV..." };
         juce::File         loadedFile_;
         juce::Label        fileInfoLabel;
@@ -1163,7 +1236,8 @@ public:
     explicit LongTermSPLWindow (SPLMeterAudioProcessor& p)
         : juce::DocumentWindow ("Long-term SPL",
                                 juce::Colour (0xff1c1c1e),
-                                juce::DocumentWindow::closeButton)
+                                juce::DocumentWindow::closeButton),
+          processor_ (p)
     {
         setUsingNativeTitleBar (false);
         auto* c = new Content (p);
@@ -1172,7 +1246,16 @@ public:
         setResizable (true, false);
     }
 
-    void closeButtonPressed() override { setVisible (false); }
+    void closeButtonPressed() override
+    {
+        // Closing the window: drop file mode so the meter analyses the live
+        // input again. setFileMode(false) also stops the transport.
+        processor_.setFileMode (false);
+        setVisible (false);
+    }
+
+private:
+    SPLMeterAudioProcessor& processor_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LongTermSPLWindow)
 };

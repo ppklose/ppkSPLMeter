@@ -122,6 +122,7 @@ public:
         atomicRMSDBASPL.store (-999.0f);
         atomicRMSDBCSPL.store (-999.0f);
         sessionPeakDBCSPL_.store (-999.0f);
+        noiseDosePct_.store (0.0f);
         clearLog();
     }
 
@@ -166,6 +167,11 @@ public:
     // DIN 15905-5: session-long C-weighted peak (does not decay with peakHoldTime)
     float getSessionPeakDBCSPL () const noexcept { return sessionPeakDBCSPL_.load (std::memory_order_relaxed); }
     void  resetSessionPeak     ()       noexcept { sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed); }
+
+    // NIOSH REL: cumulative 8-hour noise-dose percentage (100% = 85 dB(A) for 8 h,
+    // 3 dB exchange rate, 80 dB(A) threshold).
+    float getNoiseDosePct () const noexcept { return noiseDosePct_.load (std::memory_order_relaxed); }
+    void  resetNoiseDose  ()       noexcept { noiseDosePct_.store (0.0f, std::memory_order_relaxed); }
 
     //==========================================================================
     // File mode
@@ -333,6 +339,9 @@ private:
 
     // DIN 15905-5: session-long max C-weighted peak (in dB SPL, with calOffset applied)
     std::atomic<float> sessionPeakDBCSPL_ { -999.0f };
+
+    // NIOSH REL cumulative noise-dose (% of allowable 8-h exposure)
+    std::atomic<float> noiseDosePct_ { 0.0f };
 
     void pushLogEntry (float rawPeak, float aPeak, float cPeak,
                        float rawRms,  float aRms,  float cRms,

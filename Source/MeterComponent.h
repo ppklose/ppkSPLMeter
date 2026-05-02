@@ -32,9 +32,17 @@ public:
         lcPeak_    = lcpeak;
     }
 
+    // NIOSH REL: cumulative 8-h noise-dose percentage
+    void setNioshDose (float dosePct) noexcept { noiseDosePct_ = dosePct; }
+
     void setPsychoVisible (bool v) noexcept
     {
         if (psychoVisible_ != v) { psychoVisible_ = v; repaint(); }
+    }
+
+    void setDinVisible (bool v) noexcept
+    {
+        if (dinVisible_ != v) { dinVisible_ = v; repaint(); }
     }
 
     void reset() noexcept
@@ -44,6 +52,7 @@ public:
         impulsiveness_ = tonality_ = 0.0f;
         laeq_ = lceq_ = 0.0f;
         laeq30Min_ = lcPeak_ = -999.0f;
+        noiseDosePct_ = 0.0f;
         holdVal_ = kMin;
         holdTimestampMs_ = 0.0;
         repaint();
@@ -71,9 +80,11 @@ private:
     float lceq_             = 0.0f;
     float laeq30Min_        = -999.0f;
     float lcPeak_           = -999.0f;
+    float noiseDosePct_     = 0.0f;
 
     bool  lightMode_        = false;
     bool  psychoVisible_    = true;
+    bool  dinVisible_       = true;
     Band  selectedBand_     = Band::SPL;
     float holdVal_          = 0.0f;
     double holdTimestampMs_ = 0.0;

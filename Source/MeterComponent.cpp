@@ -186,9 +186,12 @@ void MeterComponent::paint (juce::Graphics& g)
         }
     }
 
-    // ---- DIN 15905-5 strip: LAeq,30min + LCpeak with compliance status ----
-    const float dinY = peakY + barH + 8.0f;
+    // ---- DIN 15905-5 strip: LAeq(30min) + LCpeak with compliance status ----
+    // Anchored to the bottom of the meter, below the psychoacoustic table and
+    // above the log component's axis pickers. Hidden in Basic mode.
     const float dinH = 22.0f;
+    const float dinY = bounds.getBottom() - dinH - 6.0f;
+    if (dinVisible_)
     {
         const bool laeqValid   = laeq30Min_ > -100.0f;
         const bool lcpeakValid = lcPeak_    > -100.0f;
@@ -234,7 +237,7 @@ void MeterComponent::paint (juce::Graphics& g)
         const int laeqW = 240;
         g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
         g.setColour (textSecond);
-        g.drawText ("LAeq,30min:",
+        g.drawText ("LAeq(30min):",
                     curX, static_cast<int> (dinY),
                     104, static_cast<int> (dinH),
                     juce::Justification::centredLeft, false);
@@ -274,10 +277,73 @@ void MeterComponent::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
         g.drawText (statusText, pill.toNearestInt(),
                     juce::Justification::centred, false);
+        curX += pillW;
+
+        // ---- NIOSH REL section ----
+        // Double-pipe separator before NIOSH
+        const int dpW = 28;
+        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
+        g.setColour (juce::Colour (0xff48484a));
+        g.drawText (juce::String::charToString (0x2016),
+                    curX, static_cast<int> (dinY),
+                    dpW, static_cast<int> (dinH),
+                    juce::Justification::centred, false);
+        curX += dpW;
+
+        // NIOSH header
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        g.setColour (textSecond);
+        const int niHdrW = 56;
+        g.drawText ("NIOSH",
+                    curX, static_cast<int> (dinY),
+                    niHdrW, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += niHdrW;
+
+        // Dose colour (NIOSH thresholds: 50 % = WARN, 100 % = LIMIT)
+        const float dose = noiseDosePct_;
+        const juce::Colour doseCol = (dose >= 100.0f) ? juce::Colour (0xffff3b30)
+                                   : (dose >= 50.0f)  ? juce::Colour (0xffffd60a)
+                                                      : juce::Colour (0xff34c759);
+
+        const int doseW = 140;
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setColour (textSecond);
+        g.drawText ("Dose:",
+                    curX, static_cast<int> (dinY),
+                    44, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
+        g.setColour (doseCol);
+        g.drawText (juce::String (dose, dose < 10.0f ? 2 : (dose < 100.0f ? 1 : 0)) + " %",
+                    curX + 44, static_cast<int> (dinY),
+                    doseW - 44, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += doseW;
+
+        // NIOSH compliance pill: worst of dose ≥ 100 % or LCpeak ≥ 140 dB(C)
+        const bool nioshOver = (dose >= 100.0f) || (lcpeakValid && lcPeak_ >= 140.0f);
+        const bool nioshWarn = ! nioshOver
+                            && ((dose >= 50.0f) || (lcpeakValid && lcPeak_ >= 135.0f));
+        const juce::Colour niStatusCol = nioshOver ? juce::Colour (0xffff3b30)
+                                       : nioshWarn ? juce::Colour (0xffffd60a)
+                                                   : juce::Colour (0xff34c759);
+        const char* niStatusText = nioshOver ? "LIMIT" : nioshWarn ? "WARN" : "OK";
+
+        auto niPill = juce::Rectangle<float> (static_cast<float> (curX),
+                                              dinY + 2.0f,
+                                              static_cast<float> (pillW),
+                                              dinH - 4.0f);
+        g.setColour (niStatusCol);
+        g.fillRoundedRectangle (niPill, 4.0f);
+        g.setColour (lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
+        g.drawText (niStatusText, niPill.toNearestInt(),
+                    juce::Justification::centred, false);
     }
 
     // ---- Psychoacoustic table (2-column grid, 4 rows) ----
-    const float tableY   = dinY + dinH + 8.0f;
+    const float tableY   = peakY + barH + 12.0f;
     const float rowH     = 20.0f;
     const float rowGap   = 6.0f;
     const float colW     = barAreaW / 2.0f;
