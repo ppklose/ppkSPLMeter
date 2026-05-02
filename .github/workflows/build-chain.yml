@@ -38,7 +38,7 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v7-macos
+          key: juce-8.0.7-tflite-2.16.2-v8-macos
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -181,7 +181,7 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-v7-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-v8-windows
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -241,7 +241,7 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v7-linux
+          key: juce-8.0.7-tflite-2.16.2-v8-linux
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
