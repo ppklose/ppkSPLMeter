@@ -176,6 +176,10 @@ if(SPLMETER_TFLITE)
     # (all fetched via GIT_REPOSITORY inside TFLite's OverridableFetchContent) all
     # exhibit this failure.  Setting per-content DISCONNECTED suppresses the update
     # step for each one individually without affecting the initial download.
+    # Belt-and-suspenders: set the global flag in addition to per-content overrides.
+    # The per-content flags don't reliably propagate through TFLite's
+    # OverridableFetchContent_Populate path (e.g. gemmlowp 2026-05 CI failure).
+    set(FETCHCONTENT_UPDATES_DISCONNECTED              ON CACHE BOOL "" FORCE)
     set(FETCHCONTENT_UPDATES_DISCONNECTED_JUCE         ON CACHE BOOL "" FORCE)
     set(FETCHCONTENT_UPDATES_DISCONNECTED_FARMHASH     ON CACHE BOOL "" FORCE)
     set(FETCHCONTENT_UPDATES_DISCONNECTED_EIGEN        ON CACHE BOOL "" FORCE)
