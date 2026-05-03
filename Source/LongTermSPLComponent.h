@@ -293,9 +293,10 @@ class LongTermSPLWindow : public juce::DocumentWindow
             calToInputButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
             calToInputButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
             calToInputButton.setTooltip ("Calibrate to a 94 dB reference: adjusts the Calibration "
-                                         "offset so the loaded file's LAeq reads 94 dB(A), then "
-                                         "re-runs the analysis. Use with a 94 dB / 1 kHz calibrator "
-                                         "recording.");
+                                         "offset so the loaded file's unweighted (Z) Leq reads "
+                                         "94 dB SPL, then re-runs the analysis. Use with a "
+                                         "94 dB / 1 kHz calibrator recording. Matches the "
+                                         "Settings panel's Cal to Input behaviour.");
             calToInputButton.onClick = [this]
             {
                 if (loadedFile_ == juce::File{} || ! loadedFile_.existsAsFile() || data.empty())
@@ -306,9 +307,21 @@ class LongTermSPLWindow : public juce::DocumentWindow
                     return;
                 }
 
-                // Use the file's LAeq (already energy-averaged in computeStats()) as
-                // the reference. For a 1 kHz calibrator dB(A) == dB.
-                if (laeq < -100.0f)
+                // Energy-average the unweighted (Z) FAST level across the file, matching
+                // the Settings panel's Cal to Input which references rmsSPL (Z-weighted).
+                const int skip = std::min (4, static_cast<int> (data.size()) - 1);
+                double sumZ = 0.0;
+                int    count = 0;
+                for (int i = skip; i < static_cast<int> (data.size()); ++i)
+                {
+                    if (data[i].lzfDB > -100.0f)
+                    {
+                        sumZ += std::pow (10.0, data[i].lzfDB / 10.0);
+                        ++count;
+                    }
+                }
+
+                if (count == 0)
                 {
                     juce::NativeMessageBox::showMessageBoxAsync (
                         juce::AlertWindow::WarningIcon, "Cal to Input",
@@ -316,8 +329,9 @@ class LongTermSPLWindow : public juce::DocumentWindow
                     return;
                 }
 
+                const float lzeq = static_cast<float> (10.0 * std::log10 (sumZ / count));
                 const float currentOffset = processor.apvts.getRawParameterValue ("calOffset")->load();
-                const float delta         = 94.0f - laeq;
+                const float delta         = 94.0f - lzeq;
                 const float newOffset     = juce::jlimit (80.0f, 180.0f, currentOffset + delta);
 
                 if (auto* param = processor.apvts.getParameter ("calOffset"))
