@@ -479,6 +479,27 @@ public:
         };
         addAndMakeVisible (calToInputButton);
 
+        // TA Lärm category dropdown
+        taLaermLabel.setText ("TA Laerm Category", juce::dontSendNotification);
+        taLaermLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+        taLaermLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+        taLaermLabel.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (taLaermLabel);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (
+                p.apvts.getParameter ("taLaermCategory")))
+            taLaermCombo.addItemList (param->choices, 1);
+        taLaermCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff3a3a3c));
+        taLaermCombo.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
+        taLaermCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff48484a));
+        taLaermCombo.setColour (juce::ComboBox::arrowColourId,      juce::Colours::white);
+        taLaermCombo.setTooltip ("TA Lärm land-use category — sets the day/night limit "
+                                 "for the Beurteilungspegel Lr (e.g. WA = Allgemeines "
+                                 "Wohngebiet, 55 dB(A) day / 40 dB(A) night).");
+        addAndMakeVisible (taLaermCombo);
+        taLaermAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            p.apvts, "taLaermCategory", taLaermCombo);
+
         calAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             p.apvts, "calOffset", calSlider);
         holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -821,6 +842,12 @@ public:
             const int bw = r.getWidth() / 2;
             lightModeButton.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
             fullscreenButton.setBounds (r.reduced (2, 0));
+        }
+        {
+            // TA Lärm category — label + dropdown
+            auto r = row (28); gap (5);
+            taLaermLabel.setBounds (r.removeFromLeft (160));
+            taLaermCombo.setBounds (r.reduced (2, 0));
         }
 
         gap (10); // section gap
@@ -1204,6 +1231,9 @@ private:
     juce::TextButton line94Button     { "94 dB Line" };
     juce::TextButton fullscreenButton { "Full Screen" };
     juce::TextButton calToInputButton { "Cal to Input" };
+    juce::Label      taLaermLabel;
+    juce::ComboBox   taLaermCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> taLaermAttachment;
 
     // Correction filter
     juce::TextButton correctionEnableButton { "Enable" };
@@ -1247,7 +1277,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (720, 829);
+        content->setSize (720, 862);
         setContentOwned (content, true);
         setResizable (false, false);
     }

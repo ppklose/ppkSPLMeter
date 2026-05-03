@@ -317,6 +317,11 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.4.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.4.0)
+- **TA Laerm compliance lane** added next to DIN 15905-5 and NIOSH on the bottom strip — Beurteilungspegel `Lr` (≈ LAeq) compared against day (06–22) / night (22–06) limits for the selected German land-use category, with an OK / WARN / LIMIT pill of its own. Categories: Industriegebiet, Gewerbegebiet, Misch-/Dorf-/Kerngebiet, Allg. Wohngebiet (default), Reines Wohngebiet, Kurgebiet/Krankenhaus
+- **Settings → General**: TA Laerm Category dropdown
+- **Hover tooltips** on each compliance section (DIN 15905-5 / NIOSH / TA Laerm) explain what the values measure, the relevant limits, and the assumed measurement position. `MeterComponent` now implements `juce::TooltipClient`, capturing per-section bounds during paint and returning region-aware tooltip text
+
 ### [v3.3.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.3.0)
 - **Main meter now displays time-weighted RMS** (IEC 61672 SPL) instead of held sample peak. Bargraph hold tick captures the maximum recent RMS reading (Lmax-style). Calibration with a 94 dB / 1 kHz reference now reads 94 dB on the meter as expected
 - **NIOSH REL readout** alongside DIN 15905-5 in the same meter strip — cumulative 8-hour noise dose (3 dB exchange rate, 85 dB(A) criterion, 80 dB(A) threshold) with its own OK / WARN / LIMIT pill (50 % WARN, 100 % LIMIT, plus 140 dB(C) LCpeak ceiling); same dose readout in the Long-term SPL window after offline analysis

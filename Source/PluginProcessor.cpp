@@ -71,6 +71,16 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftAvgCycles", "FFT Avg Cycles",
         1, 999, 1));
 
+    // TA Lärm land-use category (default: Allgemeines Wohngebiet)
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "taLaermCategory", "TA Lärm Category",
+        juce::StringArray { "Industriegebiet",
+                            "Gewerbegebiet",
+                            "Misch-/Dorf-/Kerngebiet",
+                            "Allg. Wohngebiet (WA)",
+                            "Reines Wohngebiet (WR)",
+                            "Kurgebiet / Krankenhaus" }, 3));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftRTAMode", "FFT RTA +3dB/oct", false));
 

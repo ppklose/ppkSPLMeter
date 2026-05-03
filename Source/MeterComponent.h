@@ -7,7 +7,8 @@
     Clicking one of the three readout labels (dB SPL / dBA SPL / dBC SPL)
     selects which value drives the bar and hold indicator.
 */
-class MeterComponent  : public juce::Component
+class MeterComponent  : public juce::Component,
+                        public juce::TooltipClient
 {
 public:
     enum class Band { SPL = 0, DBA, DBC };
@@ -17,6 +18,7 @@ public:
     void paint   (juce::Graphics&) override;
     void resized () override {}
     void mouseDown (const juce::MouseEvent&) override;
+    juce::String getTooltip () override;
 
     void setValues (float peakSPL, float peakDBASPL, float peakDBCSPL,
                     float roughness, float fluctuation,
@@ -34,6 +36,19 @@ public:
 
     // NIOSH REL: cumulative 8-h noise-dose percentage
     void setNioshDose (float dosePct) noexcept { noiseDosePct_ = dosePct; }
+
+    // TA Lärm: Beurteilungspegel Lr (≈ LAeq), wall-clock day/night, category limits.
+    // categoryShort is a short label (e.g. "WA", "WR", "MI"); pass empty to draw "--".
+    void setTaLaerm (float lr, bool isNight,
+                     float dayLimit, float nightLimit,
+                     juce::String categoryShort) noexcept
+    {
+        taLr_           = lr;
+        taIsNight_      = isNight;
+        taDayLimit_     = dayLimit;
+        taNightLimit_   = nightLimit;
+        taCategoryShort_ = std::move (categoryShort);
+    }
 
     void setPsychoVisible (bool v) noexcept
     {
@@ -53,6 +68,7 @@ public:
         laeq_ = lceq_ = 0.0f;
         laeq30Min_ = lcPeak_ = -999.0f;
         noiseDosePct_ = 0.0f;
+        taLr_ = -999.0f;
         holdVal_ = kMin;
         holdTimestampMs_ = 0.0;
         repaint();
@@ -81,6 +97,11 @@ private:
     float laeq30Min_        = -999.0f;
     float lcPeak_           = -999.0f;
     float noiseDosePct_     = 0.0f;
+    float taLr_             = -999.0f;
+    bool  taIsNight_        = false;
+    float taDayLimit_       = 55.0f;
+    float taNightLimit_     = 40.0f;
+    juce::String taCategoryShort_ { "WA" };
 
     bool  lightMode_        = false;
     bool  psychoVisible_    = true;
@@ -92,6 +113,10 @@ private:
 
     // hit-test rects for the three readout labels (set during paint)
     juce::Rectangle<int> readoutRects_[3];
+    // hit-test rects for the DIN / NIOSH / TA Laerm sections of the bottom strip
+    juce::Rectangle<int> dinSectionRect_;
+    juce::Rectangle<int> nioshSectionRect_;
+    juce::Rectangle<int> taLaermSectionRect_;
 
     static constexpr float kMin = 20.0f;
     static constexpr float kMax = 130.0f;

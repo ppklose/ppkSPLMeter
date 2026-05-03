@@ -465,7 +465,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.3.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.4.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -1083,6 +1083,25 @@ void SPLMeterAudioProcessorEditor::timerCallback()
         meter.setLeq (laeq, lceq);
         meter.setDinValues (laeq30, audioProcessor.getSessionPeakDBCSPL());
         meter.setNioshDose (audioProcessor.getNoiseDosePct());
+
+        // TA Lärm: Lr ≈ LAeq over the available log; day/night by wall-clock hour;
+        // limits and short label come from the apvts choice param.
+        struct TaLaermCat { const char* shortLbl; float dayLim; float nightLim; };
+        static const TaLaermCat kCats[] = {
+            { "GI",  70.0f, 70.0f },
+            { "GE",  65.0f, 50.0f },
+            { "MI",  60.0f, 45.0f },
+            { "WA",  55.0f, 40.0f },
+            { "WR",  50.0f, 35.0f },
+            { "Kur", 45.0f, 35.0f },
+        };
+        const int catIdx = juce::jlimit (0, 5,
+            static_cast<int> (audioProcessor.apvts.getRawParameterValue ("taLaermCategory")->load()));
+        const auto& cat   = kCats[catIdx];
+        const int   hour  = juce::Time::getCurrentTime().getHours();
+        const bool  night = (hour < 6) || (hour >= 22);
+        meter.setTaLaerm (logEntries.empty() ? -999.0f : laeq,
+                          night, cat.dayLim, cat.nightLim, cat.shortLbl);
     }
 
     float holdSecs = audioProcessor.apvts.getRawParameterValue ("peakHoldTime")->load();

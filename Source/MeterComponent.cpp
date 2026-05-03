@@ -226,6 +226,7 @@ void MeterComponent::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
         g.setColour (textSecond);
         int curX = static_cast<int> (barAreaX);
+        const int dinSectionStart = curX;
         const int hdrW = 110;
         g.drawText ("DIN 15905-5",
                     curX, static_cast<int> (dinY),
@@ -279,9 +280,16 @@ void MeterComponent::paint (juce::Graphics& g)
                     juce::Justification::centred, false);
         curX += pillW;
 
+        // Save DIN section bounds for tooltip
+        dinSectionRect_ = juce::Rectangle<int> (dinSectionStart,
+                                                static_cast<int> (dinY),
+                                                curX - dinSectionStart,
+                                                static_cast<int> (dinH));
+
         // ---- NIOSH REL section ----
         // Double-pipe separator before NIOSH
         const int dpW = 28;
+        const int nioshSectionStart = curX;
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
         g.setColour (juce::Colour (0xff48484a));
         g.drawText (juce::String::charToString (0x2016),
@@ -340,6 +348,88 @@ void MeterComponent::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
         g.drawText (niStatusText, niPill.toNearestInt(),
                     juce::Justification::centred, false);
+        curX += pillW;
+
+        // Save NIOSH section bounds for tooltip
+        nioshSectionRect_ = juce::Rectangle<int> (nioshSectionStart,
+                                                  static_cast<int> (dinY),
+                                                  curX - nioshSectionStart,
+                                                  static_cast<int> (dinH));
+        const int taSectionStart = curX;
+
+        // ---- TA Lärm section ----
+        // Double-pipe separator
+        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
+        g.setColour (juce::Colour (0xff48484a));
+        g.drawText (juce::String::charToString (0x2016),
+                    curX, static_cast<int> (dinY),
+                    dpW, static_cast<int> (dinH),
+                    juce::Justification::centred, false);
+        curX += dpW;
+
+        // Header "TA Lärm <period> <category>"
+        const float taLimit = taIsNight_ ? taNightLimit_ : taDayLimit_;
+        const bool taValid  = (taLr_ > -100.0f);
+
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        g.setColour (textSecond);
+        const int taHdrW = 110;
+        g.drawText (juce::String ("TA Laerm ") + (taIsNight_ ? "Nacht" : "Tag")
+                                             + " " + taCategoryShort_,
+                    curX, static_cast<int> (dinY),
+                    taHdrW, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += taHdrW;
+
+        // Lr value coloured by limit
+        const juce::Colour lrCol = (! taValid)               ? textSecond
+                                 : (taLr_ >= taLimit)        ? juce::Colour (0xffff3b30)
+                                 : (taLr_ >= taLimit - 5.0f) ? juce::Colour (0xffffd60a)
+                                                             : juce::Colour (0xff34c759);
+        const int lrW = 200;
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+        g.setColour (textSecond);
+        g.drawText ("Lr:",
+                    curX, static_cast<int> (dinY),
+                    24, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
+        g.setColour (lrCol);
+        g.drawText ((taValid ? juce::String (taLr_, 1) : juce::String ("--"))
+                       + " / " + juce::String (taLimit, 0) + " dB(A)",
+                    curX + 24, static_cast<int> (dinY),
+                    lrW - 24, static_cast<int> (dinH),
+                    juce::Justification::centredLeft, false);
+        curX += lrW;
+
+        // TA Lärm pill: Lr ≥ limit → LIMIT; within 5 dB → WARN; else OK
+        const bool taOver = taValid && (taLr_ >= taLimit);
+        const bool taWarn = ! taOver && taValid && (taLr_ >= taLimit - 5.0f);
+        const juce::Colour taStatusCol = taOver ? juce::Colour (0xffff3b30)
+                                       : taWarn ? juce::Colour (0xffffd60a)
+                                                : juce::Colour (0xff34c759);
+        const char* taStatusText = ! taValid ? "—"
+                                  : taOver   ? "LIMIT"
+                                  : taWarn   ? "WARN"
+                                             : "OK";
+
+        auto taPill = juce::Rectangle<float> (static_cast<float> (curX),
+                                              dinY + 2.0f,
+                                              static_cast<float> (pillW),
+                                              dinH - 4.0f);
+        g.setColour (taStatusCol);
+        g.fillRoundedRectangle (taPill, 4.0f);
+        g.setColour (lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
+        g.drawText (taStatusText, taPill.toNearestInt(),
+                    juce::Justification::centred, false);
+        curX += pillW;
+
+        // Save TA Laerm section bounds for tooltip
+        taLaermSectionRect_ = juce::Rectangle<int> (taSectionStart,
+                                                    static_cast<int> (dinY),
+                                                    curX - taSectionStart,
+                                                    static_cast<int> (dinH));
     }
 
     // ---- Psychoacoustic table (2-column grid, 4 rows) ----
@@ -426,4 +516,37 @@ void MeterComponent::setValues (float peakSPL, float peakDBASPL, float peakDBCSP
     }
 
     repaint();
+}
+
+//==============================================================================
+juce::String MeterComponent::getTooltip()
+{
+    const auto p = getMouseXYRelative();
+
+    if (dinSectionRect_.contains (p))
+        return juce::String (
+            "DIN 15905-5 (German concert/event audience hearing protection)\n"
+            "  LAeq(30min): A-weighted equivalent continuous SPL averaged over a sliding\n"
+            "    30-minute window. Limit 99 dB(A); audience announcement above 95.\n"
+            "  LCpeak: C-weighted peak hold over the session. Limit 135 dB(C).\n"
+            "Measurement at the loudest accessible audience position (typically FOH).");
+
+    if (nioshSectionRect_.contains (p))
+        return juce::String (
+            "NIOSH REL (U.S. occupational hearing-loss prevention)\n"
+            "  Dose: cumulative 8-hour exposure dose. 100 % = 85 dB(A) for 8 h\n"
+            "    (criterion). 3 dB exchange rate: each +3 dB halves the allowable time\n"
+            "    (88 dB(A) -> 4 h, 91 -> 2 h, 100 -> 15 min). 80 dB(A) threshold below\n"
+            "    which exposure does not accumulate. Ceiling 140 dB(C) peak.");
+
+    if (taLaermSectionRect_.contains (p))
+        return juce::String (
+            "TA Laerm (Technische Anleitung zum Schutz gegen Laerm)\n"
+            "  German federal regulation for noise immission at residential / commercial\n"
+            "  neighbours. Lr (Beurteilungspegel) ~= time-averaged LAeq compared against\n"
+            "  the day (06-22) / night (22-06) limit for the selected land-use category.\n"
+            "  Single-event peaks (LAFmax) may exceed by +30 dB(A) day / +20 dB(A) night.\n"
+            "  Measured 0.5 m in front of the open window of the most affected dwelling.");
+
+    return {};
 }
