@@ -2,7 +2,7 @@
 
 A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows/Linux standalone app and as VST3 / AU plugin.
 
-![SPLMeter v2.6 screenshot](screenShot.png)
+![SPLMeter v3.4 screenshot](screenShot.png)
 
 ---
 
@@ -134,7 +134,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ppkSPLmeter v2.6 — Real-Time Audio Signal Flow           │
+│                    ppkSPLmeter v3.4 — Real-Time Audio Signal Flow           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────┐     ┌──────────────────────┐
