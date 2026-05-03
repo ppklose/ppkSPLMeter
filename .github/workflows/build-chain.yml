@@ -38,10 +38,10 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v9-macos
+          key: juce-8.0.7-tflite-off-v10-macos
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSPLMETER_TFLITE=OFF
 
       - name: Build
         # Build only the targets we ship; avoids building unreachable abseil
@@ -181,10 +181,10 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-asio-2.3.3-tflite-2.16.2-v9-windows
+          key: juce-8.0.7-asio-2.3.3-tflite-off-v10-windows
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSPLMETER_TFLITE=OFF
 
       - name: Build
         run: cmake --build build --config Release
@@ -241,10 +241,10 @@ jobs:
             build/farmhash-*
             build/abseil-cpp
             build/eigen
-          key: juce-8.0.7-tflite-2.16.2-v9-linux
+          key: juce-8.0.7-tflite-off-v10-linux
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSPLMETER_TFLITE=OFF
 
       - name: Build
         run: cmake --build build --config Release -- -j$(nproc)
