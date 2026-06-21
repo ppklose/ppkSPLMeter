@@ -261,6 +261,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    void parentHierarchyChanged() override;
 
 private:
     void timerCallback() override;

@@ -54,6 +54,7 @@ private:
     juce::ToggleButton annoyanceVisButton      { "Annoyance" };
     juce::ToggleButton impulsivenessVisButton  { "Impulsiveness" };
     juce::ToggleButton tonalityVisButton       { "Tonality" };
+    juce::ToggleButton bassComfortVisButton    { "Bass LCeq-LAeq" };
 
     // FFT
     static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
@@ -86,7 +87,7 @@ private:
     std::vector<MarkerEvent> markerEvents_;
 
     // Selected psychoacoustic metric
-    enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Impulsiveness, Tonality, Off };
+    enum class PsychoMetric { Roughness = 0, Fluctuation, Sharpness, Loudness, Annoyance, Impulsiveness, Tonality, BassComfort, Off };
     PsychoMetric selectedMetric = PsychoMetric::Off;
 
 
@@ -114,6 +115,7 @@ private:
     static const juce::Colour colAnnoyance;
     static const juce::Colour colImpulsiveness;
     static const juce::Colour colTonality;
+    static const juce::Colour colBassComfort;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LogComponent)
 };

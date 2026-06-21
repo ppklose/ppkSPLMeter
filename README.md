@@ -2,7 +2,7 @@
 
 A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows/Linux standalone app and as VST3 / AU plugin.
 
-![SPLMeter v3.4 screenshot](screenShot.png)
+![SPLMeter v3.5 screenshot](screenShot.png)
 
 ---
 
@@ -134,7 +134,7 @@ Assigned CC numbers are shown next to each fader label (e.g. `[CC 4]`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    ppkSPLmeter v3.4 — Real-Time Audio Signal Flow           │
+│                    ppkSPLmeter v3.5 — Real-Time Audio Signal Flow           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────┐     ┌──────────────────────┐
@@ -316,6 +316,11 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 ---
 
 ## Changelog
+
+### [v3.5.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.0)
+- **Unweighted Peak readout** added to the main SPL values line (after LAeq / LCeq) — shows the Z-weighted (flat, unweighted) instantaneous peak hold in dB SPL, complementing the time-weighted RMS and energy-averaged readouts. Contributed by **Sokel**.
+- **Timeline now matches the readouts** — the SPL/dBA/dBC series in the time-series plot were plotting the peak-held values while the single-value readouts show time-weighted RMS, causing the timeline to overreport by the crest factor (~+4 dB). The plot now uses the RMS levels. Contributed by **Miracle_Nosh**.
+- **Bass comfort (LCeq − LAeq) time-series** added to the timeline — plots the C-minus-A level delta over time on the right axis (dB), a low-frequency-content indicator. Contributed by **icemac**.
 
 ### [v3.4.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.4.0)
 - **TA Laerm compliance lane** added next to DIN 15905-5 and NIOSH on the bottom strip — Beurteilungspegel `Lr` (≈ LAeq) compared against day (06–22) / night (22–06) limits for the selected German land-use category, with an OK / WARN / LIMIT pill of its own. Categories: Industriegebiet, Gewerbegebiet, Misch-/Dorf-/Kerngebiet, Allg. Wohngebiet (default), Reines Wohngebiet, Kurgebiet/Krankenhaus

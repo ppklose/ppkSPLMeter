@@ -20,6 +20,7 @@ const juce::Colour LogComponent::colLoudness       { 0xffffe57f };  // gold
 const juce::Colour LogComponent::colAnnoyance      { 0xffff6b6b };  // coral red
 const juce::Colour LogComponent::colImpulsiveness  { 0xffff9f0a };  // amber
 const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime green
+const juce::Colour LogComponent::colBassComfort    { 0xff7d5fff };  // indigo
 
 //==============================================================================
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
@@ -58,7 +59,7 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
                 for (auto* b : { &roughnessVisButton, &fluctuationVisButton,
                                  &sharpnessVisButton, &loudnessVisButton,
                                  &annoyanceVisButton, &impulsivenessVisButton,
-                                 &tonalityVisButton })
+                                 &tonalityVisButton, &bassComfortVisButton })
                     if (b != &btn)
                         b->setToggleState (false, juce::dontSendNotification);
                 selectedMetric = metric;
@@ -79,6 +80,7 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupPsychoBtn (annoyanceVisButton,      colAnnoyance,      PsychoMetric::Annoyance);
     setupPsychoBtn (impulsivenessVisButton,  colImpulsiveness,  PsychoMetric::Impulsiveness);
     setupPsychoBtn (tonalityVisButton,       colTonality,       PsychoMetric::Tonality);
+    setupPsychoBtn (bassComfortVisButton,    colBassComfort,    PsychoMetric::BassComfort);
 
     // Y-axis zoom button (magnifying glass — opens SPL range panel)
     yZoomButton_.setButtonText ("");
@@ -124,9 +126,10 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
             { "annoyance",     "Annoyance",      "PA"   },
             { "impulsiveness", "Impulsiveness",  "dB"   },
             { "tonality",      "Tonality",       "%"    },
+            { "bassComfort",   "Bass LCeq-LAeq", "dB"   },
         };
         int idx = static_cast<int> (selectedMetric);
-        if (idx < 0 || idx >= 7) return;
+        if (idx < 0 || idx >= 8) return;
         const auto& m = info[idx];
         auto panel = std::make_unique<PsychoRangePanel> (
             processor, m.prefix, m.label, m.unit);
@@ -162,7 +165,7 @@ void LogComponent::setLightMode (bool light) noexcept
                      &roughnessVisButton, &fluctuationVisButton,
                      &sharpnessVisButton, &loudnessVisButton,
                      &annoyanceVisButton, &impulsivenessVisButton,
-                     &tonalityVisButton })
+                     &tonalityVisButton, &bassComfortVisButton })
         b->setColour (juce::ToggleButton::textColourId, textPrimary);
 
     repaint();
@@ -200,6 +203,7 @@ void LogComponent::resized()
     annoyanceVisButton.setBounds     (juce::Rectangle<float> (plotX,          row3Y, colW, btnH).toNearestInt());
     impulsivenessVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   row3Y, colW, btnH).toNearestInt());
     tonalityVisButton.setBounds      (juce::Rectangle<float> (plotX + colW*2, row3Y, colW, btnH).toNearestInt());
+    bassComfortVisButton.setBounds   (juce::Rectangle<float> (plotX + colW*3, row3Y, colW, btnH).toNearestInt());
 
     // Shared geometry for zoom buttons
     {
@@ -298,6 +302,7 @@ void LogComponent::paint (juce::Graphics& g)
         case PsychoMetric::Annoyance:     rightParamPrefix = "annoyance";     rightUnit = "PA";   psychoColour = colAnnoyance;      break;
         case PsychoMetric::Impulsiveness: rightParamPrefix = "impulsiveness"; rightUnit = "dB";   psychoColour = colImpulsiveness;  break;
         case PsychoMetric::Tonality:      rightParamPrefix = "tonality";      rightUnit = "%";    psychoColour = colTonality;       break;
+        case PsychoMetric::BassComfort:   rightParamPrefix = "bassComfort";   rightUnit = "dB";   psychoColour = colBassComfort;    break;
         default: break;
     }
 
@@ -499,9 +504,11 @@ void LogComponent::paint (juce::Graphics& g)
         g.strokePath (path, juce::PathStrokeType (3.0f));
     };
 
-    if (splVisButton.getToggleState()) drawSeries (colPeakSPL, [] (const LogEntry& e) { return e.peakSPL;    });
-    if (dbaVisButton.getToggleState()) drawSeries (colPeakDBA, [] (const LogEntry& e) { return e.peakDBASPL; });
-    if (dbcVisButton.getToggleState()) drawSeries (colPeakDBC, [] (const LogEntry& e) { return e.peakDBCSPL; });
+    // Plot the time-weighted RMS levels so the timeline matches the single-value
+    // readouts (MeterComponent shows RMS, not the peak-held values).
+    if (splVisButton.getToggleState()) drawSeries (colPeakSPL, [] (const LogEntry& e) { return e.rmsSPL;    });
+    if (dbaVisButton.getToggleState()) drawSeries (colPeakDBA, [] (const LogEntry& e) { return e.rmsDBASPL; });
+    if (dbcVisButton.getToggleState()) drawSeries (colPeakDBC, [] (const LogEntry& e) { return e.rmsDBCSPL; });
 
     // ---- Selected psychoacoustic metric (right axis) ----
     if (selectedMetric != PsychoMetric::Off)
@@ -520,6 +527,7 @@ void LogComponent::paint (juce::Graphics& g)
                 case PsychoMetric::Annoyance:      val = e.psychoAnnoyance;  break;
                 case PsychoMetric::Impulsiveness:  val = e.impulsiveness;    break;
                 case PsychoMetric::Tonality:       val = e.tonality;         break;
+                case PsychoMetric::BassComfort:    val = e.rmsDBCSPL - e.rmsDBASPL;  break;
                 default: break;
             }
             float x = timeToX (e.timestampMs);

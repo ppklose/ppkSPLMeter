@@ -134,6 +134,7 @@ SPLMeterAudioProcessor::createParameterLayout()
         { "annoyance",      "Annoyance",      0, 200, 0, 100, 1  },
         { "impulsiveness",  "Impulsiveness",  0,  60, 0,  40, 1  },
         { "tonality",       "Tonality",       0, 100, 0, 100, 1  },
+        { "bassComfort",    "Bass LCeq-LAeq", 0,  40, 0,  30, 1  },
     };
     for (const auto& m : metricRanges)
     {

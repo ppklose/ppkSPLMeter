@@ -27,6 +27,9 @@ public:
 
     void setLeq (float laeq, float lceq) noexcept { laeq_ = laeq; lceq_ = lceq; }
 
+    // Unweighted (Z) instantaneous peak hold, dB SPL
+    void setPeak (float peakZ) noexcept { peakZ_ = peakZ; }
+
     // DIN 15905-5: sliding 30-min LAeq and session-long LCpeak
     void setDinValues (float laeq30, float lcpeak) noexcept
     {
@@ -66,6 +69,7 @@ public:
         roughness_ = fluctuation_ = sharpness_ = sone_ = psychoAnnoyance_ = 0.0f;
         impulsiveness_ = tonality_ = 0.0f;
         laeq_ = lceq_ = 0.0f;
+        peakZ_ = kMin;
         laeq30Min_ = lcPeak_ = -999.0f;
         noiseDosePct_ = 0.0f;
         taLr_ = -999.0f;
@@ -94,6 +98,7 @@ private:
     float tonality_         = 0.0f;
     float laeq_             = 0.0f;
     float lceq_             = 0.0f;
+    float peakZ_            = 0.0f;   // unweighted (Z) instantaneous peak hold
     float laeq30Min_        = -999.0f;
     float lcPeak_           = -999.0f;
     float noiseDosePct_     = 0.0f;

@@ -114,6 +114,22 @@ void MeterComponent::paint (juce::Graphics& g)
             curX += sepW;
 
             drawLeq ("LCeq", lceq_);
+
+            // ---- Unweighted (Z) Peak after a double-pipe separator ----
+            g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+            g.setColour (juce::Colour (0xff48484a));
+            g.drawText (juce::String::charToString (0x2016),  // ‖
+                        curX, static_cast<int> (peakReadoutY),
+                        dpW, static_cast<int> (readoutH), juce::Justification::centred, false);
+            curX += dpW;
+
+            g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)));
+            g.setColour (textSecond);
+            g.drawText (juce::String (peakZ_, 1) + " dB Peak",
+                        curX, static_cast<int> (peakReadoutY),
+                        leqW, static_cast<int> (readoutH),
+                        juce::Justification::centredLeft, false);
+            curX += leqW;
         }
 
         // background track

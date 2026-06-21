@@ -465,7 +465,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.4.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v3.5.0   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -995,6 +995,21 @@ void SPLMeterAudioProcessorEditor::triggerMarker()
     });
 }
 
+void SPLMeterAudioProcessorEditor::parentHierarchyChanged()
+{
+   #if JUCE_WINDOWS
+    // In the Windows standalone build, JUCE's StandaloneFilterWindow only enables
+    // the minimise + close title-bar buttons. Add a maximise button too, so the
+    // resizable window can be maximised. Guarded to the standalone app so plugin
+    // (VST3/AU) host windows are never touched.
+    if (juce::JUCEApplicationBase::isStandaloneApp())
+        if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
+            dw->setTitleBarButtonsRequired (juce::DocumentWindow::minimiseButton
+                                          | juce::DocumentWindow::maximiseButton
+                                          | juce::DocumentWindow::closeButton, false);
+   #endif
+}
+
 bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto mods = key.getModifiers();
@@ -1046,6 +1061,7 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getPsychoAnnoyance(),
                      audioProcessor.getImpulsiveness(),
                      audioProcessor.getTonality());
+    meter.setPeak (audioProcessor.getPeakSPL());
 
     // Compute LAeq / LCeq from log entries (energy average over logDuration)
     // and DIN 15905-5 LAeq,30min (sliding 30-min window over the available log)
