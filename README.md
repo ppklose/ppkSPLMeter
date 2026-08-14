@@ -37,10 +37,12 @@ A professional Sound Pressure Level (SPL) meter built with JUCE, available as a 
 - Opened via the **Tools…** menu; floating window with configurable controls
 - **Frequency scale:** Log (default) or **Mel**
 - Gain and time-resolution controls
+- **FFT size:** 32 – 524,288 samples (14 selectable sizes), configurable in Settings
 
 ### FFT Spectrum Analyser
 - Toggled via the **FFT** button; displayed as a semi-transparent overlay on the log plot
 - Unweighted (raw) signal — A/C weighting is not applied
+- **FFT size:** 32 – 524,288 samples (14 selectable sizes), configurable in Settings
 - **Band resolution:** 1/1, 1/3, 1/6, 1/12, or 1/24 octave (up to ~240 bands)
 - **Display modes:** Bars, Area fill, Bars + Peak hold markers
 - **Window functions:** Hann, Hamming, Blackman, Flat-top, Rectangular
@@ -84,12 +86,13 @@ Accessible via the **Tools…** button (popup menu):
 - **Note field** — three-line free-text field for session annotations
 
 ### Settings Panel
-Opened via the **Settings** button. Organised into four sections:
+Opened via the **Settings** button. A wide, two-column, card-based window with a one-line description under each section header — organised into five sections:
 
 | Section | Contents |
 |---|---|
 | **General** | Calibration fader, Hold Time fader, Light Mode, 94 dB Reference Line, 20–20k Bandpass, Full Screen |
-| **FFT** | FFT enable toggle, FFT Gain fader, FFT Smooth fader, Band Resolution, Display Mode, Window Function, Overlap, Peak Hold, RTA +3 dB/oct |
+| **FFT** | FFT enable toggle, FFT Gain fader, FFT Smooth fader, FFT Size (32 – 524,288 samples), Band Resolution, Display Mode, Window Function, Overlap, Peak Hold, RTA +3 dB/oct |
+| **Spectrogram** | FFT Size (32 – 524,288 samples) for the Spectrogram window |
 | **Analysis** | Correction Filter (enable / load / clear), Graph Overlay (enable / load / clear) |
 | **Input Channels** | Per-channel mute buttons for IN01 – IN32 |
 
