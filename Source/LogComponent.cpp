@@ -140,12 +140,6 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     };
     addAndMakeVisible (rightZoomButton_);
 
-    // Default: Hann window (index 0)
-    for (int i = 0; i < kFftSize; ++i)
-        windowCoeffs_[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
-                                                       * i / (kFftSize - 1)));
-    currentWindowType_ = 0;
-
     startTimerHz (8);
 }
 
@@ -823,18 +817,38 @@ void LogComponent::computeFftBands()
     const float  calOffset  = processor.apvts.getRawParameterValue ("calOffset")->load();
     const double sampleRate = processor.getSampleRate();
 
+    // ---- FFT size (rebuild if changed) ----
+    // 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 32768, 65536, 131072, 262144, 524288
+    static constexpr int kFftOrders[14] = { 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19 };
+    const int sizeIdx = juce::jlimit (0, 13,
+        static_cast<int> (processor.apvts.getRawParameterValue ("lfftSize")->load()));
+    const int fftOrder = kFftOrders[sizeIdx];
+    const int fftSize  = 1 << fftOrder;
+
+    if (fftOrder != currentFftOrder_)
+    {
+        currentFftOrder_ = fftOrder;
+        fft_ = std::make_unique<juce::dsp::FFT> (fftOrder);
+        windowCoeffs_.assign    (fftSize, 0.0f);
+        fftInputHistory_.assign (fftSize, 0.0f);
+        fftBuffer_.assign       (fftSize * 2, 0.0f);
+        fftAvgAccum_.assign     (fftSize / 2, 0.0f);
+        fftAvgCount_       = 0;
+        currentWindowType_ = -1;   // force window recompute below
+    }
+
     // ---- Window function (rebuild if changed) ----
     const int wType = static_cast<int> (processor.apvts.getRawParameterValue ("fftWindowType")->load());
     if (wType != currentWindowType_)
     {
         currentWindowType_ = wType;
         const float tp = juce::MathConstants<float>::twoPi;
-        for (int i = 0; i < kFftSize; ++i)
+        for (int i = 0; i < fftSize; ++i)
         {
-            const float c1 = std::cos (tp * i / (kFftSize - 1));
-            const float c2 = std::cos (2.0f * tp * i / (kFftSize - 1));
-            const float c3 = std::cos (3.0f * tp * i / (kFftSize - 1));
-            const float c4 = std::cos (4.0f * tp * i / (kFftSize - 1));
+            const float c1 = std::cos (tp * i / (fftSize - 1));
+            const float c2 = std::cos (2.0f * tp * i / (fftSize - 1));
+            const float c3 = std::cos (3.0f * tp * i / (fftSize - 1));
+            const float c4 = std::cos (4.0f * tp * i / (fftSize - 1));
             switch (wType)
             {
                 case 1:  windowCoeffs_[i] = 0.54f - 0.46f * c1; break;                              // Hamming
@@ -851,12 +865,12 @@ void LogComponent::computeFftBands()
     const int overlapIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftOverlap")->load());
     static constexpr int kOverlapPct[4] = { 0, 25, 50, 75 };
     const int overlap  = kOverlapPct[juce::jlimit (0, 3, overlapIdx)];
-    const int hopSize  = kFftSize * (100 - overlap) / 100;  // new samples this frame
-    const int keepSize = kFftSize - hopSize;
+    const int hopSize  = fftSize * (100 - overlap) / 100;  // new samples this frame
+    const int keepSize = fftSize - hopSize;
 
     // Get a fresh full window from the processor into a temp buffer
-    std::array<float, kFftSize> tempBuf {};
-    processor.copyFftWindow (tempBuf.data(), kFftSize);
+    std::vector<float> tempBuf (fftSize);
+    processor.copyFftWindow (tempBuf.data(), fftSize);
 
     if (overlap > 0 && keepSize > 0)
     {
@@ -874,24 +888,24 @@ void LogComponent::computeFftBands()
     }
 
     // Apply window function + gain; zero imaginary half
-    for (int i = 0; i < kFftSize; ++i)
+    for (int i = 0; i < fftSize; ++i)
         fftBuffer_[i] = fftInputHistory_[i] * windowCoeffs_[i] * gainLinear;
-    std::fill (fftBuffer_.begin() + kFftSize, fftBuffer_.end(), 0.0f);
+    std::fill (fftBuffer_.begin() + fftSize, fftBuffer_.end(), 0.0f);
 
-    fft_.performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
-    // fftBuffer_[0..kFftSize/2] now holds magnitudes
+    fft_->performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
+    // fftBuffer_[0..fftSize/2] now holds magnitudes
 
     // --- Accumulate for cycle averaging ---
     const int avgCycles = juce::jlimit (1, 999,
         static_cast<int> (processor.apvts.getRawParameterValue ("fftAvgCycles")->load()));
 
-    if (static_cast<int> (fftAvgAccum_.size()) != kFftSize / 2)
+    if (static_cast<int> (fftAvgAccum_.size()) != fftSize / 2)
     {
-        fftAvgAccum_.assign (kFftSize / 2, 0.0f);
+        fftAvgAccum_.assign (fftSize / 2, 0.0f);
         fftAvgCount_ = 0;
     }
 
-    for (int k = 0; k < kFftSize / 2; ++k)
+    for (int k = 0; k < fftSize / 2; ++k)
         fftAvgAccum_[k] += fftBuffer_[k];
 
     ++fftAvgCount_;
@@ -900,13 +914,13 @@ void LogComponent::computeFftBands()
         return;
 
     const float invAvg = 1.0f / static_cast<float> (fftAvgCount_);
-    for (int k = 0; k < kFftSize / 2; ++k)
+    for (int k = 0; k < fftSize / 2; ++k)
         fftBuffer_[k] = fftAvgAccum_[k] * invAvg;
 
-    fftAvgAccum_.assign (kFftSize / 2, 0.0f);
+    fftAvgAccum_.assign (fftSize / 2, 0.0f);
     fftAvgCount_ = 0;
 
-    const float normFactor = static_cast<float> (kFftSize);
+    const float normFactor = static_cast<float> (fftSize);
 
     // Determine resolution (N = subdivisions per octave)
     const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
@@ -934,8 +948,8 @@ void LogComponent::computeFftBands()
     for (float fc = fftLo; fc <= fftHi && currentNumBands_ < kMaxFftBands; fc *= stepFactor)
     {
         const int b    = currentNumBands_++;
-        const int binLo = std::max (1,            static_cast<int> (fc / halfBandFactor * kFftSize / sampleRate));
-        const int binHi = std::min (kFftSize / 2, static_cast<int> (fc * halfBandFactor * kFftSize / sampleRate) + 1);
+        const int binLo = std::max (1,          static_cast<int> (fc / halfBandFactor * fftSize / sampleRate));
+        const int binHi = std::min (fftSize / 2, static_cast<int> (fc * halfBandFactor * fftSize / sampleRate) + 1);
 
         float peak = 0.0f;
         for (int k = binLo; k < binHi; ++k)

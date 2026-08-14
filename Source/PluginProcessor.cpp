@@ -48,6 +48,11 @@ SPLMeterAudioProcessor::createParameterLayout()
         "spectroGain", "Spectrogram Gain (dB)",
         juce::NormalisableRange<float> (-40.0f, 40.0f, 0.5f), 0.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "spectroFftSize", "Spectrogram FFT Size",
+        juce::StringArray { "32", "64", "128", "256", "512", "1024", "2048", "4096", "8192",
+                            "32768", "65536", "131072", "262144", "524288" }, 6));
+
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "fftPeakHold", "FFT Peak Hold", false));
 
@@ -70,6 +75,11 @@ SPLMeterAudioProcessor::createParameterLayout()
     params.push_back (std::make_unique<juce::AudioParameterInt> (
         "fftAvgCycles", "FFT Avg Cycles",
         1, 999, 1));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "lfftSize", "L_FFT Size",
+        juce::StringArray { "32", "64", "128", "256", "512", "1024", "2048", "4096", "8192",
+                            "32768", "65536", "131072", "262144", "524288" }, 8));
 
     // TA Lärm land-use category (default: Allgemeines Wohngebiet)
     params.push_back (std::make_unique<juce::AudioParameterChoice> (

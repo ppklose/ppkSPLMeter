@@ -133,7 +133,8 @@ public:
     }
 
     // FFT circular buffer (audio thread → GUI, lock-free)
-    static constexpr int kFftCircBufSize = 8192;
+    // Sized to the largest selectable L_FFT window (524288 = 512k samples).
+    static constexpr int kFftCircBufSize = 524288;
     void copyFftWindow (float* dest, int size) const noexcept;
     int  pullSpectroSamples (float* dest, int maxSamples) noexcept;
     double getSampleRate() const noexcept { return currentSampleRate; }

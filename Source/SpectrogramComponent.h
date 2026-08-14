@@ -25,7 +25,7 @@ public:
 
     void setFftOrder (int order)
     {
-        fftOrder_ = juce::jlimit (9, 13, order);
+        fftOrder_ = juce::jlimit (5, 19, order);
         rebuildFFT (fftOrder_);
         clearSpectrogramImage();
     }
@@ -233,6 +233,14 @@ private:
     {
         const double sr = processor.getSampleRate();
         sampleRate = (sr > 0.0) ? sr : 44100.0;
+
+        // 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 32768, 65536, 131072, 262144, 524288
+        static constexpr int kSpectroFftOrders[14] = { 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19 };
+        const int sizeIdx = juce::jlimit (0, 13,
+            static_cast<int> (processor.apvts.getRawParameterValue ("spectroFftSize")->load()));
+        const int wantedOrder = kSpectroFftOrders[sizeIdx];
+        if (wantedOrder != fftOrder_)
+            setFftOrder (wantedOrder);
 
         if (spectrogramImage.getWidth() < 2)
             return;
@@ -636,18 +644,13 @@ class SpectrogramWindow : public juce::DocumentWindow
             scaleCombo.onChange = [this] { spectro.setFreqScale (scaleCombo.getSelectedId() - 1); };
             styleCombo (scaleCombo, "Frequency axis scale");
 
-            // FFT Size
+            // FFT Size (bound to the shared "spectroFftSize" param — also settable from Settings)
             makeRowLabel (fftSizeLabel, "FFT");
-            fftSizeCombo.addItem ("512",  1);
-            fftSizeCombo.addItem ("1024", 2);
-            fftSizeCombo.addItem ("2048", 3);
-            fftSizeCombo.addItem ("4096", 4);
-            fftSizeCombo.setSelectedId (3, juce::dontSendNotification);
-            fftSizeCombo.onChange = [this]
-            {
-                const int orders[] = { 9, 10, 11, 12 };
-                spectro.setFftOrder (orders[fftSizeCombo.getSelectedId() - 1]);
-            };
+            if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (
+                    p.apvts.getParameter ("spectroFftSize")))
+                fftSizeCombo.addItemList (param->choices, 1);
+            fftSizeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+                p.apvts, "spectroFftSize", fftSizeCombo);
             styleCombo (fftSizeCombo, "FFT window size — larger = better frequency resolution");
 
             // Hop Size
@@ -757,7 +760,7 @@ class SpectrogramWindow : public juce::DocumentWindow
                 row2.removeFromLeft (6);
             };
 
-            tbL2 (fftSizeLabel,  fftSizeCombo,  30,  70);
+            tbL2 (fftSizeLabel,  fftSizeCombo,  30,  85);
             tbL2 (hopLabel,      hopCombo,       26,  70);
             tbL2 (windowLabel,   windowCombo,    26,  90);
             tbL2 (colourLabel,   colourCombo,    26,  90);
@@ -782,6 +785,7 @@ class SpectrogramWindow : public juce::DocumentWindow
         juce::ComboBox   durationCombo;
         juce::TextButton formantsButton { "Formants" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttachment;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftSizeAttachment;
 
         // Row 2
         juce::Label    fftSizeLabel, hopLabel, windowLabel, colourLabel;

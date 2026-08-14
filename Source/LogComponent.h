@@ -57,14 +57,14 @@ private:
     juce::ToggleButton bassComfortVisButton    { "Bass LCeq-LAeq" };
 
     // FFT
-    static constexpr int   kFftOrder    = 13;    // 2^13 = 8192
-    static constexpr int   kFftSize     = 1 << kFftOrder;
+    static constexpr int   kMaxFftOrder = 19;    // 2^19 = 524288, matches PluginProcessor::kFftCircBufSize
     static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (~240 bands)
 
-    juce::dsp::FFT                  fft_             { kFftOrder };
-    std::array<float, kFftSize>     windowCoeffs_    {};   // current window function
-    std::array<float, kFftSize>     fftInputHistory_ {};   // overlap history
-    std::array<float, kFftSize * 2> fftBuffer_       {};
+    std::unique_ptr<juce::dsp::FFT> fft_;
+    std::vector<float>              windowCoeffs_;      // current window function
+    std::vector<float>              fftInputHistory_;   // overlap history
+    std::vector<float>              fftBuffer_;
+    int                             currentFftOrder_    = -1;
     float                           fftBands_[kMaxFftBands] {};
     float                           fftBandsSmoothed_[kMaxFftBands] {};
     float                           fftPeakBands_[kMaxFftBands] {};

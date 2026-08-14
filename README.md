@@ -317,6 +317,10 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.5.1](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.1)
+- **FFT Size is now configurable** for both the L_FFT timeline overlay (1024–8192, default 8192) and the Spectrogram (512–4096, default 2048) — previously the L_FFT engine was hardcoded to 8192 samples and the Spectrogram's size control was a local, non-persisted setting. Both are now proper APVTS parameters exposed as dropdowns in Settings and saved with the session
+- **Settings window redesigned**: wider two-column, card-based layout (GENERAL / FFT on the left, SPECTROGRAM / ANALYSIS on the right, INPUT CHANNELS spanning the full width below), with each section getting a one-line description of what it controls
+
 ### [v3.5.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.0)
 - **Unweighted Peak readout** added to the main SPL values line (after LAeq / LCeq) — shows the Z-weighted (flat, unweighted) instantaneous peak hold in dB SPL, complementing the time-weighted RMS and energy-averaged readouts. Contributed by **Sokel**.
 - **Timeline now matches the readouts** — the SPL/dBA/dBC series in the time-series plot were plotting the peak-held values while the single-value readouts show time-weighted RMS, causing the timeline to overreport by the crest factor (~+4 dB). The plot now uses the RMS levels. Contributed by **Miracle_Nosh**.

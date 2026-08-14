@@ -550,6 +550,44 @@ public:
         ovlp50Button.onClick = [this, &p] { setChoiceParam (p, "fftOverlap", 2); };
         ovlp75Button.onClick = [this, &p] { setChoiceParam (p, "fftOverlap", 3); };
 
+        // L_FFT size dropdown (FFT overlay on the timeline)
+        lfftSizeLabel.setText ("FFT Size", juce::dontSendNotification);
+        lfftSizeLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+        lfftSizeLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+        lfftSizeLabel.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (lfftSizeLabel);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (
+                p.apvts.getParameter ("lfftSize")))
+            lfftSizeCombo.addItemList (param->choices, 1);
+        lfftSizeCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff3a3a3c));
+        lfftSizeCombo.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
+        lfftSizeCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff48484a));
+        lfftSizeCombo.setColour (juce::ComboBox::arrowColourId,      juce::Colours::white);
+        lfftSizeCombo.setTooltip ("FFT window size for the L_FFT timeline overlay — larger = better frequency resolution, slower response");
+        addAndMakeVisible (lfftSizeCombo);
+        lfftSizeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            p.apvts, "lfftSize", lfftSizeCombo);
+
+        // Spectrogram FFT size dropdown
+        spectroFftSizeLabel.setText ("FFT Size", juce::dontSendNotification);
+        spectroFftSizeLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+        spectroFftSizeLabel.setColour (juce::Label::textColourId, juce::Colour (0xffaeaeb2));
+        spectroFftSizeLabel.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (spectroFftSizeLabel);
+
+        if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (
+                p.apvts.getParameter ("spectroFftSize")))
+            spectroFftSizeCombo.addItemList (param->choices, 1);
+        spectroFftSizeCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff3a3a3c));
+        spectroFftSizeCombo.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
+        spectroFftSizeCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff48484a));
+        spectroFftSizeCombo.setColour (juce::ComboBox::arrowColourId,      juce::Colours::white);
+        spectroFftSizeCombo.setTooltip ("FFT window size for the spectrogram — larger = better frequency resolution, slower scroll");
+        addAndMakeVisible (spectroFftSizeCombo);
+        spectroFftSizeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            p.apvts, "spectroFftSize", spectroFftSizeCombo);
+
         // FFT averaging cycles (editable label)
         avgCyclesLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
         avgCyclesLabel.setJustificationType (juce::Justification::centred);
@@ -788,12 +826,33 @@ public:
         };
         setupSectionLabel (sectionGeneralLabel,  "GENERAL");
         setupSectionLabel (sectionFftLabel,       "FFT");
+        setupSectionLabel (sectionSpectroLabel,   "SPECTROGRAM");
         setupSectionLabel (sectionAnalysisLabel,  "ANALYSIS");
-        setupSectionLabel (sectionChannelsLabel,  "INPUT CHANNELS  (right click to rename)");
+        setupSectionLabel (sectionChannelsLabel,  "INPUT CHANNELS");
         addAndMakeVisible (sectionGeneralLabel);
         addAndMakeVisible (sectionFftLabel);
+        addAndMakeVisible (sectionSpectroLabel);
         addAndMakeVisible (sectionAnalysisLabel);
         addAndMakeVisible (sectionChannelsLabel);
+
+        // Section description labels — a one-line explanation under each header
+        auto setupDescLabel = [] (juce::Label& l, const juce::String& text)
+        {
+            l.setText (text, juce::dontSendNotification);
+            l.setFont (juce::Font (juce::FontOptions().withHeight (11.5f)));
+            l.setColour (juce::Label::textColourId, juce::Colour (0xff6c6c70));
+            l.setInterceptsMouseClicks (false, false);
+        };
+        setupDescLabel (descGeneralLabel,   "Calibration, hold time, and general meter display behaviour.");
+        setupDescLabel (descFftLabel,       "Spectral engine behind the L_FFT timeline overlay: window, overlap, resolution.");
+        setupDescLabel (descSpectroLabel,   "Time-frequency display shown in the Spectrogram window.");
+        setupDescLabel (descAnalysisLabel,  "Reference lines, correction filters, and comparison overlays.");
+        setupDescLabel (descChannelsLabel,  "Mute or rename individual input channels — right-click a channel to rename it.");
+        addAndMakeVisible (descGeneralLabel);
+        addAndMakeVisible (descFftLabel);
+        addAndMakeVisible (descSpectroLabel);
+        addAndMakeVisible (descAnalysisLabel);
+        addAndMakeVisible (descChannelsLabel);
 
         startTimerHz (10);
     }
@@ -804,158 +863,200 @@ public:
     {
         g.fillAll (lightMode_ ? juce::Colour (0xffe5e5ea) : juce::Colour (0xff2c2c2e));
 
-        // Thin separator lines above each section except the first
-        const juce::Colour sep = lightMode_ ? juce::Colour (0xffc7c7cc) : juce::Colour (0xff48484a);
-        for (auto* lbl : { &sectionFftLabel, &sectionAnalysisLabel, &sectionChannelsLabel })
+        const juce::Colour cardBg     = lightMode_ ? juce::Colour (0xfff5f5f7) : juce::Colour (0xff333335);
+        const juce::Colour cardBorder = lightMode_ ? juce::Colour (0xffc7c7cc) : juce::Colour (0xff48484a);
+
+        for (auto* bounds : { &generalCardBounds, &fftCardBounds, &spectroCardBounds,
+                              &analysisCardBounds, &channelsCardBounds })
         {
-            g.setColour (sep);
-            g.fillRect (12, lbl->getY() - 7, getWidth() - 24, 1);
+            g.setColour (cardBg);
+            g.fillRoundedRectangle (bounds->toFloat(), 10.0f);
+            g.setColour (cardBorder);
+            g.drawRoundedRectangle (bounds->toFloat(), 10.0f, 1.0f);
         }
     }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (12, 12);
+        constexpr int outerMargin = 16;
+        constexpr int colGap      = 18;
+        constexpr int cardPad     = 14;
+        constexpr int sectionGap  = 16;
 
-        auto row = [&] (int h = 28) { return area.removeFromTop (h); };
-        auto gap = [&] (int g = 5)  { area.removeFromTop (g); };
+        auto page = getLocalBounds().reduced (outerMargin);
+        const int pageX = page.getX();
+        const int pageW = page.getWidth();
+        // FFT needs more elbow room for its 5-way button rows than SPECTROGRAM/ANALYSIS do.
+        const int leftW  = static_cast<int> ((pageW - colGap) * 0.6);
+        const int rightW = pageW - colGap - leftW;
+        const int leftX  = pageX;
+        const int rightX = pageX + leftW + colGap;
+
+        int leftY  = page.getY();
+        int rightY = page.getY();
+
+        auto rowOf = [] (juce::Rectangle<int>& r, int h = 28) { return r.removeFromTop (h); };
+        auto gapOf = [] (juce::Rectangle<int>& r, int g = 5)  { r.removeFromTop (g); };
+
+        // Lays out one card: header + description + caller-supplied content, then
+        // records its outer bounds (for the background drawn in paint()) and
+        // advances the column cursor past it.
+        auto layoutCard = [&] (int colX, int colWidth, int& colY,
+                                juce::Label& title, juce::Label& desc,
+                                juce::Rectangle<int>& cardBounds,
+                                auto&& layoutContent)
+        {
+            const int cardTop = colY;
+            auto content = juce::Rectangle<int> (colX + cardPad, cardTop + cardPad, colWidth - 2 * cardPad, 4000);
+            title.setBounds (rowOf (content, 16));
+            gapOf (content, 3);
+            desc.setBounds (rowOf (content, 16));
+            gapOf (content, 10);
+            layoutContent (content);
+            const int cardBottom = content.getY() + cardPad;
+            cardBounds = { colX, cardTop, colWidth, cardBottom - cardTop };
+            colY = cardBottom + sectionGap;
+        };
 
         // === GENERAL ===
-        sectionGeneralLabel.setBounds (row (16)); gap (5);
-        {
-            auto faderRow = row (100); gap (5);
-            const int fw = faderRow.getWidth() / 2;
-            auto calSect = faderRow.removeFromLeft (fw);
-            calLabel.setBounds  (calSect.removeFromTop (22));
-            calSlider.setBounds (calSect);
-            holdLabel.setBounds  (faderRow.removeFromTop (22));
-            holdSlider.setBounds (faderRow);
-        }
-        {
-            // "Cal to Input" sits directly below the Calibration fader (left half)
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 2;
-            calToInputButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 2;
-            lightModeButton.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            fullscreenButton.setBounds (r.reduced (2, 0));
-        }
-        {
-            // TA Lärm category — label + dropdown
-            auto r = row (28); gap (5);
-            taLaermLabel.setBounds (r.removeFromLeft (160));
-            taLaermCombo.setBounds (r.reduced (2, 0));
-        }
+        layoutCard (leftX, leftW, leftY, sectionGeneralLabel, descGeneralLabel, generalCardBounds,
+            [&] (juce::Rectangle<int>& c)
+            {
+                auto faderRow = rowOf (c, 100); gapOf (c);
+                const int fw = faderRow.getWidth() / 2;
+                auto calSect = faderRow.removeFromLeft (fw);
+                calLabel.setBounds  (calSect.removeFromTop (22));
+                calSlider.setBounds (calSect);
+                holdLabel.setBounds  (faderRow.removeFromTop (22));
+                holdSlider.setBounds (faderRow);
 
-        gap (10); // section gap
+                // "Cal to Input" sits directly below the Calibration fader (left half)
+                auto r1 = rowOf (c); gapOf (c);
+                calToInputButton.setBounds (r1.removeFromLeft (r1.getWidth() / 2).reduced (2, 0));
+
+                auto r2 = rowOf (c); gapOf (c);
+                const int bw2 = r2.getWidth() / 2;
+                lightModeButton.setBounds  (r2.removeFromLeft (bw2).reduced (2, 0));
+                fullscreenButton.setBounds (r2.reduced (2, 0));
+
+                // TA Lärm category — label + dropdown
+                auto r3 = rowOf (c);
+                taLaermLabel.setBounds (r3.removeFromLeft (140));
+                taLaermCombo.setBounds (r3.reduced (2, 0));
+            });
 
         // === FFT ===
-        sectionFftLabel.setBounds (row (16)); gap (5);
-        {
-            auto r = row (95); gap (5);
+        layoutCard (leftX, leftW, leftY, sectionFftLabel, descFftLabel, fftCardBounds,
+            [&] (juce::Rectangle<int>& c)
+            {
+                auto r = rowOf (c, 95); gapOf (c);
 
-            // Right side: two vertical freq-range sliders
-            const int sliderW = 70;
-            auto upperSect = r.removeFromRight (sliderW);
-            auto lowerSect = r.removeFromRight (sliderW);
-            fftLowerFreqLabel.setBounds  (lowerSect.removeFromTop (22));
-            fftLowerFreqSlider.setBounds (lowerSect);
-            fftUpperFreqLabel.setBounds  (upperSect.removeFromTop (22));
-            fftUpperFreqSlider.setBounds (upperSect);
+                // Right side: two vertical freq-range sliders
+                const int sliderW = 70;
+                auto upperSect = r.removeFromRight (sliderW);
+                auto lowerSect = r.removeFromRight (sliderW);
+                fftLowerFreqLabel.setBounds  (lowerSect.removeFromTop (22));
+                fftLowerFreqSlider.setBounds (lowerSect);
+                fftUpperFreqLabel.setBounds  (upperSect.removeFromTop (22));
+                fftUpperFreqSlider.setBounds (upperSect);
 
-            // Left side: FFT + BP buttons (top), Gain + Smooth sliders (bottom)
-            auto btnRow = r.removeFromTop (28);
-            const int bw = r.getWidth() / 2;
-            fftEnableButton.setBounds (btnRow.removeFromLeft (bw).reduced (2, 0));
-            bandpassButton.setBounds  (btnRow.reduced (2, 0));
+                // Left side: FFT + BP buttons (top), Gain + Smooth sliders (bottom)
+                auto btnRow = r.removeFromTop (28);
+                const int bw = r.getWidth() / 2;
+                fftEnableButton.setBounds (btnRow.removeFromLeft (bw).reduced (2, 0));
+                bandpassButton.setBounds  (btnRow.reduced (2, 0));
 
-            r.removeFromTop (5);
-            const int fw = r.getWidth() / 2;
-            auto gainSect = r.removeFromLeft (fw);
-            fftGainLabel.setBounds    (gainSect.removeFromTop (22));
-            fftGainSlider.setBounds   (gainSect);
-            fftSmoothLabel.setBounds  (r.removeFromTop (22));
-            fftSmoothSlider.setBounds (r);
-        }
-        {
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 5;
-            bandRes11Button.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            bandRes13Button.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            bandRes16Button.setBounds  (r.removeFromLeft (bw).reduced (2, 0));
-            bandRes112Button.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            bandRes124Button.setBounds (r.reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 5;
-            dispBarsButton.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            dispAreaButton.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            dispPeakButton.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            fftPeakHoldButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            fftRTAButton.setBounds      (r.reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 5;
-            winHannButton.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            winHammingButton.setBounds (r.removeFromLeft (bw).reduced (2, 0));
-            winBlackButton.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
-            winFlatButton.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            winRectButton.setBounds    (r.reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            const int bw = r.getWidth() / 5;
-            ovlp0Button.setBounds    (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp25Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp50Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
-            ovlp75Button.setBounds   (r.removeFromLeft (bw).reduced (2, 0));
-            avgCyclesLabel.setBounds (r.reduced (2, 0));
-        }
+                r.removeFromTop (5);
+                const int fw = r.getWidth() / 2;
+                auto gainSect = r.removeFromLeft (fw);
+                fftGainLabel.setBounds    (gainSect.removeFromTop (22));
+                fftGainSlider.setBounds   (gainSect);
+                fftSmoothLabel.setBounds  (r.removeFromTop (22));
+                fftSmoothSlider.setBounds (r);
 
-        gap (10); // section gap
+                auto r2 = rowOf (c); gapOf (c);
+                int bw2 = r2.getWidth() / 5;
+                bandRes11Button.setBounds  (r2.removeFromLeft (bw2).reduced (2, 0));
+                bandRes13Button.setBounds  (r2.removeFromLeft (bw2).reduced (2, 0));
+                bandRes16Button.setBounds  (r2.removeFromLeft (bw2).reduced (2, 0));
+                bandRes112Button.setBounds (r2.removeFromLeft (bw2).reduced (2, 0));
+                bandRes124Button.setBounds (r2.reduced (2, 0));
+
+                auto r3 = rowOf (c); gapOf (c);
+                bw2 = r3.getWidth() / 5;
+                dispBarsButton.setBounds    (r3.removeFromLeft (bw2).reduced (2, 0));
+                dispAreaButton.setBounds    (r3.removeFromLeft (bw2).reduced (2, 0));
+                dispPeakButton.setBounds    (r3.removeFromLeft (bw2).reduced (2, 0));
+                fftPeakHoldButton.setBounds (r3.removeFromLeft (bw2).reduced (2, 0));
+                fftRTAButton.setBounds      (r3.reduced (2, 0));
+
+                auto r4 = rowOf (c); gapOf (c);
+                bw2 = r4.getWidth() / 5;
+                winHannButton.setBounds    (r4.removeFromLeft (bw2).reduced (2, 0));
+                winHammingButton.setBounds (r4.removeFromLeft (bw2).reduced (2, 0));
+                winBlackButton.setBounds   (r4.removeFromLeft (bw2).reduced (2, 0));
+                winFlatButton.setBounds    (r4.removeFromLeft (bw2).reduced (2, 0));
+                winRectButton.setBounds    (r4.reduced (2, 0));
+
+                auto r5 = rowOf (c); gapOf (c);
+                bw2 = r5.getWidth() / 5;
+                ovlp0Button.setBounds    (r5.removeFromLeft (bw2).reduced (2, 0));
+                ovlp25Button.setBounds   (r5.removeFromLeft (bw2).reduced (2, 0));
+                ovlp50Button.setBounds   (r5.removeFromLeft (bw2).reduced (2, 0));
+                ovlp75Button.setBounds   (r5.removeFromLeft (bw2).reduced (2, 0));
+                avgCyclesLabel.setBounds (r5.reduced (2, 0));
+
+                auto r6 = rowOf (c);
+                lfftSizeLabel.setBounds (r6.removeFromLeft (110));
+                lfftSizeCombo.setBounds (r6.reduced (2, 0));
+            });
+
+        // === SPECTROGRAM ===
+        layoutCard (rightX, rightW, rightY, sectionSpectroLabel, descSpectroLabel, spectroCardBounds,
+            [&] (juce::Rectangle<int>& c)
+            {
+                auto r = rowOf (c);
+                spectroFftSizeLabel.setBounds (r.removeFromLeft (110));
+                spectroFftSizeCombo.setBounds (r.reduced (2, 0));
+            });
 
         // === ANALYSIS ===
-        sectionAnalysisLabel.setBounds (row (16)); gap (5);
-        {
-            auto r = row (28); gap (5);
-            line94Button.setBounds (r.removeFromLeft (r.getWidth() / 2).reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            correctionEnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
-            correctionClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
-            correctionLoadButton.setBounds   (r.reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            graphOverlayEnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
-            graphOverlayClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
-            graphOverlayLoadButton.setBounds   (r.reduced (2, 0));
-        }
-        {
-            auto r = row (28); gap (5);
-            graphOverlay2EnableButton.setBounds (r.removeFromLeft (70).reduced (2, 0));
-            graphOverlay2ClearButton.setBounds  (r.removeFromRight (60).reduced (2, 0));
-            graphOverlay2LoadButton.setBounds   (r.reduced (2, 0));
-        }
+        layoutCard (rightX, rightW, rightY, sectionAnalysisLabel, descAnalysisLabel, analysisCardBounds,
+            [&] (juce::Rectangle<int>& c)
+            {
+                auto r1 = rowOf (c); gapOf (c);
+                line94Button.setBounds (r1.removeFromLeft (r1.getWidth() / 2).reduced (2, 0));
 
-        gap (10); // section gap
+                auto r2 = rowOf (c); gapOf (c);
+                correctionEnableButton.setBounds (r2.removeFromLeft (70).reduced (2, 0));
+                correctionClearButton.setBounds  (r2.removeFromRight (60).reduced (2, 0));
+                correctionLoadButton.setBounds   (r2.reduced (2, 0));
 
-        // === INPUT CHANNELS ===
-        sectionChannelsLabel.setBounds (row (16)); gap (5);
-        for (int i = 0; i < 4; ++i)
-        {
-            auto r = row (26);
-            const int bw = r.getWidth() / 8;
-            for (int j = 0; j < 8; ++j)
-                channelMuteButtons[i * 8 + j].setBounds (r.removeFromLeft (bw));
-            if (i < 3) gap (3);
-        }
+                auto r3 = rowOf (c); gapOf (c);
+                graphOverlayEnableButton.setBounds (r3.removeFromLeft (70).reduced (2, 0));
+                graphOverlayClearButton.setBounds  (r3.removeFromRight (60).reduced (2, 0));
+                graphOverlayLoadButton.setBounds   (r3.reduced (2, 0));
+
+                auto r4 = rowOf (c);
+                graphOverlay2EnableButton.setBounds (r4.removeFromLeft (70).reduced (2, 0));
+                graphOverlay2ClearButton.setBounds  (r4.removeFromRight (60).reduced (2, 0));
+                graphOverlay2LoadButton.setBounds   (r4.reduced (2, 0));
+            });
+
+        // === INPUT CHANNELS === (spans the full width, below both columns)
+        int bottomY = std::max (leftY, rightY);
+        layoutCard (leftX, pageW, bottomY, sectionChannelsLabel, descChannelsLabel, channelsCardBounds,
+            [&] (juce::Rectangle<int>& c)
+            {
+                for (int i = 0; i < 4; ++i)
+                {
+                    auto r = rowOf (c, 26);
+                    const int bw = r.getWidth() / 8;
+                    for (int j = 0; j < 8; ++j)
+                        channelMuteButtons[i * 8 + j].setBounds (r.removeFromLeft (bw));
+                    if (i < 3) gapOf (c, 3);
+                }
+            });
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -1135,6 +1236,7 @@ private:
         bool rtaOn = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
         fftRTAButton.setToggleState (rtaOn, juce::dontSendNotification);
 
+
         bool bpOn = processor.apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f;
         bandpassButton.setToggleState (bpOn, juce::dontSendNotification);
 
@@ -1225,6 +1327,16 @@ private:
     juce::TextButton ovlp75Button { "75%" };
     juce::Label      avgCyclesLabel;
 
+    // L_FFT size (timeline overlay)
+    juce::Label      lfftSizeLabel;
+    juce::ComboBox   lfftSizeCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> lfftSizeAttachment;
+
+    // Spectrogram FFT size
+    juce::Label      spectroFftSizeLabel;
+    juce::ComboBox   spectroFftSizeCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> spectroFftSizeAttachment;
+
     juce::TextButton fftEnableButton  { "FFT" };
     juce::TextButton lightModeButton  { "Light Mode" };
     juce::TextButton bandpassButton   { "20Hz-20kHz Bandpass" };
@@ -1254,7 +1366,11 @@ private:
     std::unique_ptr<juce::FileChooser> graphOverlay2FileChooser_;
 
     // Section header labels
-    juce::Label sectionGeneralLabel, sectionFftLabel, sectionAnalysisLabel, sectionChannelsLabel;
+    juce::Label sectionGeneralLabel, sectionFftLabel, sectionSpectroLabel, sectionAnalysisLabel, sectionChannelsLabel;
+    juce::Label descGeneralLabel, descFftLabel, descSpectroLabel, descAnalysisLabel, descChannelsLabel;
+
+    // Card background bounds, computed each resized() and painted behind the controls
+    juce::Rectangle<int> generalCardBounds, fftCardBounds, spectroCardBounds, analysisCardBounds, channelsCardBounds;
 
     // Channel mute checkboxes
     ChannelMuteButton channelMuteButtons[32];
@@ -1277,7 +1393,7 @@ public:
         auto* content = new SettingsComponent (p, editor,
                                                std::move (onFftToggle),
                                                std::move (onThemeToggle));
-        content->setSize (720, 862);
+        content->setSize (1200, 900);
         setContentOwned (content, true);
         setResizable (false, false);
     }
