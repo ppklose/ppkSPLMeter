@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "UserPrefs.h"
+#include "InputsComponent.h"
 
 //==============================================================================
 // Custom channel mute button: shows label with red X + strikethrough when muted.
@@ -10,6 +11,12 @@ class ChannelMuteButton : public juce::Button
 {
 public:
     std::function<void(const juce::String&)> onNameChanged;
+
+    // Sensor role shown in the top-right corner (empty for Mic)
+    void setRoleTag (const juce::String& tag)
+    {
+        if (tag != roleTag_) { roleTag_ = tag; repaint(); }
+    }
 
     ChannelMuteButton() : juce::Button ("")
     {
@@ -45,6 +52,13 @@ public:
         const juce::Font font (juce::FontOptions().withHeight (13.0f));
         g.setFont (font);
         g.drawText (displayText, b.toNearestInt(), juce::Justification::centred, false);
+
+        if (roleTag_.isNotEmpty())
+        {
+            g.setColour (roleTag_ == "OFF" ? juce::Colour (0xff8e8e93) : juce::Colour (0xffff9f0a));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (9.5f).withStyle ("Bold")));
+            g.drawText (roleTag_, b.reduced (4.0f, 1.0f).toNearestInt(), juce::Justification::topRight, false);
+        }
 
         if (muted)
         {
@@ -97,6 +111,7 @@ private:
     }
 
     juce::TextEditor editor_;
+    juce::String     roleTag_;
 };
 
 //==============================================================================
@@ -817,6 +832,20 @@ public:
             addAndMakeVisible (channelMuteButtons[i]);
         }
 
+        // Inputs & Sensors window: sensor roles, accelerometer calibration (vibration spec §7.1)
+        inputsButton.setButtonText (InputsUi::U ("Inputs & Sensors…"));
+        inputsButton.setTooltip ("Assign microphone / accelerometer roles to the inputs and calibrate the accelerometer");
+        inputsButton.onClick = [this]
+        {
+            if (inputsWindow_ == nullptr)
+                inputsWindow_ = std::make_unique<InputsUi::InputsWindow> (processor, lightMode_);
+            inputsWindow_->setVisible (true);
+            if (auto* top = getTopLevelComponent())
+                inputsWindow_->setTopLeftPosition (top->getScreenPosition() + juce::Point<int> (40, 40));
+            inputsWindow_->toFront (true);
+        };
+        addAndMakeVisible (inputsButton);
+
         // Full Screen toggle
         fullscreenButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
         fullscreenButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff5ac8fa));
@@ -865,7 +894,7 @@ public:
         setupDescLabel (descFftLabel,       "Spectral engine behind the L_FFT timeline overlay: window, overlap, resolution.");
         setupDescLabel (descSpectroLabel,   "Time-frequency display shown in the Spectrogram window.");
         setupDescLabel (descAnalysisLabel,  "Reference lines, correction filters, and comparison overlays.");
-        setupDescLabel (descChannelsLabel,  "Mute or rename individual input channels — right-click a channel to rename it.");
+        setupDescLabel (descChannelsLabel,  InputsUi::U ("Mute or rename input channels (right-click to rename). Roles and accelerometer calibration: Inputs & Sensors."));
         addAndMakeVisible (descGeneralLabel);
         addAndMakeVisible (descFftLabel);
         addAndMakeVisible (descSpectroLabel);
@@ -1076,6 +1105,7 @@ public:
                     if (i < 3) gapOf (c, 3);
                 }
             });
+        inputsButton.setBounds (channelsCardBounds.getRight() - cardPad - 180, channelsCardBounds.getY() + cardPad, 180, 28);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -1127,6 +1157,9 @@ private:
         };
         styleBtn (fftEnableButton,   juce::Colour (0xff34c759));
         styleBtn (fullscreenButton,  juce::Colour (0xff5ac8fa));
+        styleBtn (inputsButton,      juce::Colour (0xff5ac8fa));
+        if (inputsWindow_ != nullptr)
+            inputsWindow_->setLightMode (light);
         styleBtn (calToInputButton,  juce::Colour (0xff5ac8fa));
         styleBtn (winHannButton,    juce::Colour (0xffbf5af2));
         styleBtn (winHammingButton, juce::Colour (0xffbf5af2));
@@ -1272,6 +1305,7 @@ private:
         {
             bool muted = processor.apvts.getRawParameterValue ("channelMute" + juce::String (i))->load() > 0.5f;
             channelMuteButtons[i].setToggleState (muted, juce::dontSendNotification);
+            channelMuteButtons[i].setRoleTag (InputsUi::roleTag (processor.getChannelRole (i)));
         }
     }
 
@@ -1368,6 +1402,8 @@ private:
     juce::TextButton line94Button     { "94 dB Line" };
     juce::TextButton fullscreenButton { "Full Screen" };
     juce::TextButton calToInputButton { "Cal to Input" };
+    juce::TextButton inputsButton;
+    std::unique_ptr<InputsUi::InputsWindow> inputsWindow_;
     juce::Label      taLaermLabel;
     juce::ComboBox   taLaermCombo;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> taLaermAttachment;

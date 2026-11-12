@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "Vibration/AccelChannel.h"
+#include "Vibration/CalibratorMeasurement.h"
 
 #include <cmath>
 #include <string>
@@ -287,5 +288,87 @@ TEST_CASE ("Vibration chain: calibrated, weighted acceleration end to end", "[vi
         // full-rate acceleration (incl. settling) ≈ 10 m/s² RMS
         CHECK (std::sqrt (fullSum / fullCount) == Approx (10.0).epsilon (0.01));
         CHECK (dB (rms / 10.0) == Approx (dB (analogMagnitude (Weighting::Wk, f))).margin (0.1));
+    }
+}
+
+//==============================================================================
+namespace
+{
+// Feeds a generated signal to a calibrator measurement in 480-sample blocks
+template <typename Signal>
+CalibratorMeasurement::Result measureCalibrator (double fs, double refHz, Signal&& signal)
+{
+    CalibratorMeasurement m;
+    m.prepare (fs, refHz);
+    std::vector<float> block (480);
+    long long n = 0;
+    for (int b = 0; b < 100000 && ! m.finished(); ++b)
+    {
+        for (auto& x : block) x = (float) signal (n++ / fs);
+        m.process (block.data(), (int) block.size());
+    }
+    REQUIRE (m.finished());
+    CHECK (m.progress() == Approx (1.0));
+    return m.result();
+}
+} // namespace
+
+TEST_CASE ("Vibration calibrator measurement: level, frequency and acceptance", "[vibration][calibration]")
+{
+    using Status = CalibratorMeasurement::Status;
+    const double twoPi = 2.0 * kPi;
+
+    for (double fs : { 44100.0, 48000.0, 96000.0 })
+    {
+        INFO ("fs = " << fs);
+        // −20 dBFS RMS at the nominal 159.2 Hz, with hum and noise-like interference
+        const double amp = std::sqrt (2.0) * 0.1;
+        auto r = measureCalibrator (fs, 159.2, [&] (double t)
+        {
+            return amp * std::sin (twoPi * 159.2 * t) + 0.002 * std::sin (twoPi * 50.0 * t)
+                 + 0.001 * std::sin (twoPi * 3000.0 * t);
+        });
+        CHECK (r.status == Status::Ok);
+        CHECK (r.freqHz == Approx (159.2).epsilon (1e-4));
+        CHECK (20.0 * std::log10 (r.rmsFS) == Approx (-20.0).margin (0.01));
+        CHECK (r.fluctuationDb < 0.02);
+        // The calibration derived from it reads the calibrator exactly
+        CHECK (calibration::calDbFromCalibrator (r.rmsFS) == Approx (160.0).margin (0.01));
+    }
+
+    SECTION ("calibrator 3 % off its nominal frequency still reads the right level")
+    {
+        auto r = measureCalibrator (48000.0, 159.2, [&] (double t) { return 0.5 * std::sin (twoPi * 164.0 * t); });
+        CHECK (r.status == Status::Ok);
+        CHECK (r.freqHz == Approx (164.0).epsilon (1e-4));
+        CHECK (r.rmsFS == Approx (0.5 / std::sqrt (2.0)).epsilon (0.001));
+    }
+    SECTION ("custom low reference frequency")
+    {
+        auto r = measureCalibrator (48000.0, 16.0, [&] (double t) { return 0.3 * std::sin (twoPi * 16.0 * t); });
+        CHECK (r.status == Status::Ok);
+        CHECK (r.rmsFS == Approx (0.3 / std::sqrt (2.0)).epsilon (0.002));
+    }
+    SECTION ("wrong frequency is rejected")
+    {
+        auto r = measureCalibrator (48000.0, 159.2, [&] (double t) { return 0.3 * std::sin (twoPi * 80.0 * t); });
+        CHECK (r.status == Status::FrequencyOff);
+    }
+    SECTION ("fluctuating level is rejected")
+    {
+        // ±0.5 dB slow amplitude modulation
+        auto r = measureCalibrator (48000.0, 159.2, [&] (double t)
+        {
+            return 0.3 * (1.0 + 0.06 * std::sin (twoPi * 0.4 * t)) * std::sin (twoPi * 159.2 * t);
+        });
+        CHECK (r.status == Status::Unstable);
+        CHECK (r.fluctuationDb > 0.2);
+    }
+    SECTION ("too low and clipped signals are rejected")
+    {
+        CHECK (measureCalibrator (48000.0, 159.2, [&] (double t) { return 1.0e-5 * std::sin (twoPi * 159.2 * t); })
+                   .status == Status::TooLow);
+        CHECK (measureCalibrator (48000.0, 159.2, [&] (double t) { return std::sin (twoPi * 159.2 * t); })
+                   .status == Status::Clipped);
     }
 }

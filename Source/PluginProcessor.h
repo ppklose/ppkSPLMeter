@@ -10,6 +10,7 @@
 #include "SoundDetective.h"
 #include "SensorConfig.h"
 #include "Vibration/VibrationEngine.h"
+#include "Vibration/CalibratorMeasurement.h"
 #include <array>
 #include <atomic>
 #include <deque>
@@ -318,6 +319,39 @@ public:
     }
     void resetVibrationStats() noexcept { vibResetRequest_.store (true, std::memory_order_release); }
 
+    // Sensor information for the report (UIState/Accel; no engine rebuild)
+    struct AccelSensorInfo
+    {
+        juce::String serial;
+        double lowerLimitHz = 0.5;      // usable range from the datasheet (spec §3.2)
+        double upperLimitHz = 10000.0;
+    };
+    AccelSensorInfo getAccelSensorInfo() const;
+    void setAccelSensorInfo (const AccelSensorInfo& info);
+
+    // Calibration date/method per input (UIState/Inputs "calDate<ch>", "calMethod<ch>")
+    juce::String getAccelCalInfo (int ch) const;     // e.g. "2026-11-12 · calibrator", empty if never
+    void setAccelCalInfo (int ch, const juce::String& method);   // stamps today's date
+
+    // Live input level per channel (raw, after mute), for the Inputs table.
+    // RMS is smoothed with τ = 125 ms; the peak is the maximum since the last read.
+    float getInputRms (int ch) const noexcept
+    {
+        return ch >= 0 && ch < SensorConfig::kMaxInputs ? inputRms_[(size_t) ch].load (std::memory_order_relaxed) : 0.0f;
+    }
+    float takeInputPeak (int ch) noexcept
+    {
+        return ch >= 0 && ch < SensorConfig::kMaxInputs ? inputPeak_[(size_t) ch].exchange (0.0f, std::memory_order_relaxed) : 0.0f;
+    }
+
+    // Handheld-calibrator measurement on one input (spec §4). Message thread:
+    // start → poll getAccelCalibrationProgress() → takeAccelCalibrationResult().
+    bool   startAccelCalibration (int ch, double referenceHz);
+    void   cancelAccelCalibration() noexcept;
+    double getAccelCalibrationProgress() const noexcept { return calProgress_.load (std::memory_order_relaxed); }
+    // Returns true (and fills result) once the measurement has finished
+    bool   takeAccelCalibrationResult (vib::CalibratorMeasurement::Result& result) noexcept;
+
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
@@ -345,6 +379,19 @@ private:
     std::atomic<bool>                     vibResetRequest_ { false };
     vib::SeqLock<vib::VibrationSnapshot>  vibSnapshot_;
     vib::VibrationSnapshot                vibWork_;                 // audio thread
+
+    // Input level meters (audio thread writes)
+    std::array<std::atomic<float>, SensorConfig::kMaxInputs> inputRms_ {}, inputPeak_ {};
+    std::array<double, SensorConfig::kMaxInputs>             inputMs_ {};   // audio thread
+
+    // Calibrator measurement hand-over: the message thread configures calMeas_
+    // only while calState_ is Idle, the audio thread uses it only while Running,
+    // and the message thread reads the result once it is Done.
+    enum CalState : int { CalIdle = 0, CalRunning, CalCancel, CalDone };
+    std::atomic<int>            calState_ { CalIdle };
+    std::atomic<double>         calProgress_ { 0.0 };
+    int                         calChannel_ = -1;
+    vib::CalibratorMeasurement  calMeas_;
 
     // Accelerometer channels are restored from here after the correction
     // convolution, which processes all channels at once (allocated in prepareToPlay)

@@ -284,6 +284,86 @@ TEST_CASE ("Vibration in processor: settings and calibration persist in the plug
     CHECK (restored->getChannelRole (2) == SensorRole::AccelZ);
 }
 
+TEST_CASE ("Vibration in processor: sensor info and calibration date persist", "[vibration][processor][state]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    auto proc = std::make_unique<SPLMeterAudioProcessor>();
+    CHECK (proc->getAccelCalInfo (1).isEmpty());
+    proc->setAccelSensorInfo ({ "SN 4711", 0.3, 8000.0 });
+    proc->setAccelCalInfo (1, "calibrator");
+
+    juce::MemoryBlock blob;
+    proc->getStateInformation (blob);
+    auto restored = std::make_unique<SPLMeterAudioProcessor>();
+    restored->setStateInformation (blob.getData(), (int) blob.getSize());
+
+    const auto info = restored->getAccelSensorInfo();
+    CHECK (info.serial == "SN 4711");
+    CHECK (info.lowerLimitHz == Approx (0.3));
+    CHECK (info.upperLimitHz == Approx (8000.0));
+    CHECK (restored->getAccelCalInfo (1)
+           == juce::Time::getCurrentTime().formatted ("%Y-%m-%d") + " · calibrator");
+}
+
+TEST_CASE ("Vibration in processor: input level meters", "[vibration][processor]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (3);
+    rig.prepare();
+    rig.run (1.0, [] (int ch, int n) { return ch == 2 ? sine (159.2, 0.5, n) : 0.0f; });
+    CHECK (rig.proc->getInputRms (2) == Approx (0.5 * kRms).epsilon (0.01));
+    CHECK (rig.proc->getInputRms (0) < 1.0e-9f);
+    CHECK (rig.proc->takeInputPeak (2) == Approx (0.5).epsilon (0.001));
+    CHECK (rig.proc->takeInputPeak (2) < 1.0e-9f);   // reset by the read
+}
+
+TEST_CASE ("Vibration in processor: calibrator measurement on a live input", "[vibration][processor][calibration]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (4);
+    rig.proc->setChannelRole (3, SensorRole::AccelUniaxial);
+    vib::VibrationSettings vs;
+    vs.tauSec = 0.125;
+    rig.proc->setVibrationSettings (vs);
+    rig.prepare();
+    vib::CalibratorMeasurement::Result r;
+
+    // Calibrator (10 m/s² RMS) reads −26 dBFS RMS on input 4
+    const double amp = std::sqrt (2.0) * std::pow (10.0, -26.0 / 20.0);
+    auto signal = [amp] (int ch, int n) { return ch == 3 ? sine (159.2, (float) amp, n) : 0.0f; };
+
+    REQUIRE_FALSE (rig.proc->startAccelCalibration (7, 159.2));   // no such input
+    REQUIRE (rig.proc->startAccelCalibration (3, 159.2));
+    CHECK_FALSE (rig.proc->startAccelCalibration (3, 159.2));     // already running
+    rig.run (1.0, signal);
+    CHECK_FALSE (rig.proc->takeAccelCalibrationResult (r));
+    CHECK (rig.proc->getAccelCalibrationProgress() > 0.2);
+    rig.run (3.0, signal);
+    REQUIRE (rig.proc->takeAccelCalibrationResult (r));
+    CHECK (r.status == vib::CalibratorMeasurement::Status::Ok);
+    const double calDb = vib::calibration::calDbFromCalibrator (r.rmsFS);
+    CHECK (calDb == Approx (166.0).margin (0.01));
+
+    // Applying it makes the engine read the calibrator level
+    rig.proc->setAccelCalDb (3, calDb);
+    rig.run (3.0, signal);
+    CHECK (rig.snap().axis[vib::AxisX].rms == Approx (10.0).epsilon (0.005));
+
+    SECTION ("cancel stops a running measurement")
+    {
+        REQUIRE (rig.proc->startAccelCalibration (3, 159.2));
+        rig.run (0.5, signal);
+        rig.proc->cancelAccelCalibration();
+        rig.run (0.1, signal);
+        rig.run (5.0, signal);
+        CHECK_FALSE (rig.proc->takeAccelCalibrationResult (r));
+        CHECK (rig.proc->startAccelCalibration (3, 159.2));   // idle again
+    }
+}
+
 TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][performance]")
 {
     juce::ScopedJuceInitialiser_GUI juceInit;

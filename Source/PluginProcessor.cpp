@@ -272,6 +272,11 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     vibWork_ = {};
     vibSnapshot_.write (vibWork_);
 
+    // A running calibrator measurement was set up for the old rate: abandon it
+    calState_.store (CalIdle, std::memory_order_release);
+    calProgress_.store (0.0, std::memory_order_relaxed);
+    inputMs_.fill (0.0);
+
     nonMicScratch_.setSize (juce::jmax (1, juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)),
                             samplesPerBlock, false, true, false);
 }
@@ -400,6 +405,43 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
         if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
             vibSnapshot_.write (vibWork_);
+    }
+
+    // --- Live input level per channel (Inputs table) ---
+    const int numLiveInputs = juce::jmin (getTotalNumInputChannels(), numChannels, SensorConfig::kMaxInputs);
+    if (numSamples > 0)
+    {
+        const double a = 1.0 - std::exp (-numSamples / (0.125 * currentSampleRate));
+        for (int ch = 0; ch < numLiveInputs; ++ch)
+        {
+            const float* x = buffer.getReadPointer (ch);
+            double sumSq = 0.0;
+            float  peak  = 0.0f;
+            for (int s = 0; s < numSamples; ++s)
+            {
+                sumSq += (double) x[s] * x[s];
+                peak = juce::jmax (peak, std::abs (x[s]));
+            }
+            auto& ms = inputMs_[(size_t) ch];
+            ms += a * (sumSq / numSamples - ms);
+            inputRms_[(size_t) ch].store ((float) std::sqrt (ms), std::memory_order_relaxed);
+            if (peak > inputPeak_[(size_t) ch].load (std::memory_order_relaxed))
+                inputPeak_[(size_t) ch].store (peak, std::memory_order_relaxed);
+        }
+    }
+
+    // --- Calibrator measurement on one live input ---
+    {
+        const int cs = calState_.load (std::memory_order_acquire);
+        if (cs == CalCancel)
+            calState_.store (CalIdle, std::memory_order_release);
+        else if (cs == CalRunning && calChannel_ < numLiveInputs)
+        {
+            calMeas_.process (buffer.getReadPointer (calChannel_), numSamples);
+            calProgress_.store (calMeas_.progress(), std::memory_order_relaxed);
+            if (calMeas_.finished())
+                calState_.store (CalDone, std::memory_order_release);
+        }
     }
     if (fileMode)
     {
@@ -1037,6 +1079,81 @@ void SPLMeterAudioProcessor::loadChannelRolesFromState()
         const int v = inputs.isValid() ? (int) inputs.getProperty ("role" + juce::String (ch), 0) : 0;
         channelRoles_[(size_t) ch].store ((int) SensorConfig::fromInt (v), std::memory_order_relaxed);
     }
+}
+
+SPLMeterAudioProcessor::AccelSensorInfo SPLMeterAudioProcessor::getAccelSensorInfo() const
+{
+    AccelSensorInfo info;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (! node.isValid())
+        return info;
+    info.serial       = node.getProperty ("sensorSerial", juce::String()).toString();
+    info.lowerLimitHz = juce::jlimit (0.01, 1000.0,  (double) node.getProperty ("lowerLimitHz", info.lowerLimitHz));
+    info.upperLimitHz = juce::jlimit (1.0, 100000.0, (double) node.getProperty ("upperLimitHz", info.upperLimitHz));
+    return info;
+}
+
+void SPLMeterAudioProcessor::setAccelSensorInfo (const AccelSensorInfo& info)
+{
+    auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+    node.setProperty ("sensorSerial", info.serial,       nullptr);
+    node.setProperty ("lowerLimitHz", info.lowerLimitHz, nullptr);
+    node.setProperty ("upperLimitHz", info.upperLimitHz, nullptr);
+}
+
+juce::String SPLMeterAudioProcessor::getAccelCalInfo (int ch) const
+{
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    if (! inputs.isValid())
+        return {};
+    const auto date   = inputs.getProperty ("calDate"   + juce::String (ch), juce::String()).toString();
+    const auto method = inputs.getProperty ("calMethod" + juce::String (ch), juce::String()).toString();
+    if (date.isEmpty())
+        return {};
+    return method.isNotEmpty() ? date + " · " + method : date;
+}
+
+void SPLMeterAudioProcessor::setAccelCalInfo (int ch, const juce::String& method)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    auto inputs = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+    inputs.setProperty ("calDate"   + juce::String (ch), juce::Time::getCurrentTime().formatted ("%Y-%m-%d"), nullptr);
+    inputs.setProperty ("calMethod" + juce::String (ch), method, nullptr);
+}
+
+//==============================================================================
+// Calibrator measurement (spec §4)
+bool SPLMeterAudioProcessor::startAccelCalibration (int ch, double referenceHz)
+{
+    if (ch < 0 || ch >= juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)
+        || referenceHz <= 0.0 || referenceHz > 0.4 * currentSampleRate)
+        return false;
+
+    // Only from Idle or Done: the audio thread does not touch calMeas_ then
+    int s = calState_.load (std::memory_order_acquire);
+    if (s != CalIdle && s != CalDone)
+        return false;
+    calChannel_ = ch;
+    calMeas_.prepare (currentSampleRate, referenceHz);
+    calProgress_.store (0.0, std::memory_order_relaxed);
+    return calState_.compare_exchange_strong (s, CalRunning, std::memory_order_acq_rel);
+}
+
+void SPLMeterAudioProcessor::cancelAccelCalibration() noexcept
+{
+    int s = CalRunning;
+    if (! calState_.compare_exchange_strong (s, CalCancel, std::memory_order_acq_rel) && s == CalDone)
+        calState_.store (CalIdle, std::memory_order_release);
+}
+
+bool SPLMeterAudioProcessor::takeAccelCalibrationResult (vib::CalibratorMeasurement::Result& result) noexcept
+{
+    if (calState_.load (std::memory_order_acquire) != CalDone)
+        return false;
+    result = calMeas_.result();
+    calState_.store (CalIdle, std::memory_order_release);
+    return true;
 }
 
 //==============================================================================

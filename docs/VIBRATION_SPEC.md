@@ -71,7 +71,9 @@ Stored in `UIState/Accel`:
 | `upperLimitHz` | 100 … fs/2 | Sensor's upper usable frequency (mounting resonance) |
 | `displayUnit` | m/s², mm/s, µm, g, dB | dB = dB re 1 µm/s² / 1 nm/s / 1 pm (ISO 1683) |
 | `kx`, `ky`, `kz` | 0 … 2 | Axis multiplying factors for the vector sum; defaults from the profile |
-| `calDate` | date | Last calibration, goes into the report |
+| `sensorSerial` | text | Goes into the report |
+
+The calibration date is stored per input (`calDate<ch>`, `calMethod<ch>` in `UIState/Inputs`), since each axis is calibrated separately.
 
 ## 4. Calibration
 
@@ -81,7 +83,7 @@ Calibration works like `calOffset`: a per-channel dB offset that maps dBFS to **
 
 Two methods are available, per axis, in a calibration dialog:
 
-1. **Handheld calibrator** (preferred): the user mounts the sensor on a calibrator and selects the reference (default **10 m/s² RMS at 159.2 Hz = 140 dB**; also 1 g = 9.80665 m/s² and a custom value). SPLMeter measures for 3 s with a narrow bandpass around the reference frequency and sets `calDb`. It rejects the measurement if the frequency deviates by more than ±5 % or the level fluctuates by more than ±0.2 dB.
+1. **Handheld calibrator** (preferred): the user mounts the sensor on a calibrator and selects the reference (default **10 m/s² RMS at 159.2 Hz = 140 dB**; also 1 g = 9.80665 m/s² and a custom value). SPLMeter settles for 0.5 s, then measures for 3 s behind a bandpass around the reference frequency (2nd-order Butterworth HP at f/2 and LP at 2f; the RMS is corrected by the bandpass gain at the measured frequency), and sets `calDb`. It rejects the measurement if the frequency deviates by more than ±5 % or the level fluctuates by more than ±0.2 dB.
 2. **Datasheet**: sensitivity *S* in mV/(m/s²) or mV/g, plus the interface's full-scale input voltage *V_FS* (Vrms of a full-scale sine, or dBu at 0 dBFS).
    `calDb = 120 + 20·log10(√2 · V_FS / S)` with *V_FS* in mV RMS and *S* in mV/(m/s²). The √2 is there because sample value 1.0 is the *peak* of a full-scale sine (implemented in `Source/Vibration/Calibration.h`).
 
@@ -178,11 +180,14 @@ A profile sets the defaults for weighting, quantity, filters, detectors, k-facto
 
 ## 7. UI
 
-### 7.1 Settings → new "Inputs" section
+### 7.1 Settings → "Inputs & Sensors" window
 
-- A table of the device's input channels (up to 8 shown; scrolls for 32): **Channel · Role · Level meter · Cal (dB) · Calibrate…**
-- Role combobox: Mic / Accel X / Accel Y / Accel Z / Accel (uniaxial) / Off.
-- An "Accelerometer" group appears below when any channel has an accelerometer role: profile, high-pass, lower/upper limit, unit, k-factors, sensor serial, calibration date.
+The Settings window has a fixed size and no free space, so the inputs table lives in its own resizable window, opened with **Inputs & Sensors…** in the INPUT CHANNELS card (`Source/InputsComponent.h`). The channel buttons in that card show the role as a small tag (X / Y / Z / ACC / OFF).
+
+- A table of the device's input channels (scrolls for up to 32): **Channel · Role · Level meter · level (dBFS for Mic, calibrated m/s² for accelerometer) · Cal (dB) · Calibrate… · last calibration (date · method)**.
+- Role combobox: Mic / Accel X / Accel Y / Accel Z / Accel (uniaxial) / Off. A status line shows the detected sensor ("Triaxial accelerometer: X = IN02, …") or, in red, why the configuration is invalid; invalid rows are tinted red.
+- An "Accelerometer" group appears below when any channel has an accelerometer role: quantity, high-pass, RMS τ, weighting per axis (one for uniaxial), band limits (for "Band limit"), k-factors (not for uniaxial), sensor serial, usable range (lower/upper limit). Profile (step 9) and display unit (step 6) are added with those steps.
+- Calibration dialog (per input): **Handheld calibrator** (10 m/s² or 1 g at 159.2 Hz, or custom level/frequency; Measure → 0.5 s settling + 3 s measurement, `vib::CalibratorMeasurement`; result with frequency and stability, Apply) or **Datasheet** (sensitivity in mV/(m/s²) or mV/g, interface full scale in Vrms or dBu at 0 dBFS; live result, Apply). The cal value can also be typed into the table. Each apply stores `calDate<ch>` and `calMethod<ch>` (calibrator / datasheet / manual) in `UIState/Inputs`; the report uses them.
 - Psychoacoustic metrics, dBA/dBC and the Sound Detective continue to use the mic mix only. If no channel is `Mic`, the SPL meter shows "No microphone input" instead of meaningless values.
 
 ### 7.2 Vibration panel (below the SPL meter)
