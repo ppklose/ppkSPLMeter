@@ -19,7 +19,12 @@ public:
     void mouseExit (const juce::MouseEvent&) override;
 
     bool isOff()        const noexcept { return selectedMetric == PsychoMetric::Off; }
-    void setFftEnabled (bool e) noexcept { fftEnabled_ = e; repaint(); }
+    void setFftEnabled (bool e)
+    {
+        fftEnabled_ = e;
+        processor.getUiState().setProperty ("logFftEnabled", e, nullptr);
+        repaint();
+    }
     void setLightMode  (bool light) noexcept;
 
     // Sound event markers on the timeline
@@ -60,20 +65,33 @@ private:
     static constexpr int   kMaxFftOrder = 19;    // 2^19 = 524288, matches PluginProcessor::kFftCircBufSize
     static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (~240 bands)
 
+    // Per-signal analysis state. Mono mode uses fftCh_[0] fed by the input mix;
+    // Dual FFT feeds fftCh_[0] / fftCh_[1] from inputs 1 / 2 with identical settings.
+    struct FftChannel
+    {
+        std::vector<float> inputHistory;   // overlap history
+        std::vector<float> buffer;
+        std::vector<float> avgAccum;
+        int                avgCount = 0;
+        float              bands[kMaxFftBands] {};
+        float              bandsSmoothed[kMaxFftBands] {};
+        float              peakBands[kMaxFftBands] {};
+        double             peakTimestamps[kMaxFftBands] {};
+    };
+    void processFftChannel (FftChannel&, int sourceChannel);
+    int  numFftChannels() const noexcept { return fftDual_ ? 2 : 1; }
+
+    static const juce::Colour colFftIn1;   // Dual FFT: input 1 (green)
+    static const juce::Colour colFftIn2;   // Dual FFT: input 2 (red)
+
     std::unique_ptr<juce::dsp::FFT> fft_;
     std::vector<float>              windowCoeffs_;      // current window function
-    std::vector<float>              fftInputHistory_;   // overlap history
-    std::vector<float>              fftBuffer_;
+    FftChannel                      fftCh_[2];
     int                             currentFftOrder_    = -1;
-    float                           fftBands_[kMaxFftBands] {};
-    float                           fftBandsSmoothed_[kMaxFftBands] {};
-    float                           fftPeakBands_[kMaxFftBands] {};
-    double                          fftPeakTimestamps_[kMaxFftBands] {};
-    std::vector<float>              fftAvgAccum_;
-    int                             fftAvgCount_        = 0;
     int                             currentNumBands_    = 0;
     int                             currentBandN_       = -1;
     int                             currentWindowType_  = -1;
+    bool                            fftDual_    = false;
     bool                            fftEnabled_ = false;
     bool                            lightMode_  = false;
 

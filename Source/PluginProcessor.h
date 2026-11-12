@@ -69,6 +69,14 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    // Full persistent state: APVTS parameters + UIState + MIDI CC + channel names.
+    std::unique_ptr<juce::XmlElement> createStateXml();
+    void restoreStateXml (const juce::XmlElement& xml);
+
+    // Non-parameter user settings (view options, loaded file paths). Kept as a
+    // child of apvts.state so it is saved and restored together with the parameters.
+    juce::ValueTree getUiState() { return apvts.state.getOrCreateChildWithName ("UIState", nullptr); }
+
     //==========================================================================
     float getPeakSPL()    const noexcept { return atomicPeakSPL.load(); }
     float getPeakDBASPL() const noexcept { return atomicPeakDBASPL.load(); }
@@ -135,7 +143,8 @@ public:
     // FFT circular buffer (audio thread → GUI, lock-free)
     // Sized to the largest selectable L_FFT window (524288 = 512k samples).
     static constexpr int kFftCircBufSize = 524288;
-    void copyFftWindow (float* dest, int size) const noexcept;
+    // channel -1 = mono mix of all inputs; 0 / 1 = input 1 / 2 alone (Dual FFT)
+    void copyFftWindow (float* dest, int size, int channel = -1) const noexcept;
     int  pullSpectroSamples (float* dest, int maxSamples) noexcept;
     double getSampleRate() const noexcept { return currentSampleRate; }
 
@@ -150,7 +159,7 @@ public:
         paused_.store (p);
     }
     bool isPaused      ()       const noexcept { return paused_.load(); }
-    void setDawSync    (bool d) noexcept { dawSync_.store (d); }
+    void setDawSync    (bool d) { dawSync_.store (d); getUiState().setProperty ("dawSync", d, nullptr); }
     bool isDawSync     ()       const noexcept { return dawSync_.load(); }
     bool isDawPlaying  ()       const noexcept { return dawIsPlaying_.load(); }
     juce::int64 getPauseOffsetMs    () const noexcept { return pauseOffsetMs_.load(); }
@@ -315,6 +324,7 @@ private:
     std::atomic<int> midiLearnParamIndex     { -1 };
 
     std::array<float, kFftCircBufSize> fftCircBuf_ {};
+    std::array<std::array<float, kFftCircBufSize>, 2> fftCircBufDual_ {};  // inputs 1 + 2, same write pos
     std::atomic<int>                   fftWritePos_ { 0 };
     std::atomic<int>                   spectroReadPos_ { 0 };
 

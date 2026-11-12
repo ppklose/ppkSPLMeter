@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 #include "AWeightingFilter.h"
 #include "CWeightingFilter.h"
 #include <vector>
@@ -370,6 +371,13 @@ class LongTermSPLWindow : public juce::DocumentWindow
             setupToggle (lafToggle, "LAF", juce::Colour (0xffbf5af2), true);
             setupToggle (lcfToggle, "LCF", juce::Colour (0xffffe620), false);
             setupToggle (lzfToggle, "LZF", juce::Colour (0xff34c759), false);
+            UserPrefs::bind (processor, lafToggle, "longTermLAF");
+            UserPrefs::bind (processor, lcfToggle, "longTermLCF");
+            UserPrefs::bind (processor, lzfToggle, "longTermLZF");
+
+            auto ui = processor.getUiState();
+            yMin_ = (float) (double) ui.getProperty ("longTermYMin", yMin_);
+            yMax_ = (float) (double) ui.getProperty ("longTermYMax", yMax_);
 
             statsLabel.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (12.0f)));
             statsLabel.setColour (juce::Label::textColourId, juce::Colours::white);
@@ -394,7 +402,13 @@ class LongTermSPLWindow : public juce::DocumentWindow
             yZoomButton_.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
             yZoomButton_.onClick = [this]
             {
-                auto panel = std::make_unique<YAxisPanel> (yMin_, yMax_, [this] { repaint(); });
+                auto panel = std::make_unique<YAxisPanel> (yMin_, yMax_, [this]
+                {
+                    auto ui = processor.getUiState();
+                    ui.setProperty ("longTermYMin", yMin_, nullptr);
+                    ui.setProperty ("longTermYMax", yMax_, nullptr);
+                    repaint();
+                });
                 juce::CallOutBox::launchAsynchronously (
                     std::move (panel), yZoomButton_.getScreenBounds(), nullptr);
             };

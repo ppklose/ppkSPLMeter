@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "SoundDetective.h"
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 #include <vector>
 
 //==============================================================================
@@ -46,6 +47,7 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             {
                 processor.getSoundDetective().setThreshold ((float) thresholdSlider.getValue());
             };
+            UserPrefs::bind (processor, thresholdSlider, "sdThreshold");
             addAndMakeVisible (thresholdSlider);
 
             // ---- Event log ----
@@ -99,7 +101,8 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             srLabel_.setJustificationType (juce::Justification::centredRight);
             addAndMakeVisible (srLabel_);
 
-            srField_.setText ("16000", juce::dontSendNotification);
+            srField_.setText (processor.getUiState().getProperty ("tfliteSampleRate", 16000).toString(),
+                              juce::dontSendNotification);
             srField_.setFont (juce::Font (juce::FontOptions().withName ("Courier New").withHeight (12.0f)));
             srField_.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff2c2c2e));
             srField_.setColour (juce::TextEditor::textColourId,       juce::Colour (0xffdddddd));
@@ -117,6 +120,7 @@ class SoundDetectiveWindow : public juce::DocumentWindow
             clearModelButton_.onClick = [this]
             {
                 processor.getSoundDetective().clearTFLiteModel();
+                processor.getUiState().removeProperty ("tfliteModel", nullptr);
                 updateModelInfo();
             };
             addAndMakeVisible (clearModelButton_);
@@ -247,9 +251,16 @@ class SoundDetectiveWindow : public juce::DocumentWindow
                     processor.getSoundDetective().loadTFLiteModel (cfg, err);
 
                     if (err.isNotEmpty())
+                    {
                         modelInfoLabel_.setText ("Error: " + err, juce::dontSendNotification);
+                    }
                     else
+                    {
+                        auto ui = processor.getUiState();
+                        ui.setProperty ("tfliteModel",      cfg.modelPath,       nullptr);
+                        ui.setProperty ("tfliteSampleRate", cfg.modelSampleRate, nullptr);
                         updateModelInfo();
+                    }
                 });
         }
 

@@ -320,6 +320,10 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 
 ## Changelog
 
+### [v3.5.2](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.2)
+- **All user settings now persist across launches** — previously some changes were silently reverted on quit, because the app's preferences shared a file with JUCE's standalone wrapper, which rewrote it from a stale copy. Preferences now live in their own `SPLMeter.prefs` (migrated automatically) and are saved every few seconds, so they also survive a crash or force-quit. Newly remembered: window size, timeline series checkboxes and psychoacoustic metric, FFT overlay toggle, Spectrogram view settings, Long-term SPL toggles and Y range, Sound Detective threshold and TFLite model, Impulse Fidelity frequency, loaded correction filter and graph overlays, MIDI CC assignments and channel names
+- **Dual FFT** (Settings → FFT): the timeline FFT overlay can show separate spectra for input 1 (green) and input 2 (red), overlaid with a legend. Both use identical analysis settings; the crosshair reads out both levels
+
 ### [v3.5.1](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.1)
 - **FFT Size is now configurable** for both the L_FFT timeline overlay (1024–8192, default 8192) and the Spectrogram (512–4096, default 2048) — previously the L_FFT engine was hardcoded to 8192 samples and the Spectrogram's size control was a local, non-persisted setting. Both are now proper APVTS parameters exposed as dropdowns in Settings and saved with the session
 - **Settings window redesigned**: wider two-column, card-based layout (GENERAL / FFT on the left, SPECTROGRAM / ANALYSIS on the right, INPUT CHANNELS spanning the full width below), with each section getting a one-line description of what it controls

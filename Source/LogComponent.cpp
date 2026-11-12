@@ -1,5 +1,6 @@
 #include "LogComponent.h"
 #include "SettingsComponent.h"
+#include "UserPrefs.h"
 
 // Resolution index → subdivisions per octave
 static const int kBandNForRes[5] = { 1, 3, 6, 12, 24 };
@@ -21,6 +22,8 @@ const juce::Colour LogComponent::colAnnoyance      { 0xffff6b6b };  // coral red
 const juce::Colour LogComponent::colImpulsiveness  { 0xffff9f0a };  // amber
 const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime green
 const juce::Colour LogComponent::colBassComfort    { 0xff7d5fff };  // indigo
+const juce::Colour LogComponent::colFftIn1         { 0xff34c759 };  // green
+const juce::Colour LogComponent::colFftIn2         { 0xffff453a };  // red
 
 //==============================================================================
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
@@ -68,6 +71,7 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
             {
                 selectedMetric = PsychoMetric::Off;
             }
+            processor.getUiState().setProperty ("logPsychoMetric", (int) selectedMetric, nullptr);
             repaint();
         };
         addAndMakeVisible (btn);
@@ -81,6 +85,24 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupPsychoBtn (impulsivenessVisButton,  colImpulsiveness,  PsychoMetric::Impulsiveness);
     setupPsychoBtn (tonalityVisButton,       colTonality,       PsychoMetric::Tonality);
     setupPsychoBtn (bassComfortVisButton,    colBassComfort,    PsychoMetric::BassComfort);
+
+    // Restore the user's last series selection and record future changes
+    UserPrefs::bind (processor, splVisButton, "logShowSPL");
+    UserPrefs::bind (processor, dbaVisButton, "logShowDBA");
+    UserPrefs::bind (processor, dbcVisButton, "logShowDBC");
+
+    auto ui = processor.getUiState();
+    fftEnabled_ = ui.getProperty ("logFftEnabled", false);
+    const int savedMetric = ui.getProperty ("logPsychoMetric", (int) PsychoMetric::Off);
+    juce::ToggleButton* psychoButtons[] = { &roughnessVisButton, &fluctuationVisButton,
+                                            &sharpnessVisButton, &loudnessVisButton,
+                                            &annoyanceVisButton, &impulsivenessVisButton,
+                                            &tonalityVisButton,  &bassComfortVisButton };
+    if (savedMetric >= 0 && savedMetric < (int) PsychoMetric::Off)
+    {
+        selectedMetric = (PsychoMetric) savedMetric;
+        psychoButtons[savedMetric]->setToggleState (true, juce::dontSendNotification);
+    }
 
     // Y-axis zoom button (magnifying glass — opens SPL range panel)
     yZoomButton_.setButtonText ("");
@@ -759,16 +781,17 @@ void LogComponent::paint (juce::Graphics& g)
         }
 
         const float bandFreq = fMin * std::pow (stepFactor, static_cast<float> (bestBand));
-        const float bandDB   = fftBandsSmoothed_[bestBand];
 
         // Frequency → pixel X (log scale)
         const float crossX = plot.getX() + juce::jlimit (0.0f, 1.0f,
             std::log2 (bandFreq / fMin) / std::log2 (fMax / fMin)) * plot.getWidth();
 
         // dB → pixel Y
-        const float crossY = plot.getBottom()
-            - juce::jlimit (0.0f, 1.0f, (bandDB - yDispMin) / (yDispMax - yDispMin))
-              * plot.getHeight();
+        auto dbToY = [&] (float db)
+        {
+            return plot.getBottom()
+                 - juce::jlimit (0.0f, 1.0f, (db - yDispMin) / (yDispMax - yDispMin)) * plot.getHeight();
+        };
 
         const juce::Colour crossCol = lightMode_ ? juce::Colour (0xcc000000)
                                                   : juce::Colour (0xccffffff);
@@ -777,18 +800,25 @@ void LogComponent::paint (juce::Graphics& g)
         g.setColour (crossCol.withAlpha (0.4f));
         g.drawVerticalLine (static_cast<int> (crossX), plot.getY(), plot.getBottom());
 
-        // Horizontal line
+        // Horizontal line (first channel) + a dot per displayed channel
+        const float crossY = dbToY (fftCh_[0].bandsSmoothed[bestBand]);
         g.drawHorizontalLine (static_cast<int> (crossY), plot.getX(), plot.getRight());
 
-        // Small dot at intersection
-        g.setColour (crossCol);
-        g.fillEllipse (crossX - 4.0f, crossY - 4.0f, 8.0f, 8.0f);
+        for (int c = 0; c < numFftChannels(); ++c)
+        {
+            g.setColour (fftDual_ ? (c == 0 ? colFftIn1 : colFftIn2) : crossCol);
+            const float y = dbToY (fftCh_[c].bandsSmoothed[bestBand]);
+            g.fillEllipse (crossX - 4.0f, y - 4.0f, 8.0f, 8.0f);
+        }
 
-        // Label: frequency + level
+        // Label: frequency + level (per input in Dual FFT)
         juce::String freqStr = (bandFreq >= 1000.0f)
             ? juce::String (bandFreq / 1000.0f, 2) + " kHz"
             : juce::String (static_cast<int> (bandFreq + 0.5f)) + " Hz";
-        juce::String label = freqStr + "  " + juce::String (bandDB, 1) + " dB";
+        juce::String label = freqStr;
+        for (int c = 0; c < numFftChannels(); ++c)
+            label << "  " << (fftDual_ ? processor.getChannelName (c) + " " : juce::String())
+                  << juce::String (fftCh_[c].bandsSmoothed[bestBand], 1) << " dB";
 
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f).withStyle ("Bold")));
         const float tw = g.getCurrentFont().getStringWidthFloat (label) + 12.0f;
@@ -812,11 +842,6 @@ void LogComponent::paint (juce::Graphics& g)
 //==============================================================================
 void LogComponent::computeFftBands()
 {
-    const float  fftGainDB  = processor.apvts.getRawParameterValue ("fftGain")->load();
-    const float  gainLinear = std::pow (10.0f, fftGainDB / 20.0f);
-    const float  calOffset  = processor.apvts.getRawParameterValue ("calOffset")->load();
-    const double sampleRate = processor.getSampleRate();
-
     // ---- FFT size (rebuild if changed) ----
     // 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 32768, 65536, 131072, 262144, 524288
     static constexpr int kFftOrders[14] = { 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19 };
@@ -825,15 +850,33 @@ void LogComponent::computeFftBands()
     const int fftOrder = kFftOrders[sizeIdx];
     const int fftSize  = 1 << fftOrder;
 
-    if (fftOrder != currentFftOrder_)
+    // Switching between mono mix and Dual FFT changes what each channel state
+    // is fed with, so its history must start over too
+    const bool dual = processor.apvts.getRawParameterValue ("fftDual")->load() > 0.5f;
+
+    if (fftOrder != currentFftOrder_ || dual != fftDual_)
     {
+        if (dual != fftDual_)
+        {
+            for (auto& ch : fftCh_)
+            {
+                std::fill (ch.bandsSmoothed,  ch.bandsSmoothed  + kMaxFftBands, kYMin);
+                std::fill (ch.peakBands,      ch.peakBands      + kMaxFftBands, kYMin);
+                std::fill (ch.peakTimestamps, ch.peakTimestamps + kMaxFftBands, 0.0);
+            }
+        }
+
         currentFftOrder_ = fftOrder;
+        fftDual_         = dual;
         fft_ = std::make_unique<juce::dsp::FFT> (fftOrder);
-        windowCoeffs_.assign    (fftSize, 0.0f);
-        fftInputHistory_.assign (fftSize, 0.0f);
-        fftBuffer_.assign       (fftSize * 2, 0.0f);
-        fftAvgAccum_.assign     (fftSize / 2, 0.0f);
-        fftAvgCount_       = 0;
+        windowCoeffs_.assign (fftSize, 0.0f);
+        for (auto& ch : fftCh_)
+        {
+            ch.inputHistory.assign (fftSize, 0.0f);
+            ch.buffer.assign       (fftSize * 2, 0.0f);
+            ch.avgAccum.assign     (fftSize / 2, 0.0f);
+            ch.avgCount = 0;
+        }
         currentWindowType_ = -1;   // force window recompute below
     }
 
@@ -861,7 +904,37 @@ void LogComponent::computeFftBands()
         }
     }
 
-    // ---- Overlap: maintain fftInputHistory_ ----
+    // Determine resolution (N = subdivisions per octave)
+    const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
+    const int N      = kBandNForRes[juce::jlimit (0, 4, resIdx)];
+
+    // Reset smoothed/peak arrays when resolution changes
+    if (N != currentBandN_)
+    {
+        for (auto& ch : fftCh_)
+        {
+            std::fill (ch.bandsSmoothed,  ch.bandsSmoothed  + kMaxFftBands, kYMin);
+            std::fill (ch.peakBands,      ch.peakBands      + kMaxFftBands, kYMin);
+            std::fill (ch.peakTimestamps, ch.peakTimestamps + kMaxFftBands, 0.0);
+        }
+        currentBandN_ = N;
+    }
+
+    for (int c = 0; c < numFftChannels(); ++c)
+        processFftChannel (fftCh_[c], fftDual_ ? c : -1);
+}
+
+// Runs one analysis frame for a single signal. All channels share the FFT size,
+// window, overlap, averaging, band resolution, smoothing and peak-hold settings.
+void LogComponent::processFftChannel (FftChannel& ch, int sourceChannel)
+{
+    const float  fftGainDB  = processor.apvts.getRawParameterValue ("fftGain")->load();
+    const float  gainLinear = std::pow (10.0f, fftGainDB / 20.0f);
+    const float  calOffset  = processor.apvts.getRawParameterValue ("calOffset")->load();
+    const double sampleRate = processor.getSampleRate();
+    const int    fftSize    = 1 << currentFftOrder_;
+
+    // ---- Overlap: maintain the channel's input history ----
     const int overlapIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftOverlap")->load());
     static constexpr int kOverlapPct[4] = { 0, 25, 50, 75 };
     const int overlap  = kOverlapPct[juce::jlimit (0, 3, overlapIdx)];
@@ -870,73 +943,60 @@ void LogComponent::computeFftBands()
 
     // Get a fresh full window from the processor into a temp buffer
     std::vector<float> tempBuf (fftSize);
-    processor.copyFftWindow (tempBuf.data(), fftSize);
+    processor.copyFftWindow (tempBuf.data(), fftSize, sourceChannel);
 
     if (overlap > 0 && keepSize > 0)
     {
         // Shift history left by hopSize, fill right portion with newest samples
-        std::memmove (fftInputHistory_.data(),
-                      fftInputHistory_.data() + hopSize,
+        std::memmove (ch.inputHistory.data(),
+                      ch.inputHistory.data() + hopSize,
                       keepSize * sizeof (float));
-        std::memcpy  (fftInputHistory_.data() + keepSize,
+        std::memcpy  (ch.inputHistory.data() + keepSize,
                       tempBuf.data() + keepSize,
                       hopSize * sizeof (float));
     }
     else
     {
-        fftInputHistory_ = tempBuf;
+        ch.inputHistory = tempBuf;
     }
 
     // Apply window function + gain; zero imaginary half
     for (int i = 0; i < fftSize; ++i)
-        fftBuffer_[i] = fftInputHistory_[i] * windowCoeffs_[i] * gainLinear;
-    std::fill (fftBuffer_.begin() + fftSize, fftBuffer_.end(), 0.0f);
+        ch.buffer[i] = ch.inputHistory[i] * windowCoeffs_[i] * gainLinear;
+    std::fill (ch.buffer.begin() + fftSize, ch.buffer.end(), 0.0f);
 
-    fft_->performFrequencyOnlyForwardTransform (fftBuffer_.data(), true);
-    // fftBuffer_[0..fftSize/2] now holds magnitudes
+    fft_->performFrequencyOnlyForwardTransform (ch.buffer.data(), true);
+    // ch.buffer[0..fftSize/2] now holds magnitudes
 
     // --- Accumulate for cycle averaging ---
     const int avgCycles = juce::jlimit (1, 999,
         static_cast<int> (processor.apvts.getRawParameterValue ("fftAvgCycles")->load()));
 
-    if (static_cast<int> (fftAvgAccum_.size()) != fftSize / 2)
+    if (static_cast<int> (ch.avgAccum.size()) != fftSize / 2)
     {
-        fftAvgAccum_.assign (fftSize / 2, 0.0f);
-        fftAvgCount_ = 0;
+        ch.avgAccum.assign (fftSize / 2, 0.0f);
+        ch.avgCount = 0;
     }
 
     for (int k = 0; k < fftSize / 2; ++k)
-        fftAvgAccum_[k] += fftBuffer_[k];
+        ch.avgAccum[k] += ch.buffer[k];
 
-    ++fftAvgCount_;
+    ++ch.avgCount;
 
-    if (fftAvgCount_ < avgCycles)
+    if (ch.avgCount < avgCycles)
         return;
 
-    const float invAvg = 1.0f / static_cast<float> (fftAvgCount_);
+    const float invAvg = 1.0f / static_cast<float> (ch.avgCount);
     for (int k = 0; k < fftSize / 2; ++k)
-        fftBuffer_[k] = fftAvgAccum_[k] * invAvg;
+        ch.buffer[k] = ch.avgAccum[k] * invAvg;
 
-    fftAvgAccum_.assign (fftSize / 2, 0.0f);
-    fftAvgCount_ = 0;
+    ch.avgAccum.assign (fftSize / 2, 0.0f);
+    ch.avgCount = 0;
 
     const float normFactor = static_cast<float> (fftSize);
 
-    // Determine resolution (N = subdivisions per octave)
-    const int resIdx = static_cast<int> (processor.apvts.getRawParameterValue ("fftBandRes")->load());
-    const int N      = kBandNForRes[juce::jlimit (0, 4, resIdx)];
-
-    // Reset smoothed/peak arrays when resolution changes
-    if (N != currentBandN_)
-    {
-        std::fill (fftBandsSmoothed_,   fftBandsSmoothed_   + kMaxFftBands, kYMin);
-        std::fill (fftPeakBands_,       fftPeakBands_       + kMaxFftBands, kYMin);
-        std::fill (fftPeakTimestamps_,  fftPeakTimestamps_  + kMaxFftBands, 0.0);
-        currentBandN_ = N;
-    }
-
     // Compute band energies dynamically
-    const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (N));
+    const float stepFactor     = std::pow (2.0f, 1.0f / static_cast<float> (currentBandN_));
     const float halfBandFactor = std::sqrt (stepFactor);  // = 2^(1/(2N))
 
     const bool rtaMode = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
@@ -953,12 +1013,12 @@ void LogComponent::computeFftBands()
 
         float peak = 0.0f;
         for (int k = binLo; k < binHi; ++k)
-            peak = std::max (peak, fftBuffer_[k]);
+            peak = std::max (peak, ch.buffer[k]);
 
         float dbSPL = 20.0f * std::log10 (peak / normFactor + 1e-10f) + calOffset;
         if (rtaMode)
             dbSPL += 3.0f * std::log2 (fc / fftLo);   // +3 dB/oct relative to lower limit
-        fftBands_[b] = juce::jlimit (kYMin, kYMax, dbSPL);
+        ch.bands[b] = juce::jlimit (kYMin, kYMax, dbSPL);
     }
 
     // Smoothing + peak hold
@@ -969,20 +1029,20 @@ void LogComponent::computeFftBands()
 
     for (int b = 0; b < currentNumBands_; ++b)
     {
-        fftBandsSmoothed_[b] = alpha * fftBandsSmoothed_[b] + (1.0f - alpha) * fftBands_[b];
+        ch.bandsSmoothed[b] = alpha * ch.bandsSmoothed[b] + (1.0f - alpha) * ch.bands[b];
 
         if (peakHoldOn)
         {
-            if (fftBandsSmoothed_[b] >= fftPeakBands_[b]
-                || (nowMs - fftPeakTimestamps_[b]) > holdSecs * 1000.0)
+            if (ch.bandsSmoothed[b] >= ch.peakBands[b]
+                || (nowMs - ch.peakTimestamps[b]) > holdSecs * 1000.0)
             {
-                fftPeakBands_[b]      = fftBandsSmoothed_[b];
-                fftPeakTimestamps_[b] = nowMs;
+                ch.peakBands[b]      = ch.bandsSmoothed[b];
+                ch.peakTimestamps[b] = nowMs;
             }
         }
         else
         {
-            fftPeakBands_[b] = kYMin;
+            ch.peakBands[b] = kYMin;
         }
     }
 }
@@ -1020,57 +1080,84 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
     const bool peakHoldOn  = processor.apvts.getRawParameterValue ("fftPeakHold")->load() > 0.5f;
     const int  numBands    = currentNumBands_;
 
-    const juce::Colour colFill    { 0xaa34c759 };
-    const juce::Colour colSolid   { 0xff34c759 };
-    const juce::Colour colPeak    { 0xffffcc00 };  // amber peak line
-
     // Iterate bands starting from lower frequency limit
     float fc0 = fMin;
 
-    if (displayMode == 1)  // ---- Area ----
+    auto drawChannel = [&] (const FftChannel& ch, juce::Colour colSolid, juce::Colour colFill,
+                            juce::Colour colPeak)
     {
-        juce::Path area;
-        float fc = fc0;
-        for (int b = 0; b < numBands; ++b, fc *= stepFactor)
+        if (displayMode == 1)  // ---- Area ----
         {
-            float x = freqToX (fc);
-            float y = splToY (fftBandsSmoothed_[b]);
-            if (b == 0) area.startNewSubPath (x, y);
-            else        area.lineTo (x, y);
-        }
-        float fcLast = fc0 * std::pow (stepFactor, static_cast<float> (numBands - 1));
-        area.lineTo (freqToX (fcLast * halfBandFactor), plot.getBottom());
-        area.lineTo (freqToX (fc0    / halfBandFactor), plot.getBottom());
-        area.closeSubPath();
-
-        g.setColour (colFill);
-        g.fillPath (area);
-        g.setColour (colSolid);
-        g.strokePath (area, juce::PathStrokeType (2.0f));
-    }
-    else  // ---- Bars  /  Bars+Peak ----
-    {
-        float fc = fc0;
-        for (int b = 0; b < numBands; ++b, fc *= stepFactor)
-        {
-            float x1   = freqToX (fc / halfBandFactor);
-            float x2   = freqToX (fc * halfBandFactor);
-            float yBot = plot.getBottom();
-            float yTop = std::min (splToY (fftBandsSmoothed_[b]), yBot - 3.0f);
-
-            if (x2 - x1 < 1.0f) continue;
+            juce::Path area;
+            float fc = fc0;
+            for (int b = 0; b < numBands; ++b, fc *= stepFactor)
+            {
+                float x = freqToX (fc);
+                float y = splToY (ch.bandsSmoothed[b]);
+                if (b == 0) area.startNewSubPath (x, y);
+                else        area.lineTo (x, y);
+            }
+            float fcLast = fc0 * std::pow (stepFactor, static_cast<float> (numBands - 1));
+            area.lineTo (freqToX (fcLast * halfBandFactor), plot.getBottom());
+            area.lineTo (freqToX (fc0    / halfBandFactor), plot.getBottom());
+            area.closeSubPath();
 
             g.setColour (colFill);
-            g.fillRect (x1, yTop, x2 - x1 - 1.0f, yBot - yTop);
+            g.fillPath (area);
             g.setColour (colSolid);
-            g.fillRect (x1, yTop, x2 - x1 - 1.0f, 2.0f);
-
-            if (displayMode == 2 && peakHoldOn)
+            g.strokePath (area, juce::PathStrokeType (2.0f));
+        }
+        else  // ---- Bars  /  Bars+Peak ----
+        {
+            float fc = fc0;
+            for (int b = 0; b < numBands; ++b, fc *= stepFactor)
             {
-                float yPeak = splToY (fftPeakBands_[b]);
-                g.setColour (colPeak);
-                g.fillRect (x1, yPeak, x2 - x1 - 1.0f, 2.0f);
+                float x1   = freqToX (fc / halfBandFactor);
+                float x2   = freqToX (fc * halfBandFactor);
+                float yBot = plot.getBottom();
+                float yTop = std::min (splToY (ch.bandsSmoothed[b]), yBot - 3.0f);
+
+                if (x2 - x1 < 1.0f) continue;
+
+                g.setColour (colFill);
+                g.fillRect (x1, yTop, x2 - x1 - 1.0f, yBot - yTop);
+                g.setColour (colSolid);
+                g.fillRect (x1, yTop, x2 - x1 - 1.0f, 2.0f);
+
+                if (displayMode == 2 && peakHoldOn)
+                {
+                    float yPeak = splToY (ch.peakBands[b]);
+                    g.setColour (colPeak);
+                    g.fillRect (x1, yPeak, x2 - x1 - 1.0f, 2.0f);
+                }
             }
+        }
+    };
+
+    if (! fftDual_)
+    {
+        drawChannel (fftCh_[0], juce::Colour (0xff34c759), juce::Colour (0xaa34c759),
+                     juce::Colour (0xffffcc00));  // amber peak line
+    }
+    else
+    {
+        // Light fills so the two overlaid spectra stay readable; peak lines in channel colour
+        drawChannel (fftCh_[0], colFftIn1, colFftIn1.withAlpha (0.25f), colFftIn1.brighter (0.6f));
+        drawChannel (fftCh_[1], colFftIn2, colFftIn2.withAlpha (0.25f), colFftIn2.brighter (0.6f));
+
+        // Legend (top-right of the plot)
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        float ly = plot.getY() + 6.0f;
+        for (int c = 0; c < 2; ++c)
+        {
+            const auto text = "FFT " + processor.getChannelName (c);
+            const float tw  = g.getCurrentFont().getStringWidthFloat (text);
+            const float lx  = plot.getRight() - tw - 26.0f;
+            g.setColour (c == 0 ? colFftIn1 : colFftIn2);
+            g.fillRoundedRectangle (lx, ly + 3.0f, 10.0f, 10.0f, 2.0f);
+            g.drawText (text, juce::Rectangle<float> (lx + 14.0f, ly, tw + 4.0f, 16.0f),
+                        juce::Justification::centredLeft, false);
+            ly += 18.0f;
         }
     }
 

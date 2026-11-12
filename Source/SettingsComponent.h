@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 
 //==============================================================================
 // Custom channel mute button: shows label with red X + strikethrough when muted.
@@ -377,6 +378,8 @@ public:
         fftEnableButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
         fftEnableButton.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
         fftEnableButton.setClickingTogglesState (true);
+        fftEnableButton.setToggleState (p.getUiState().getProperty ("logFftEnabled", false),
+                                        juce::dontSendNotification);
         fftEnableButton.onClick = [this]
         {
             if (onFftToggle_) onFftToggle_ (fftEnableButton.getToggleState());
@@ -655,6 +658,20 @@ public:
             param->setValueNotifyingHost (fftRTAButton.getToggleState() ? 1.0f : 0.0f);
         };
         addAndMakeVisible (fftRTAButton);
+
+        // Dual FFT: separate spectra for input 1 (green) and input 2 (red)
+        fftDualButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
+        fftDualButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff34c759));
+        fftDualButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        fftDualButton.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+        fftDualButton.setClickingTogglesState (true);
+        fftDualButton.setTooltip ("Separate FFT for input 1 (green) and input 2 (red), same analysis settings");
+        fftDualButton.onClick = [this, &p]
+        {
+            auto* param = p.apvts.getParameter ("fftDual");
+            param->setValueNotifyingHost (fftDualButton.getToggleState() ? 1.0f : 0.0f);
+        };
+        addAndMakeVisible (fftDualButton);
 
         // FFT frequency range sliders
         setupKnob (fftLowerFreqSlider, fftLowerFreqLabel, "f Lower");
@@ -962,8 +979,9 @@ public:
 
                 // Left side: FFT + BP buttons (top), Gain + Smooth sliders (bottom)
                 auto btnRow = r.removeFromTop (28);
-                const int bw = r.getWidth() / 2;
+                const int bw = btnRow.getWidth() / 3;
                 fftEnableButton.setBounds (btnRow.removeFromLeft (bw).reduced (2, 0));
+                fftDualButton.setBounds   (btnRow.removeFromLeft (bw).reduced (2, 0));
                 bandpassButton.setBounds  (btnRow.reduced (2, 0));
 
                 r.removeFromTop (5);
@@ -1088,30 +1106,8 @@ public:
             channelMuteButtons[i].setButtonText (processor.getChannelName (i));
     }
 
-    static juce::File lastUsedFolder()
-    {
-        juce::PropertiesFile::Options o;
-        o.applicationName     = "SPLMeter";
-        o.filenameSuffix      = "settings";
-        o.osxLibrarySubFolder = "Application Support";
-        juce::PropertiesFile prefs (o);
-        const auto path = prefs.getValue ("lastUsedFolder");
-        const juce::File f (path);
-        return (path.isNotEmpty() && f.isDirectory())
-                   ? f : juce::File::getSpecialLocation (juce::File::userDesktopDirectory);
-    }
-
-    static void saveLastUsedFolder (const juce::File& fileOrFolder)
-    {
-        juce::PropertiesFile::Options o;
-        o.applicationName     = "SPLMeter";
-        o.filenameSuffix      = "settings";
-        o.osxLibrarySubFolder = "Application Support";
-        juce::PropertiesFile prefs (o);
-        prefs.setValue ("lastUsedFolder",
-            (fileOrFolder.isDirectory() ? fileOrFolder
-                                        : fileOrFolder.getParentDirectory()).getFullPathName());
-    }
+    static juce::File lastUsedFolder()                              { return UserPrefs::lastUsedFolder(); }
+    static void saveLastUsedFolder (const juce::File& fileOrFolder) { UserPrefs::saveLastUsedFolder (fileOrFolder); }
 
 private:
     void applyTheme (bool light)
@@ -1150,6 +1146,7 @@ private:
         styleBtn (dispPeakButton,    juce::Colour (0xff34c759));
         styleBtn (fftPeakHoldButton, juce::Colour (0xffffcc00));
         styleBtn (fftRTAButton,      juce::Colour (0xffff6b35));
+        styleBtn (fftDualButton,     juce::Colour (0xff34c759));
         styleBtn (bandpassButton,    juce::Colour (0xffff9f0a));
         styleBtn (line94Button,           juce::Colour (0xffff453a));
         styleBtn (correctionEnableButton,   juce::Colour (0xff34c759));
@@ -1235,6 +1232,8 @@ private:
         fftPeakHoldButton.setToggleState (peakOn, juce::dontSendNotification);
         bool rtaOn = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
         fftRTAButton.setToggleState (rtaOn, juce::dontSendNotification);
+        bool dualOn = processor.apvts.getRawParameterValue ("fftDual")->load() > 0.5f;
+        fftDualButton.setToggleState (dualOn, juce::dontSendNotification);
 
 
         bool bpOn = processor.apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f;
@@ -1312,6 +1311,7 @@ private:
     // FFT Peak Hold + RTA
     juce::TextButton fftPeakHoldButton { "Peak Hold"   };
     juce::TextButton fftRTAButton      { "RTA +3dB/Oct" };
+    juce::TextButton fftDualButton     { "Dual FFT" };
 
     // Window function
     juce::TextButton winHannButton    { "Hann"     };

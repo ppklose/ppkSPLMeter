@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 #include <vector>
 #include <cmath>
 
@@ -95,6 +96,7 @@ class ImpulseFidelityWindow : public juce::DocumentWindow
             }
             freqSelector.setSelectedId (11, juce::dontSendNotification); // default 1 kHz
             freqSelector.onChange = [this] { repaint(); };
+            UserPrefs::bind (processor, freqSelector, "impulseFidelityFreq");
             freqSelector.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff3a3a3c));
             freqSelector.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
             freqSelector.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff48484a));

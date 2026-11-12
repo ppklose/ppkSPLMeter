@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 #include "MeterComponent.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
@@ -267,6 +268,7 @@ private:
     void timerCallback() override;
     void saveSettings();
     void loadSettings();
+    static bool restoreProcessorState (SPLMeterAudioProcessor&);
 
     void doSaveCsv();
     void doSaveWav();
@@ -278,6 +280,8 @@ private:
                               const std::vector<LogComponent::MarkerEvent>&);
 
     SPLMeterAudioProcessor& audioProcessor;
+    // Must stay above the child components so they are built from the restored state
+    bool processorStateRestored_ = restoreProcessorState (audioProcessor);
 
     MeterComponent       meter;
     LogComponent         log;
@@ -295,6 +299,8 @@ private:
     juce::ToggleButton dawSyncToggle { "DAW sync" };
     bool basicMode_      = true;
     int  extendedHeight_ = 900;
+    int  windowWidth_    = 1800;
+    int  settingsSaveTicks_ = 0;
     MonitorButton    monitorButton;
     juce::Slider     monitorGainSlider;
     OutputVUMeter    outputVUMeter;

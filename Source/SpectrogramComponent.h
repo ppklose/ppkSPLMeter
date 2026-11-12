@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "UserPrefs.h"
 #include <cmath>
 #include <array>
 #include <algorithm>
@@ -730,6 +731,18 @@ class SpectrogramWindow : public juce::DocumentWindow
                 spectro.setFreqMax (freqs[freqMaxCombo.getSelectedId() - 1]);
             };
             styleCombo (freqMaxCombo, "Highest displayed frequency");
+
+            // Restore the user's last view settings and record future changes
+            UserPrefs::bind (p, formantsButton, "spectroFormants");
+            UserPrefs::bind (p, durationCombo,  "spectroDuration");
+            UserPrefs::bind (p, scaleCombo,     "spectroScale");
+            UserPrefs::bind (p, hopCombo,       "spectroHop");
+            UserPrefs::bind (p, windowCombo,    "spectroWindow");
+            UserPrefs::bind (p, colourCombo,    "spectroColourMap");
+            UserPrefs::bind (p, floorSlider,    "spectroDbFloor");
+            UserPrefs::bind (p, ceilSlider,     "spectroDbCeil");
+            UserPrefs::bind (p, freqMinCombo,   "spectroFreqMin");
+            UserPrefs::bind (p, freqMaxCombo,   "spectroFreqMax");
         }
 
         void resized() override

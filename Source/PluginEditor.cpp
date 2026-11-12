@@ -1,53 +1,55 @@
 #include "PluginEditor.h"
 #include <map>
 
-static juce::PropertiesFile::Options splmeterPropsOptions()
+static juce::File splmeterLastFolder()                              { return UserPrefs::lastUsedFolder(); }
+static void splmeterSaveLastFolder (const juce::File& fileOrFolder) { UserPrefs::saveLastUsedFolder (fileOrFolder); }
+
+// Copies settings from the pre-3.5.2 file (shared with JUCE's standalone wrapper)
+// into UserPrefs on first launch after the update.
+static void migrateLegacyPrefs (juce::PropertiesFile& prefs)
 {
-    juce::PropertiesFile::Options o;
-    o.applicationName     = "SPLMeter";
-    o.filenameSuffix      = "settings";
-    o.osxLibrarySubFolder = "Application Support";
-    return o;
+    if (prefs.containsKey ("processorState") || prefs.containsKey ("lightMode"))
+        return;
+
+    juce::PropertiesFile legacy (UserPrefs::legacyOptions());
+    for (auto* key : { "basicMode", "lightMode", "lastUsedFolder" })
+        if (legacy.containsKey (key))
+            prefs.setValue (key, legacy.getValue (key));
 }
 
-static juce::File splmeterLastFolder()
+bool SPLMeterAudioProcessorEditor::restoreProcessorState (SPLMeterAudioProcessor& p)
 {
-    juce::PropertiesFile prefs (splmeterPropsOptions());
-    const auto path = prefs.getValue ("lastUsedFolder");
-    const juce::File f (path);
-    return (path.isNotEmpty() && f.isDirectory())
-               ? f
-               : juce::File::getSpecialLocation (juce::File::userDesktopDirectory);
-}
+    juce::PropertiesFile prefs (UserPrefs::options());
+    migrateLegacyPrefs (prefs);
 
-static void splmeterSaveLastFolder (const juce::File& fileOrFolder)
-{
-    juce::PropertiesFile prefs (splmeterPropsOptions());
-    prefs.setValue ("lastUsedFolder",
-        (fileOrFolder.isDirectory() ? fileOrFolder
-                                    : fileOrFolder.getParentDirectory()).getFullPathName());
+    if (auto xml = juce::parseXML (prefs.getValue ("processorState")))
+    {
+        p.restoreStateXml (*xml);
+        return true;
+    }
+    // No saved state yet: in the standalone app JUCE has already restored its own
+    // copy; in a plugin the host has.
+    return false;
 }
 
 void SPLMeterAudioProcessorEditor::saveSettings()
 {
-    juce::PropertiesFile prefs (splmeterPropsOptions());
+    juce::PropertiesFile prefs (UserPrefs::options());
     prefs.setValue ("basicMode", basicMode_);
     prefs.setValue ("lightMode", lightMode_);
-    auto state = audioProcessor.apvts.copyState();
-    if (auto xml = state.createXml())
-        prefs.setValue ("apvtsState", xml->toString());
+    prefs.setValue ("windowWidth",    getWidth());
+    prefs.setValue ("extendedHeight", basicMode_ ? extendedHeight_ : getHeight());
+    if (auto xml = audioProcessor.createStateXml())
+        prefs.setValue ("processorState", xml->toString());
 }
 
 void SPLMeterAudioProcessorEditor::loadSettings()
 {
-    juce::PropertiesFile prefs (splmeterPropsOptions());
-    basicMode_ = prefs.getBoolValue ("basicMode", true);
-    lightMode_ = prefs.getBoolValue ("lightMode", false);
-
-    auto xmlStr = prefs.getValue ("apvtsState");
-    if (xmlStr.isNotEmpty())
-        if (auto xml = juce::XmlDocument::parse (xmlStr))
-            audioProcessor.apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    juce::PropertiesFile prefs (UserPrefs::options());
+    basicMode_      = prefs.getBoolValue ("basicMode", true);
+    lightMode_      = prefs.getBoolValue ("lightMode", false);
+    windowWidth_    = juce::jlimit (480, 3840, prefs.getIntValue ("windowWidth",    windowWidth_));
+    extendedHeight_ = juce::jlimit (500, 2160, prefs.getIntValue ("extendedHeight", extendedHeight_));
 }
 
 //==============================================================================
@@ -407,8 +409,9 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     addAndMakeVisible (markerButton);
 
     setResizable (true, true);
-    // Restore all persisted settings
+    // Restore UI settings (processor state was restored before the child components were built)
     loadSettings();
+    dawSyncToggle.setToggleState (audioProcessor.isDawSync(), juce::dontSendNotification);
 
     basicModeButton.setToggleState (basicMode_, juce::dontSendNotification);
     basicModeButton.setButtonText (basicMode_ ? "Basic Mode" : "Advanced Mode");
@@ -426,12 +429,12 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     if (basicMode_)
     {
         setResizeLimits (480, basicH, 3840, 2160);
-        setSize (1800, basicH);
+        setSize (windowWidth_, basicH);
     }
     else
     {
         setResizeLimits (480, 500, 3840, 2160);
-        setSize (1800, extendedHeight_);
+        setSize (windowWidth_, extendedHeight_);
     }
     applyTheme (lightMode_);
     initialising_ = false;
@@ -817,6 +820,7 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             p->setProperty ("fftWindowType",         getInt  ("fftWindowType"));
             p->setProperty ("fftOverlap",            getInt  ("fftOverlap"));
             p->setProperty ("fftRTAMode",            getBool ("fftRTAMode"));
+            p->setProperty ("fftDual",               getBool ("fftDual"));
             p->setProperty ("bandpassEnabled",       getBool ("bandpassEnabled"));
             p->setProperty ("line94Enabled",         getBool ("line94Enabled"));
             p->setProperty ("correctionEnabled",     getBool ("correctionEnabled"));
@@ -911,6 +915,7 @@ void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
                 applyB ("fftPeakHold");        applyI ("fftDisplayMode");
                 applyI ("fftBandRes");         applyI ("fftWindowType");
                 applyI ("fftOverlap");         applyB ("fftRTAMode");
+                applyB ("fftDual");
                 applyB ("bandpassEnabled");    applyB ("line94Enabled");
                 applyB ("correctionEnabled");  applyB ("graphOverlayEnabled");
                 applyB ("graphOverlay2Enabled");
@@ -1049,6 +1054,14 @@ bool SPLMeterAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 //==============================================================================
 void SPLMeterAudioProcessorEditor::timerCallback()
 {
+    // Persist every ~2 s (written only when something changed) so settings also
+    // survive a crash or force-quit, not just a clean exit.
+    if (++settingsSaveTicks_ >= 60)
+    {
+        settingsSaveTicks_ = 0;
+        saveSettings();
+    }
+
     // IEC 61672 SPL = time-weighted RMS (FAST/SLOW). The bargraph follows this;
     // the in-meter hold tick captures the maximum recent reading (Lmax-style).
     meter.setValues (audioProcessor.getRMSSPL(),

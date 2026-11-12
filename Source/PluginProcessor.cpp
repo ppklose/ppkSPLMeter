@@ -95,6 +95,9 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftRTAMode", "FFT RTA +3dB/oct", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "fftDual", "Dual FFT (Input 1 + 2)", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
         "bandpassEnabled", "20-20k Bandpass", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -415,6 +418,12 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (activeChannels == 0) activeChannels = 1;   // silence guard
     const float channelScale = 1.0f / static_cast<float> (activeChannels);
 
+    // Inputs 1 + 2 individually, for the Dual FFT (same processing stage as the mono mix)
+    const juce::AudioBuffer<float>& dualSrc = fileMode ? fileReadBuffer : buffer;
+    const float* dualCh[2] = {
+        dualSrc.getNumChannels() > 0 ? dualSrc.getReadPointer (0) : nullptr,
+        dualSrc.getNumChannels() > 1 ? dualSrc.getReadPointer (1) : nullptr };
+
     for (int s = 0; s < numSamples; ++s)
     {
         // Mix source channels to mono
@@ -441,6 +450,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             int pos = fftWritePos_.load (std::memory_order_relaxed);
             fftCircBuf_[pos] = raw;
+            fftCircBufDual_[0][pos] = dualCh[0] != nullptr ? dualCh[0][s] : 0.0f;
+            fftCircBufDual_[1][pos] = dualCh[1] != nullptr ? dualCh[1][s] : 0.0f;
             fftWritePos_.store ((pos + 1) % kFftCircBufSize, std::memory_order_release);
         }
 
@@ -649,13 +660,14 @@ void SPLMeterAudioProcessor::pruneLog (float logDurationSeconds)
         logEntries.pop_front();
 }
 
-void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size) const noexcept
+void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size, int channel) const noexcept
 {
+    const auto& src = (channel == 0 || channel == 1) ? fftCircBufDual_[(size_t) channel] : fftCircBuf_;
     int writePos = fftWritePos_.load (std::memory_order_acquire);
     for (int i = 0; i < size; ++i)
     {
         int readPos = (writePos - size + i + kFftCircBufSize) % kFftCircBufSize;
-        dest[i] = fftCircBuf_[readPos];
+        dest[i] = src[readPos];
     }
 }
 
@@ -683,7 +695,7 @@ juce::AudioProcessorEditor* SPLMeterAudioProcessor::createEditor()
     return new SPLMeterAudioProcessorEditor (*this);
 }
 
-void SPLMeterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+std::unique_ptr<juce::XmlElement> SPLMeterAudioProcessor::createStateXml()
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
@@ -692,20 +704,72 @@ void SPLMeterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     for (int i = 0; i < 32; ++i)
         if (channelNames_[i].isNotEmpty())
             xml->setAttribute ("channelName_" + juce::String (i), channelNames_[i]);
-    copyXmlToBinary (*xml, destData);
+    return xml;
+}
+
+void SPLMeterAudioProcessor::restoreStateXml (const juce::XmlElement& xml)
+{
+    if (! xml.hasTagName (apvts.state.getType()))
+        return;
+
+    for (int i = 0; i < kNumMidiParams; ++i)
+        midiCC[i].store (xml.getIntAttribute (juce::String ("midiCC_") + kMidiParamIds[i], -1));
+    for (int i = 0; i < 32; ++i)
+        channelNames_[i] = xml.getStringAttribute ("channelName_" + juce::String (i), "");
+    apvts.replaceState (juce::ValueTree::fromXml (xml));
+
+    // Apply the non-parameter settings held in UIState
+    auto ui = getUiState();
+    dawSync_.store ((bool) ui.getProperty ("dawSync", false));
+    soundDetective_.setThreshold ((float) (double) ui.getProperty ("sdThreshold", 0.35));
+
+    // Reload user-chosen files. The loaders force their enable flag on, so keep
+    // the persisted flag instead.
+    auto reload = [this, &ui] (const char* pathKey, const char* enableId,
+                               auto&& load, auto&& clear)
+    {
+        const juce::File f (ui.getProperty (pathKey).toString());
+        if (! f.existsAsFile())
+        {
+            clear();
+            return;
+        }
+        auto* enable = apvts.getParameter (enableId);
+        const float wasEnabled = enable->getValue();
+        load (f);
+        enable->setValueNotifyingHost (wasEnabled);
+    };
+    const auto keepUiState = ui.createCopy();  // clear*() would drop the stored paths
+    reload ("correctionFile",    "correctionEnabled",
+            [this] (const juce::File& f) { loadCorrectionFilter (f); }, [this] { clearCorrectionFilter(); });
+    reload ("graphOverlayFile",  "graphOverlayEnabled",
+            [this] (const juce::File& f) { loadGraphOverlay (f); },     [this] { clearGraphOverlay(); });
+    reload ("graphOverlay2File", "graphOverlay2Enabled",
+            [this] (const juce::File& f) { loadGraphOverlay2 (f); },    [this] { clearGraphOverlay2(); });
+    ui.copyPropertiesFrom (keepUiState, nullptr);
+
+#if SPLMETER_HAS_TFLITE
+    const juce::File model (ui.getProperty ("tfliteModel").toString());
+    if (model.existsAsFile())
+    {
+        TFLiteDetector::Config cfg;
+        cfg.modelPath       = model.getFullPathName();
+        cfg.modelSampleRate = ui.getProperty ("tfliteSampleRate", 16000);
+        juce::String err;
+        soundDetective_.loadTFLiteModel (cfg, err);
+    }
+#endif
+}
+
+void SPLMeterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    copyXmlToBinary (*createStateXml(), destData);
 }
 
 void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
-    if (xml && xml->hasTagName (apvts.state.getType()))
-    {
-        for (int i = 0; i < kNumMidiParams; ++i)
-            midiCC[i].store (xml->getIntAttribute (juce::String ("midiCC_") + kMidiParamIds[i], -1));
-        for (int i = 0; i < 32; ++i)
-            channelNames_[i] = xml->getStringAttribute ("channelName_" + juce::String (i), "");
-        apvts.replaceState (juce::ValueTree::fromXml (*xml));
-    }
+    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+        restoreStateXml (*xml);
 }
 
 //==============================================================================
@@ -811,6 +875,7 @@ void SPLMeterAudioProcessor::loadCorrectionFilter (const juce::File& file)
                [] (auto& a, auto& b) { return a.first < b.first; });
 
     correctionFileName_ = file.getFileNameWithoutExtension();
+    getUiState().setProperty ("correctionFile", file.getFullPathName(), nullptr);
     rebuildCorrectionFIR();
 
     auto* param = apvts.getParameter ("correctionEnabled");
@@ -821,6 +886,7 @@ void SPLMeterAudioProcessor::clearCorrectionFilter()
 {
     correctionPoints_.clear();
     correctionFileName_ = {};
+    getUiState().removeProperty ("correctionFile", nullptr);
     correctionPending_.store (false);
     correctionLoaded_.store (false);
     correctionConv_.reset();
@@ -935,6 +1001,7 @@ void SPLMeterAudioProcessor::loadGraphOverlay (const juce::File& file)
                [] (auto& a, auto& b) { return a.first < b.first; });
 
     graphOverlayFileName_ = file.getFileNameWithoutExtension();
+    getUiState().setProperty ("graphOverlayFile", file.getFullPathName(), nullptr);
     graphOverlayLoaded_.store (true);
 }
 
@@ -942,6 +1009,7 @@ void SPLMeterAudioProcessor::clearGraphOverlay()
 {
     graphOverlayPoints_.clear();
     graphOverlayFileName_ = {};
+    getUiState().removeProperty ("graphOverlayFile", nullptr);
     graphOverlayLoaded_.store (false);
 }
 
@@ -983,6 +1051,7 @@ void SPLMeterAudioProcessor::loadGraphOverlay2 (const juce::File& file)
                [] (auto& a, auto& b) { return a.first < b.first; });
 
     graphOverlay2FileName_ = file.getFileNameWithoutExtension();
+    getUiState().setProperty ("graphOverlay2File", file.getFullPathName(), nullptr);
     graphOverlay2Loaded_.store (true);
 }
 
@@ -990,6 +1059,7 @@ void SPLMeterAudioProcessor::clearGraphOverlay2()
 {
     graphOverlay2Points_.clear();
     graphOverlay2FileName_ = {};
+    getUiState().removeProperty ("graphOverlay2File", nullptr);
     graphOverlay2Loaded_.store (false);
 }
 
