@@ -574,7 +574,35 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
                              + " not available on this input";
 
     const auto validity = audioProcessor.getSensorValidity();
-    if (! anyAccel)
+    const bool fileVib = audioProcessor.isFileModeActive() && audioProcessor.fileHasAccelerometer();
+    if (fileVib)
+    {
+        // Playback of an accelerometer recording: its own roles and calibration
+        st.kind = Kind::Running;
+        st.snap = audioProcessor.getVibrationSnapshot();
+        if (! st.snap.valid)
+        {
+            st.snap = {};
+            st.snap.quantity = (int) settings.quantity;
+            const auto tracks = audioProcessor.getFileTracks();
+            for (const auto& t : tracks)
+            {
+                switch (t.role)
+                {
+                    case SensorRole::AccelX:        st.snap.axisMask |= 1; break;
+                    case SensorRole::AccelY:        st.snap.axisMask |= 2; break;
+                    case SensorRole::AccelZ:        st.snap.axisMask |= 4; break;
+                    case SensorRole::AccelUniaxial: st.snap.axisMask |= 1; st.snap.uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+            }
+            for (int a = 0; a < 3; ++a)
+                st.snap.weighting[a] = (int) settings.weighting[a];
+        }
+        st.note = "file playback with recorded roles and calibration";
+    }
+    else if (! anyAccel)
     {
         st.kind = Kind::Hidden;
     }
@@ -615,7 +643,7 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
                 st.snap.weighting[a] = (int) settings.weighting[a];
         }
         if (audioProcessor.isFileModeActive())
-            st.note = "live input only, paused during file playback";
+            st.note = "the played file has no accelerometer tracks";
         else if (missingText.isNotEmpty())
             st.note = missingText;
     }

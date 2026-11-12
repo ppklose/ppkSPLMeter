@@ -467,6 +467,123 @@ TEST_CASE ("Vibration settings JSON export/import", "[vibration][processor][stat
     CHECK (dst->getChannelRole (1) == SensorRole::AccelX);
 }
 
+TEST_CASE ("Vibration WAV recording: tracks, metadata and file playback", "[vibration][processor][wav]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    const auto tmp = juce::File::createTempFile (".wav");
+
+    // Recording: mic on input 1, triax on 2–4 (cal 120 dB → 1 FS = 1 m/s²), input 5 off
+    {
+        Rig rig (5);
+        setParam (*rig.proc, "logDuration", 5.0f);
+        configureTriax (*rig.proc, 1);
+        rig.proc->setChannelRole (4, SensorRole::Off);
+        rig.prepare();
+        CHECK (rig.proc->getRecordedInputs() == std::vector<int> { 0, 1, 2, 3 });
+        rig.run (5.0, [] (int ch, int n)
+        {
+            switch (ch)
+            {
+                case 0:  return sine (1000.0, 0.1, n);
+                case 1:  return sine (80.0, 0.2, n);
+                case 2:  return sine (80.0, 0.4, n);
+                case 3:  return sine (80.0, 0.6, n);
+                default: return 0.5f;
+            }
+        });
+        REQUIRE (rig.proc->saveWavToFile (tmp));
+    }
+
+    // The file: 4 tracks, roles + calibration in the iXML chunk
+    {
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::AudioFormatReader> reader (fmt.createReaderFor (tmp.createInputStream().release(), true));
+        REQUIRE (reader != nullptr);
+        CHECK (reader->numChannels == 4);
+        CHECK (reader->bitsPerSample == 24);
+        std::vector<WavRecording::Track> tracks;
+        REQUIRE (WavRecording::fromJson (reader->metadataValues[juce::WavAudioFormat::aswgUserData], tracks));
+        REQUIRE (tracks.size() == 4);
+        CHECK (tracks[0].role == SensorRole::Mic);
+        CHECK (tracks[1].role == SensorRole::AccelX);
+        CHECK (tracks[3].role == SensorRole::AccelZ);
+        CHECK (tracks[3].input == 3);
+        CHECK (tracks[2].calDb == Approx (120.0));
+
+        juce::AudioBuffer<float> buf (4, (int) reader->lengthInSamples);
+        reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+        CHECK (buf.getMagnitude (3, buf.getNumSamples() / 2, 48000) == Approx (0.6).epsilon (0.001));
+        CHECK (buf.getMagnitude (0, buf.getNumSamples() / 2, 48000) == Approx (0.1).epsilon (0.001));
+    }
+
+    // Playback on a mic-only setup: recorded roles + calibration drive the analysis,
+    // the SPL mix uses the Mic track only
+    {
+        Rig rig (2);
+        rig.prepare();
+        rig.proc->loadFile (tmp);
+        CHECK (rig.proc->fileHasAccelerometer());
+        CHECK (rig.proc->isVibrationAvailable());
+        rig.run (4.0, [] (int, int) { return 0.0f; });
+
+        const auto snap = rig.snap();
+        REQUIRE (snap.valid);
+        CHECK (snap.axisMask == 0b111);
+        CHECK (snap.axis[vib::AxisX].rms == Approx (0.2 * kRms).epsilon (0.01));
+        CHECK (snap.axis[vib::AxisZ].rms == Approx (0.6 * kRms).epsilon (0.01));
+        CHECK (rig.proc->copyLog().back().vib.valid);
+
+        const float calOffset = rig.proc->apvts.getRawParameterValue ("calOffset")->load();
+        const float expected  = 20.0f * std::log10 (0.1f * (float) kRms) + calOffset;   // mic track alone
+        CHECK (rig.proc->copyLog().back().rmsSPL == Approx (expected).margin (0.2));
+    }
+    tmp.deleteFile();
+}
+
+TEST_CASE ("Vibration WAV recording: without accelerometer it stays the 3.5.2 stereo file", "[vibration][processor][wav]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    const auto tmp = juce::File::createTempFile (".wav");
+
+    Rig rig (4);
+    setParam (*rig.proc, "logDuration", 2.0f);
+    rig.prepare();
+    CHECK (rig.proc->getRecordedInputs() == std::vector<int> { 0, 1 });
+    rig.run (2.0, [] (int ch, int n) { return sine (440.0, 0.1 * (ch + 1), n); });
+    REQUIRE (rig.proc->saveWavToFile (tmp));
+
+    juce::WavAudioFormat fmt;
+    std::unique_ptr<juce::AudioFormatReader> reader (fmt.createReaderFor (tmp.createInputStream().release(), true));
+    REQUIRE (reader != nullptr);
+    CHECK (reader->numChannels == 2);
+    CHECK (reader->metadataValues[juce::WavAudioFormat::aswgUserData].isEmpty());
+
+    // Playing it back: no accelerometer, both tracks mixed as before
+    Rig player (2);
+    player.prepare();
+    player.proc->loadFile (tmp);
+    CHECK_FALSE (player.proc->fileHasAccelerometer());
+    CHECK_FALSE (player.proc->isVibrationAvailable());
+    reader.reset();
+    tmp.deleteFile();
+}
+
+TEST_CASE ("Vibration WAV recording: role changes switch the recorded tracks", "[vibration][processor][wav]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (6);
+    setParam (*rig.proc, "logDuration", 1.0f);
+    rig.prepare();
+    rig.run (0.1, [] (int, int) { return 0.0f; });
+    CHECK (rig.proc->getRecordedInputs() == std::vector<int> { 0, 1 });
+
+    rig.proc->setChannelRole (5, SensorRole::AccelUniaxial);
+    rig.proc->setChannelRole (2, SensorRole::Off);
+    rig.run (0.1, [] (int, int) { return 0.0f; });   // audio thread takes the new recorder
+    CHECK (rig.proc->getRecordedInputs() == std::vector<int> { 0, 1, 3, 4, 5 });
+}
+
 TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][performance]")
 {
     juce::ScopedJuceInitialiser_GUI juceInit;

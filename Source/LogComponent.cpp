@@ -292,10 +292,11 @@ void LogComponent::timerCallback()
         computeFftBands();
     rows = processor.copyLog();
 
-    const auto validity = processor.getSensorValidity();
-    const bool vibAvailable = SensorConfig::isValid (validity)
-                           && validity != SensorConfig::Validity::NoAccelerometer;
-    const bool uniaxial = validity == SensorConfig::Validity::Uniaxial;
+    // Live accelerometer, or playback of a recording with one
+    const bool vibAvailable = processor.isVibrationAvailable();
+    const auto snap = processor.getVibrationSnapshot();
+    const bool uniaxial = snap.valid ? snap.uniaxial
+                                     : processor.getSensorValidity() == SensorConfig::Validity::Uniaxial;
     if (vibAvailable != vibAvailable_ || uniaxial != vibUniaxial_)
     {
         vibAvailable_ = vibAvailable;

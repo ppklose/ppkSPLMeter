@@ -217,14 +217,7 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     logIntervalSamples = static_cast<int> (0.125 * sampleRate);
     logSampleCounter = 0;
 
-    // WAV circular buffer: sized to current logDuration
-    {
-        const float logDurS = apvts.getRawParameterValue ("logDuration")->load();
-        wavBufSize_ = static_cast<int> (logDurS * sampleRate);
-        wavCircBuf_[0].assign (wavBufSize_, 0.0f);
-        wavCircBuf_[1].assign (wavBufSize_, 0.0f);
-        wavWritePos_.store (0, std::memory_order_relaxed);
-    }
+    // WAV recorder: sized to the current logDuration (built after currentSampleRate is set)
 
     // 20-20k bandpass: 8th-order Butterworth Q values for each biquad stage
     static const double bpQ[kBpStages] = { 0.5098, 0.6013, 0.8999, 2.5629 };
@@ -250,7 +243,7 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         rebuildCorrectionFIR();
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
-    fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
+    fileReadBuffer.setSize (WavRecording::kMaxTracks, samplesPerBlock, false, true, false);   // capacity for 8-track files
 
     // Per-input FFT buffers: grow only (never freed while the GUI may read them).
     // Inputs 1 + 2 always exist so Dual FFT works on mono devices too.
@@ -271,6 +264,9 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     vibActive_ = buildVibrationEngine().release();
     vibWork_ = {};
     vibSnapshot_.write (vibWork_);
+    vibFile_.replaceNow (buildFileVibrationEngine());
+    vibSource_ = 0;
+    rebuildWavRecorder (true);
 
     // A running calibrator measurement was set up for the old rate: abandon it
     calState_.store (CalIdle, std::memory_order_release);
@@ -393,6 +389,20 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             vibSnapshot_.write (vibWork_);   // invalid until the new engine publishes
         }
     }
+    // File playback has its own engine (recorded roles + calibration)
+    if (vibFile_.acquire() && fileMode)
+    {
+        vibWork_ = {};
+        vibSnapshot_.write (vibWork_);
+    }
+    auto* vibEngine = fileMode ? vibFile_.active() : vibActive_;
+    if (vibSource_ != (fileMode ? 1 : 0))
+    {
+        vibSource_ = fileMode ? 1 : 0;   // live ↔ file: start the readings afresh
+        vibWork_ = {};
+        vibSnapshot_.write (vibWork_);
+        if (vibEngine != nullptr) vibEngine->requestReset();
+    }
     if (vibActive_ != nullptr && vibActive_->hasAxes() && ! fileMode)
     {
         if (vibResetRequest_.exchange (false, std::memory_order_acq_rel))
@@ -406,7 +416,6 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
             vibSnapshot_.write (vibWork_);
     }
-    vibLogLive_ = vibActive_ != nullptr && vibActive_->hasAxes() && ! fileMode && vibWork_.valid;
 
     // --- Live input level per channel (Inputs table) ---
     const int numLiveInputs = juce::jmin (getTotalNumInputChannels(), numChannels, SensorConfig::kMaxInputs);
@@ -446,7 +455,7 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
     if (fileMode)
     {
-        fileReadBuffer.setSize (2, numSamples, false, true, true);
+        fileReadBuffer.setSize (fileNumChannels_.load (std::memory_order_relaxed), numSamples, false, true, true);
         juce::AudioSourceChannelInfo info (&fileReadBuffer, 0, numSamples);
         transportSource.getNextAudioBlock (info);
 
@@ -459,22 +468,26 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Push Ch0 + Ch1 to WAV circular buffer (before bandpass/correction)
-    if (wavBufSize_ > 0)
+    // Accelerometer tracks of a recording (before bandpass/correction)
+    if (fileMode && vibEngine != nullptr && vibEngine->hasAxes())
     {
-        const juce::AudioBuffer<float>& wavSrc = fileMode ? fileReadBuffer : buffer;
-        const int nSrc = wavSrc.getNumChannels();
-        const float* ch0 = nSrc > 0 ? wavSrc.getReadPointer (0) : nullptr;
-        const float* ch1 = nSrc > 1 ? wavSrc.getReadPointer (1) : ch0;
-        int pos = wavWritePos_.load (std::memory_order_relaxed);
-        for (int s = 0; s < numSamples; ++s)
+        if (vibResetRequest_.exchange (false, std::memory_order_acq_rel))
+            vibEngine->requestReset();
+        const float* axisIn[3];
+        for (int a = 0; a < 3; ++a)
         {
-            wavCircBuf_[0][pos] = ch0 ? ch0[s] : 0.0f;
-            wavCircBuf_[1][pos] = ch1 ? ch1[s] : 0.0f;
-            if (++pos >= wavBufSize_) pos = 0;
+            const int ch = vibEngine->inputChannel (a);
+            axisIn[a] = (ch >= 0 && ch < fileReadBuffer.getNumChannels()) ? fileReadBuffer.getReadPointer (ch) : nullptr;
         }
-        wavWritePos_.store (pos, std::memory_order_release);
+        if (vibEngine->process (axisIn, numSamples, ! skipMetering, vibWork_))
+            vibSnapshot_.write (vibWork_);
     }
+    vibLogLive_ = vibEngine != nullptr && vibEngine->hasAxes() && vibWork_.valid;
+
+    // WAV recorder (before bandpass/correction)
+    wavRec_.acquire();
+    if (auto* rec = wavRec_.active())
+        rec->push (fileMode ? fileReadBuffer : buffer, numSamples);
 
     // 20Hz-20kHz bandpass (48dB/oct) applied per channel before mono mix
     if (apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f)
@@ -563,16 +576,23 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         chOut[ch] = fftChBuf_[(size_t) ch].load (std::memory_order_acquire);
     }
 
+    // File playback mixes its Mic tracks (all tracks for files without SPLMeter metadata)
+    const float* fileMicIn[WavRecording::kMaxTracks];
+    int fileMicCount = 0;
+    if (fileMode)
+        for (int ch = 0; ch < juce::jmin (fileReadBuffer.getNumChannels(), WavRecording::kMaxTracks); ++ch)
+            if (fileRoles_[(size_t) ch].load (std::memory_order_relaxed) == (int) SensorRole::Mic)
+                fileMicIn[fileMicCount++] = fileReadBuffer.getReadPointer (ch);
+    const float fileScl = 1.0f / static_cast<float> (juce::jmax (1, fileMicCount));
+
     for (int s = 0; s < numSamples; ++s)
     {
         // Mix source channels to mono
         float raw = 0.0f;
         if (fileMode)
         {
-            const int fileCh    = fileReadBuffer.getNumChannels();
-            const float fileScl = fileCh > 0 ? 1.0f / static_cast<float> (fileCh) : 1.0f;
-            for (int ch = 0; ch < fileCh; ++ch)
-                raw += fileReadBuffer.getReadPointer (ch)[s];
+            for (int ch = 0; ch < fileMicCount; ++ch)
+                raw += fileMicIn[ch][s];
             raw *= fileScl;
         }
         else
@@ -1042,39 +1062,62 @@ void SPLMeterAudioProcessor::setAccelCalDb (int ch, double calDb)
     rebuildVibrationEngine();
 }
 
+namespace
+{
+    // Engine for the given channel roles; calOf(ch) gives the calibration of a channel
+    template <typename CalOf>
+    std::unique_ptr<vib::VibrationEngine> makeVibrationEngine (double fs, const vib::VibrationSettings& settings,
+                                                               const SensorConfig::Roles& roles, int numInputs,
+                                                               CalOf&& calOf)
+    {
+        vib::AxisInput axes[3];
+        bool uniaxial = false;
+        if (SensorConfig::isValid (SensorConfig::validate (roles, numInputs)))
+        {
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                int axis = -1;
+                switch (roles[(size_t) ch])
+                {
+                    case SensorRole::AccelX:        axis = vib::AxisX; break;
+                    case SensorRole::AccelY:        axis = vib::AxisY; break;
+                    case SensorRole::AccelZ:        axis = vib::AxisZ; break;
+                    case SensorRole::AccelUniaxial: axis = vib::AxisX; uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+                if (axis >= 0)
+                    axes[axis] = { ch, calOf (ch) };
+            }
+        }
+        // Without a (valid) accelerometer this is an empty engine: hasAxes() == false
+        return std::make_unique<vib::VibrationEngine> (fs, settings, axes, uniaxial);
+    }
+}
+
+std::unique_ptr<vib::VibrationEngine> SPLMeterAudioProcessor::buildFileVibrationEngine() const
+{
+    auto roles = SensorConfig::defaultRoles();
+    const int n = juce::jmin ((int) fileTracks_.size(), WavRecording::kMaxTracks);
+    for (int t = 0; t < n; ++t)
+        roles[(size_t) t] = fileTracks_[(size_t) t].role;
+    return makeVibrationEngine (currentSampleRate, getVibrationSettings(), roles, n,
+                                [this] (int t) { return fileTracks_[(size_t) t].calDb; });
+}
+
 std::unique_ptr<vib::VibrationEngine> SPLMeterAudioProcessor::buildVibrationEngine() const
 {
-    vib::AxisInput axes[3];
-    bool uniaxial = false;
-    const auto roles = getChannelRoles();
-    const int  numInputs = juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs);
-
-    if (SensorConfig::isValid (SensorConfig::validate (roles, numInputs)))
-    {
-        for (int ch = 0; ch < numInputs; ++ch)
-        {
-            int axis = -1;
-            switch (roles[(size_t) ch])
-            {
-                case SensorRole::AccelX:        axis = vib::AxisX; break;
-                case SensorRole::AccelY:        axis = vib::AxisY; break;
-                case SensorRole::AccelZ:        axis = vib::AxisZ; break;
-                case SensorRole::AccelUniaxial: axis = vib::AxisX; uniaxial = true; break;
-                case SensorRole::Mic:
-                case SensorRole::Off:           break;
-            }
-            if (axis >= 0)
-                axes[axis] = { ch, getAccelCalDb (ch) };
-        }
-    }
-    // Without a (valid) accelerometer this is an empty engine: hasAxes() == false
-    return std::make_unique<vib::VibrationEngine> (currentSampleRate, getVibrationSettings(), axes, uniaxial);
+    return makeVibrationEngine (currentSampleRate, getVibrationSettings(), getChannelRoles(),
+                                juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs),
+                                [this] (int ch) { return getAccelCalDb (ch); });
 }
 
 void SPLMeterAudioProcessor::rebuildVibrationEngine()
 {
     delete vibRetired_.exchange (nullptr, std::memory_order_acq_rel);   // no longer used by the audio thread
     delete vibPending_.exchange (buildVibrationEngine().release(), std::memory_order_acq_rel);
+    vibFile_.publish (buildFileVibrationEngine());   // follows settings changes
+    rebuildWavRecorder (false);                       // follows role changes
 }
 
 SensorConfig::Roles SPLMeterAudioProcessor::getChannelRoles() const noexcept
@@ -1261,8 +1304,28 @@ void SPLMeterAudioProcessor::loadFile (const juce::File& file)
     auto* reader = formatManager.createReaderFor (file);
     if (reader == nullptr) return;
 
+    // Track roles + calibration of an SPLMeter recording (spec §7.5); other
+    // files: every channel is a microphone channel, as before
+    std::vector<WavRecording::Track> tracks;
+    if (! WavRecording::fromJson (reader->metadataValues.getValue (juce::WavAudioFormat::aswgUserData, {}), tracks))
+        tracks.clear();
+    const int fileChannels = (int) reader->numChannels;
+    tracks.resize ((size_t) juce::jmin (fileChannels, WavRecording::kMaxTracks));   // missing entries: Mic
+    fileTracks_ = tracks;
+    bool anyAccel = false;
+    for (int t = 0; t < WavRecording::kMaxTracks; ++t)
+    {
+        const auto role = t < (int) tracks.size() ? tracks[(size_t) t].role : SensorRole::Mic;
+        fileRoles_[(size_t) t].store ((int) role, std::memory_order_relaxed);
+        anyAccel = anyAccel || SensorConfig::isAccel (role);
+    }
+    fileHasAccel_.store (anyAccel);
+    fileNumChannels_.store (juce::jlimit (2, WavRecording::kMaxTracks, fileChannels));
+    vibFile_.publish (buildFileVibrationEngine());
+
     auto newSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
-    transportSource.setSource (newSource.get(), 0, nullptr, reader->sampleRate);
+    // Up to 8 tracks (the transport passes only 2 channels by default)
+    transportSource.setSource (newSource.get(), 0, nullptr, reader->sampleRate, WavRecording::kMaxTracks);
     readerSource = std::move (newSource);
 
     transportSource.setPosition (0.0);
@@ -1549,40 +1612,73 @@ void SPLMeterAudioProcessor::clearGraphOverlay2()
 //==============================================================================
 bool SPLMeterAudioProcessor::saveWavToFile (const juce::File& destFile)
 {
-    if (wavBufSize_ <= 0 || currentSampleRate < 1.0) return false;
+    const auto* rec = wavRec_.current();
+    if (rec == nullptr || currentSampleRate < 1.0) return false;
 
-    const float logDurS        = apvts.getRawParameterValue ("logDuration")->load();
-    const int   numSamplesToSave = juce::jmin (wavBufSize_,
-                                               static_cast<int> (logDurS * currentSampleRate));
+    const float logDurS          = apvts.getRawParameterValue ("logDuration")->load();
+    const int   numSamplesToSave = juce::jmin (rec->size(), static_cast<int> (logDurS * currentSampleRate));
     if (numSamplesToSave <= 0) return false;
 
-    // Snapshot: copy the most recent numSamplesToSave samples from the circular buffer.
-    // Reading across the audio-thread write is a benign race for audio data.
-    const int writePos = wavWritePos_.load (std::memory_order_acquire);
+    const auto snapBuf = rec->snapshot (numSamplesToSave);
 
-    juce::AudioBuffer<float> snapBuf (2, numSamplesToSave);
-    float* out0 = snapBuf.getWritePointer (0);
-    float* out1 = snapBuf.getWritePointer (1);
-
-    for (int s = 0; s < numSamplesToSave; ++s)
+    // Track roles + calibration (only for accelerometer recordings: the default
+    // stereo recording stays as in 3.5.2)
+    juce::StringPairArray metadata;
+    std::vector<WavRecording::Track> tracks;
+    bool anyAccel = false;
+    for (int input : rec->inputs())
     {
-        const int readPos = (writePos - numSamplesToSave + s + wavBufSize_) % wavBufSize_;
-        out0[s] = wavCircBuf_[0][readPos];
-        out1[s] = wavCircBuf_[1][readPos];
+        WavRecording::Track t;
+        t.input = input;
+        t.role  = getChannelRole (input);
+        t.calDb = getAccelCalDb (input);
+        t.name  = getChannelName (input);
+        anyAccel = anyAccel || SensorConfig::isAccel (t.role);
+        tracks.push_back (t);
     }
+    if (anyAccel)
+        metadata.set (juce::WavAudioFormat::aswgUserData, WavRecording::toJson (tracks));
 
-    // Write stereo 24-bit WAV
     juce::WavAudioFormat wavFmt;
     auto stream = std::make_unique<juce::FileOutputStream> (destFile);
     if (!stream->openedOk()) return false;
     stream->setPosition (0);
     stream->truncate();
 
-    auto* writer = wavFmt.createWriterFor (stream.release(), currentSampleRate, 2, 24, {}, 0);
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        wavFmt.createWriterFor (stream.get(), currentSampleRate, (unsigned int) snapBuf.getNumChannels(),
+                                24, metadata, 0));
     if (writer == nullptr) return false;
+    stream.release();   // owned by the writer now
+    return writer->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
+}
 
-    std::unique_ptr<juce::AudioFormatWriter> writerOwner (writer);
-    return writerOwner->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
+std::vector<int> SPLMeterAudioProcessor::getRecordedInputs() const
+{
+    if (const auto* rec = wavRec_.current())
+        return rec->inputs();
+    return {};
+}
+
+void SPLMeterAudioProcessor::rebuildWavRecorder (bool audioStopped)
+{
+    auto layout = WavRecording::layoutFor (getChannelRoles(), getTotalNumInputChannels());
+    if (! audioStopped && layout == wavLayout_ && wavRec_.current() != nullptr)
+        return;   // same tracks: keep the recorded history
+    wavLayout_ = layout;
+    const float logDurS = apvts.getRawParameterValue ("logDuration")->load();
+    auto rec = std::make_unique<WavRecording::Recorder> (std::move (layout),
+                                                         static_cast<int> (logDurS * currentSampleRate));
+    if (audioStopped) wavRec_.replaceNow (std::move (rec));
+    else              wavRec_.publish (std::move (rec));
+}
+
+bool SPLMeterAudioProcessor::isVibrationAvailable() const
+{
+    if (isFileModeActive())
+        return fileHasAccelerometer();
+    const auto v = getSensorValidity();
+    return SensorConfig::isValid (v) && v != SensorConfig::Validity::NoAccelerometer;
 }
 
 //==============================================================================

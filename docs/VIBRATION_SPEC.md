@@ -225,7 +225,9 @@ The Settings window has a fixed size and no free space, so the inputs table live
 
 ### 7.5 WAV recording
 
-Extend recording to **all non-Off channels** (up to 8), and write channel roles and calibration as a `iXML` chunk (or a sidecar `.json`). This makes file-mode playback able to re-analyse a vibration recording with correct roles and calibration.
+Without accelerometer roles the recording is unchanged from v3.5.2 (inputs 1 + 2, input 1 twice on mono devices, no metadata). With an accelerometer it records **every non-Off input** (up to 8, 24-bit) and writes each track's input, name, role and calibration as JSON into the iXML chunk's ASWG `userData` field (JUCE writes only ASWG keys into iXML; `Source/WavRecording.h`). The recorder is rebuilt (lock-free hand-over, `Source/RtHandover.h`) when the recorded inputs change; its history then starts afresh.
+
+File playback reads that metadata: Mic tracks feed the SPL mix (all tracks for files without metadata, as before), accelerometer tracks feed a separate vibration engine with the recorded calibration and the current accelerometer settings, so the Vibration panel, timeline and CSV work during playback. The transport passes up to 8 channels.
 
 ## 8. Persistence and export
 

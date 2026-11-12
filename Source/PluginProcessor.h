@@ -12,6 +12,8 @@
 #include "Vibration/VibrationEngine.h"
 #include "Vibration/CalibratorMeasurement.h"
 #include "Vibration/Units.h"
+#include "RtHandover.h"
+#include "WavRecording.h"
 #include <array>
 #include <atomic>
 #include <deque>
@@ -256,8 +258,17 @@ public:
     const std::vector<std::pair<float,float>>& getGraphOverlay2Points() const { return graphOverlay2Points_; }
 
     //==========================================================================
-    // WAV recorder
+    // WAV recorder: inputs 1 + 2, or every non-Off input (≤ 8) with an
+    // accelerometer, with track roles + calibration in the iXML chunk (spec §7.5)
     bool saveWavToFile (const juce::File& destFile);
+    std::vector<int> getRecordedInputs() const;
+
+    // File playback of an SPLMeter recording: the recorded track roles and
+    // calibration drive the mix and the vibration analysis
+    std::vector<WavRecording::Track> getFileTracks() const { return fileTracks_; }
+    bool fileHasAccelerometer() const noexcept { return fileHasAccel_.load(); }
+    // Vibration readings exist: live accelerometer, or playback of a recording with one
+    bool isVibrationAvailable() const;
 
     //==========================================================================
     // Impulse Fidelity
@@ -534,9 +545,18 @@ private:
     juce::String channelNames_[32];
 
     // WAV circular buffer: stereo (Ch0 + Ch1), sized to logDuration at prepareToPlay
-    std::vector<float>  wavCircBuf_[2];
-    std::atomic<int>    wavWritePos_ { 0 };
-    int                 wavBufSize_  { 0 };
+    RtHandover<WavRecording::Recorder> wavRec_;
+    std::vector<int>                   wavLayout_;   // message thread: inputs of the published recorder
+    void rebuildWavRecorder (bool audioStopped);
+
+    // File playback (roles per file channel; Mic for files without SPLMeter metadata)
+    std::array<std::atomic<int>, WavRecording::kMaxTracks> fileRoles_ {};
+    std::atomic<int>                   fileNumChannels_ { 2 };
+    std::atomic<bool>                  fileHasAccel_ { false };
+    std::vector<WavRecording::Track>   fileTracks_;   // message thread
+    RtHandover<vib::VibrationEngine>   vibFile_;      // engine for file playback
+    std::unique_ptr<vib::VibrationEngine> buildFileVibrationEngine() const;
+    int                                vibSource_ = 0;   // audio thread: 0 live, 1 file
 
     // Impulse Fidelity test signal generator + capture
     juce::AudioBuffer<float>  impFidTestSignal_;
