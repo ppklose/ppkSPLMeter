@@ -247,16 +247,21 @@ TEST_CASE ("Processor regression: outputs match golden files", "[regression]")
             REQUIRE (expected.size() == values.size());
 
             int mismatches = 0;
+            float maxDiff = 0.0f;
+            std::string report;
             for (size_t i = 0; i < values.size(); ++i)
             {
                 const auto& [key, actual] = values[i];
                 REQUIRE (key == expected[i].first);
                 const bool ok = exact ? (formatValue (actual) == formatValue (expected[i].second))
                                       : closeEnough (key, expected[i].second, actual);
-                if (! ok && ++mismatches <= 20)
-                    UNSCOPED_INFO (key << ": expected " << formatValue (expected[i].second)
-                                       << ", got " << formatValue (actual));
+                if (ok) continue;
+                maxDiff = std::max (maxDiff, std::fabs (actual - expected[i].second));
+                if (++mismatches <= 20)
+                    report += key + ": expected " + formatValue (expected[i].second)
+                            + ", got " + formatValue (actual) + "\n";
             }
+            INFO (mismatches << " mismatches, max abs diff " << maxDiff << "\n" << report);
             CHECK (mismatches == 0);
         }
     }
