@@ -185,7 +185,12 @@ SPLMeterAudioProcessor::SPLMeterAudioProcessor()
     formatManager.registerBasicFormats();
 }
 
-SPLMeterAudioProcessor::~SPLMeterAudioProcessor() {}
+SPLMeterAudioProcessor::~SPLMeterAudioProcessor()
+{
+    delete vibPending_.exchange (nullptr);
+    delete vibRetired_.exchange (nullptr);
+    delete vibActive_;
+}
 
 //==============================================================================
 void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -257,6 +262,15 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
             fftChBuf_[(size_t) ch].store (fftChStorage_[(size_t) ch].get(), std::memory_order_release);
         }
     }
+
+    // Accelerometer engine for the new sample rate. The audio thread is stopped here,
+    // so the active engine can be replaced directly.
+    delete vibPending_.exchange (nullptr);
+    delete vibRetired_.exchange (nullptr);
+    delete vibActive_;
+    vibActive_ = buildVibrationEngine().release();
+    vibWork_ = {};
+    vibSnapshot_.write (vibWork_);
 
     nonMicScratch_.setSize (juce::jmax (1, juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)),
                             samplesPerBlock, false, true, false);
@@ -359,6 +373,34 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // --- File mode: pull audio from transport instead of live input ---
     const bool fileMode = fileModeActive.load();
+
+    // --- Accelerometer: take over a newly built engine, then feed the live inputs ---
+    // (before bandpass/correction, which never touch accelerometer inputs anyway;
+    //  file playback gets role-aware analysis with multichannel recording, spec §7.5)
+    if (vibPending_.load (std::memory_order_acquire) != nullptr
+        && vibRetired_.load (std::memory_order_acquire) == nullptr)
+    {
+        if (auto* next = vibPending_.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            vibRetired_.store (vibActive_, std::memory_order_release);
+            vibActive_ = next;
+            vibWork_ = {};
+            vibSnapshot_.write (vibWork_);   // invalid until the new engine publishes
+        }
+    }
+    if (vibActive_ != nullptr && vibActive_->hasAxes() && ! fileMode)
+    {
+        if (vibResetRequest_.exchange (false, std::memory_order_acq_rel))
+            vibActive_->requestReset();
+        const float* axisIn[3];
+        for (int a = 0; a < 3; ++a)
+        {
+            const int ch = vibActive_->inputChannel (a);
+            axisIn[a] = (ch >= 0 && ch < numChannels) ? buffer.getReadPointer (ch) : nullptr;
+        }
+        if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
+            vibSnapshot_.write (vibWork_);
+    }
     if (fileMode)
     {
         fileReadBuffer.setSize (2, numSamples, false, true, true);
@@ -784,6 +826,7 @@ void SPLMeterAudioProcessor::restoreStateXml (const juce::XmlElement& xml)
         channelNames_[i] = xml.getStringAttribute ("channelName_" + juce::String (i), "");
     apvts.replaceState (juce::ValueTree::fromXml (xml));
     loadChannelRolesFromState();
+    rebuildVibrationEngine();
 
     // ≤ 3.5.2 sessions have no fftSource: derive it from the legacy Dual FFT flag
     {
@@ -877,6 +920,105 @@ void SPLMeterAudioProcessor::setChannelRole (int ch, SensorRole role)
     const juce::Identifier key ("role" + juce::String (ch));
     if (role == SensorRole::Mic) inputs.removeProperty (key, nullptr);
     else                         inputs.setProperty (key, (int) role, nullptr);
+
+    rebuildVibrationEngine();
+}
+
+//==============================================================================
+// Accelerometer settings and engine
+namespace
+{
+    const juce::Identifier kAccelNode ("Accel");
+    const char* const kWeightingKeys[3] = { "weightingX", "weightingY", "weightingZ" };
+    const char* const kKKeys[3]         = { "kx", "ky", "kz" };
+}
+
+vib::VibrationSettings SPLMeterAudioProcessor::getVibrationSettings() const
+{
+    vib::VibrationSettings s;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (! node.isValid())
+        return s;
+    s.highPassHz = juce::jlimit (0.05, 50.0, (double) node.getProperty ("highPassHz", s.highPassHz));
+    s.quantity   = static_cast<vib::Quantity> (juce::jlimit (0, 2, (int) node.getProperty ("quantity", 0)));
+    for (int a = 0; a < 3; ++a)
+    {
+        s.weighting[a] = static_cast<vib::Weighting> (juce::jlimit (0, (int) vib::Weighting::KB,
+                                                                    (int) node.getProperty (kWeightingKeys[a], 0)));
+        s.k[a] = juce::jlimit (0.0, 5.0, (double) node.getProperty (kKKeys[a], 1.0));
+    }
+    s.bandLowHz  = juce::jlimit (0.1, 1000.0, (double) node.getProperty ("bandLowHz",  s.bandLowHz));
+    s.bandHighHz = juce::jlimit (1.0, 20000.0, (double) node.getProperty ("bandHighHz", s.bandHighHz));
+    s.tauSec     = juce::jlimit (0.01, 10.0, (double) node.getProperty ("tauSec", s.tauSec));
+    return s;
+}
+
+void SPLMeterAudioProcessor::setVibrationSettings (const vib::VibrationSettings& s)
+{
+    auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+    node.setProperty ("highPassHz", s.highPassHz, nullptr);
+    node.setProperty ("quantity",   (int) s.quantity, nullptr);
+    for (int a = 0; a < 3; ++a)
+    {
+        node.setProperty (kWeightingKeys[a], (int) s.weighting[a], nullptr);
+        node.setProperty (kKKeys[a],         s.k[a], nullptr);
+    }
+    node.setProperty ("bandLowHz",  s.bandLowHz,  nullptr);
+    node.setProperty ("bandHighHz", s.bandHighHz, nullptr);
+    node.setProperty ("tauSec",     s.tauSec,     nullptr);
+    rebuildVibrationEngine();
+}
+
+double SPLMeterAudioProcessor::getAccelCalDb (int ch) const
+{
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    const double v = inputs.isValid() ? (double) inputs.getProperty ("cal" + juce::String (ch), 140.0) : 140.0;
+    return juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb, v);
+}
+
+void SPLMeterAudioProcessor::setAccelCalDb (int ch, double calDb)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    getUiState().getOrCreateChildWithName ("Inputs", nullptr)
+        .setProperty ("cal" + juce::String (ch),
+                      juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb, calDb), nullptr);
+    rebuildVibrationEngine();
+}
+
+std::unique_ptr<vib::VibrationEngine> SPLMeterAudioProcessor::buildVibrationEngine() const
+{
+    vib::AxisInput axes[3];
+    bool uniaxial = false;
+    const auto roles = getChannelRoles();
+    const int  numInputs = juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs);
+
+    if (SensorConfig::isValid (SensorConfig::validate (roles, numInputs)))
+    {
+        for (int ch = 0; ch < numInputs; ++ch)
+        {
+            int axis = -1;
+            switch (roles[(size_t) ch])
+            {
+                case SensorRole::AccelX:        axis = vib::AxisX; break;
+                case SensorRole::AccelY:        axis = vib::AxisY; break;
+                case SensorRole::AccelZ:        axis = vib::AxisZ; break;
+                case SensorRole::AccelUniaxial: axis = vib::AxisX; uniaxial = true; break;
+                case SensorRole::Mic:
+                case SensorRole::Off:           break;
+            }
+            if (axis >= 0)
+                axes[axis] = { ch, getAccelCalDb (ch) };
+        }
+    }
+    // Without a (valid) accelerometer this is an empty engine: hasAxes() == false
+    return std::make_unique<vib::VibrationEngine> (currentSampleRate, getVibrationSettings(), axes, uniaxial);
+}
+
+void SPLMeterAudioProcessor::rebuildVibrationEngine()
+{
+    delete vibRetired_.exchange (nullptr, std::memory_order_acq_rel);   // no longer used by the audio thread
+    delete vibPending_.exchange (buildVibrationEngine().release(), std::memory_order_acq_rel);
 }
 
 SensorConfig::Roles SPLMeterAudioProcessor::getChannelRoles() const noexcept

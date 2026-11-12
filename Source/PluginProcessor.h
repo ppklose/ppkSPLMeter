@@ -9,6 +9,7 @@
 #include "TonalityEstimator.h"
 #include "SoundDetective.h"
 #include "SensorConfig.h"
+#include "Vibration/VibrationEngine.h"
 #include <array>
 #include <atomic>
 #include <deque>
@@ -189,7 +190,11 @@ public:
 
     // DIN 15905-5: session-long C-weighted peak (does not decay with peakHoldTime)
     float getSessionPeakDBCSPL () const noexcept { return sessionPeakDBCSPL_.load (std::memory_order_relaxed); }
-    void  resetSessionPeak     ()       noexcept { sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed); }
+    void  resetSessionPeak     ()       noexcept
+    {
+        sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed);
+        resetVibrationStats();   // session statistics reset together (spec §5.3)
+    }
 
     // NIOSH REL: cumulative 8-hour noise-dose percentage (100% = 85 dB(A) for 8 h,
     // 3 dB exchange rate, 80 dB(A) threshold).
@@ -297,6 +302,23 @@ public:
     }
 
     //==========================================================================
+    // Accelerometer (vibration spec §3–§5). Settings persist in UIState/Accel,
+    // per-input calibration in UIState/Inputs ("cal<ch>"). Message thread only.
+    vib::VibrationSettings getVibrationSettings() const;
+    void   setVibrationSettings (const vib::VibrationSettings& settings);
+    double getAccelCalDb (int ch) const;
+    void   setAccelCalDb (int ch, double calDb);
+
+    // Latest readout (published every 125 ms); valid == false without accelerometer
+    vib::VibrationSnapshot getVibrationSnapshot() const noexcept
+    {
+        vib::VibrationSnapshot s;
+        if (! vibSnapshot_.read (s)) s.valid = false;
+        return s;
+    }
+    void resetVibrationStats() noexcept { vibResetRequest_.store (true, std::memory_order_release); }
+
+    //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -309,6 +331,20 @@ private:
     // Sensor roles (audio-thread mirror of UIState/Inputs)
     std::array<std::atomic<int>, SensorConfig::kMaxInputs> channelRoles_ {};
     void loadChannelRolesFromState();
+
+    // Accelerometer engine hand-over (real-time safe): the message thread builds a
+    // complete engine and puts it in vibPending_; the audio thread swaps it in at the
+    // start of a block and parks the previous one in vibRetired_, which the message
+    // thread deletes on its next rebuild (or in the destructor). The audio thread only
+    // swaps when vibRetired_ is empty, so it never allocates or frees.
+    std::unique_ptr<vib::VibrationEngine> buildVibrationEngine() const;
+    void rebuildVibrationEngine();
+    std::atomic<vib::VibrationEngine*>    vibPending_ { nullptr };
+    std::atomic<vib::VibrationEngine*>    vibRetired_ { nullptr };
+    vib::VibrationEngine*                 vibActive_  = nullptr;   // audio thread
+    std::atomic<bool>                     vibResetRequest_ { false };
+    vib::SeqLock<vib::VibrationSnapshot>  vibSnapshot_;
+    vib::VibrationSnapshot                vibWork_;                 // audio thread
 
     // Accelerometer channels are restored from here after the correction
     // convolution, which processes all channels at once (allocated in prepareToPlay)
