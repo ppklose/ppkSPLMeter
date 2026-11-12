@@ -614,3 +614,34 @@ TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][perform
           << withVib * 1000.0 << " ms → vibration overhead " << overheadPct << " % of one core");
     CHECK (overheadPct < 5.0);
 }
+
+TEST_CASE ("Input bus: standalone takes up to 32 inputs, plugins 1-8", "[vibration][processor][bus]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    auto layoutWith = [] (SPLMeterAudioProcessor& p, int inputs)
+    {
+        auto layout = p.getBusesLayout();
+        layout.inputBuses.getReference (0) = juce::AudioChannelSet::discreteChannels (inputs);
+        return p.checkBusesLayoutSupported (layout);
+    };
+
+    juce::AudioProcessor::setTypeOfNextNewPlugin (juce::AudioProcessor::wrapperType_Standalone);
+    auto standalone = std::make_unique<SPLMeterAudioProcessor>();
+    juce::AudioProcessor::setTypeOfNextNewPlugin (juce::AudioProcessor::wrapperType_Undefined);
+    CHECK (layoutWith (*standalone, 1));
+    CHECK (layoutWith (*standalone, 18));
+    CHECK (layoutWith (*standalone, 32));
+    CHECK_FALSE (layoutWith (*standalone, 33));
+
+    auto plugin = std::make_unique<SPLMeterAudioProcessor>();
+    CHECK (layoutWith (*plugin, 8));
+    CHECK_FALSE (layoutWith (*plugin, 18));
+
+    // A 16-input standalone device: roles on input 12+ work end to end
+    REQUIRE (standalone->setBusesLayout ([&] { auto l = standalone->getBusesLayout();
+                                               l.inputBuses.getReference (0) = juce::AudioChannelSet::discreteChannels (16);
+                                               return l; }()));
+    standalone->setChannelRole (12, SensorRole::AccelUniaxial);
+    CHECK (standalone->getSensorValidity() == SensorConfig::Validity::Uniaxial);
+}

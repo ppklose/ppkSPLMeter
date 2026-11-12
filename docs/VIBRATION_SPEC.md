@@ -180,9 +180,9 @@ A profile sets the defaults for weighting, quantity, filters, detectors, k-facto
 
 ## 7. UI
 
-### 7.1 Settings → "Inputs & Sensors" window
+### 7.1 Settings → "Inputs and Sensors" window
 
-The Settings window has a fixed size and no free space, so the inputs table lives in its own resizable window, opened with **Inputs & Sensors…** in the INPUT CHANNELS card (`Source/InputsComponent.h`). The channel buttons in that card show the role as a small tag (X / Y / Z / ACC / OFF).
+The Settings window has a fixed size and no free space, so the inputs table lives in its own resizable window, opened with **Inputs and Sensors…** in the INPUT CHANNELS card (`Source/InputsComponent.h`). The channel buttons in that card show the role as a small tag (X / Y / Z / ACC / OFF).
 
 - A table of the device's input channels (scrolls for up to 32): **Channel · Role · Level meter · level (dBFS for Mic, calibrated m/s² for accelerometer) · Cal (dB) · Calibrate… · last calibration (date · method)**.
 - Role combobox: Mic / Accel X / Accel Y / Accel Z / Accel (uniaxial) / Off. A status line shows the detected sensor ("Triaxial accelerometer: X = IN02, …") or, in red, why the configuration is invalid; invalid rows are tinted red.
@@ -295,6 +295,8 @@ All limit values ship as **editable defaults** in Settings; the report lists the
 ## 10. Plugin specifics
 
 - Input bus: keep 1–8 channels for VST3/AU. Accelerometer roles only make sense when the host provides more than 2 channels. With a stereo track, the Inputs table shows only channels 1–2.
+- Standalone: 1–32 inputs (all the device opens, up to the 32 mute/role slots). Before 3.6, devices with more than 8 open inputs fell back to a single input, because JUCE's player uses the first channel configuration `{1, 1}` when the device layout is rejected.
+- The Inputs and Sensors table lists every active (not muted) input, plus muted inputs that still have a sensor role.
 - DAW sync and pause behaviour apply to vibration detectors as they do to SPL.
 - Vibration values are not exposed as automatable output parameters in this version.
 

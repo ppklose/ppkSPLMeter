@@ -69,8 +69,12 @@ public:
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
     {
+        // The standalone app takes every input the device opens (up to the 32
+        // mute/role slots); plugins keep 1–8 (vibration spec §10). Rejecting a
+        // device with more inputs would make JUCE fall back to a single input.
+        const int maxIns = wrapperType == wrapperType_Standalone ? SensorConfig::kMaxInputs : 8;
         int n = layouts.getMainInputChannels();
-        return n >= 1 && n <= 8;
+        return n >= 1 && n <= maxIns;
     }
 
     //==========================================================================

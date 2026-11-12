@@ -4,7 +4,7 @@
 #include <optional>
 
 //==============================================================================
-// "Inputs & Sensors" window (vibration spec §7.1): a role per input, live level,
+// "Inputs and Sensors" window (vibration spec §7.1): a role per input, live level,
 // accelerometer calibration, and the accelerometer sensor settings.
 namespace InputsUi
 {
@@ -587,6 +587,8 @@ public:
             l->setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
     }
 
+    int channel() const noexcept { return ch_; }
+
     void applyPalette (const Palette& p)
     {
         pal_ = p;
@@ -699,7 +701,7 @@ public:
         };
 
         setupLabel (inputsTitle_, "INPUTS", 11.0f, true);
-        setupLabel (inputsDesc_, "Assign a role to each input. Only Mic inputs feed the SPL meter; "
+        setupLabel (inputsDesc_, "Assign a role to each active (not muted) input. Only Mic inputs feed the SPL meter; "
                                  "accelerometer inputs bypass the mix, bandpass and correction filter.", 11.5f);
         setupLabel (statusLabel_, {}, 13.0f, true);
         const juce::String headers[6] = { "Channel", "Role", "Level", "", U ("Cal (dB re 1 µm/s²)"), "Calibration" };
@@ -909,10 +911,25 @@ private:
 
     int numInputs() const { return juce::jmin (processor_.getTotalNumInputChannels(), SensorConfig::kMaxInputs); }
 
+    // Inputs listed in the table: every active (not muted) input, plus muted ones
+    // that still have a sensor role, so a configured input never disappears
+    std::vector<int> listedChannels() const
+    {
+        std::vector<int> list;
+        for (int ch = 0; ch < numInputs(); ++ch)
+        {
+            const bool muted = processor_.apvts.getRawParameterValue ("channelMute" + juce::String (ch))->load() > 0.5f;
+            if (! muted || processor_.getChannelRole (ch) != SensorRole::Mic)
+                list.push_back (ch);
+        }
+        return list;
+    }
+
     void rebuildRows()
     {
         rows_.clear();
-        for (int ch = 0; ch < numInputs(); ++ch)
+        listed_ = listedChannels();
+        for (int ch : listed_)
         {
             auto row = std::make_unique<InputRow> (processor_, ch);
             row->applyPalette (pal_);
@@ -975,7 +992,7 @@ private:
 
     void timerCallback() override
     {
-        if ((int) rows_.size() != numInputs())
+        if (listedChannels() != listed_)
             rebuildRows();
 
         const auto roles = processor_.getChannelRoles();
@@ -1023,12 +1040,14 @@ private:
             text << U ("   No Mic input — the SPL meter has no signal.");
             if (valid) col = pal_.warn;
         }
+        if (listed_.empty())
+            text = "All inputs are muted. Unmute inputs in Settings to assign roles.";
         statusLabel_.setText (text, juce::dontSendNotification);
         statusLabel_.setColour (juce::Label::textColourId, col);
 
         // Rows: with an invalid configuration, every accelerometer row is marked
-        for (int ch = 0; ch < (int) rows_.size(); ++ch)
-            rows_[(size_t) ch]->refresh (! valid && SensorConfig::isAccel (roles[(size_t) ch]));
+        for (auto& row : rows_)
+            row->refresh (! valid && SensorConfig::isAccel (roles[(size_t) row->channel()]));
 
         // Accelerometer group: shown when any input has an accelerometer role
         bool anyAccel = false;
@@ -1089,6 +1108,7 @@ private:
     juce::Viewport viewport_;
     juce::Component rowsHolder_;
     std::vector<std::unique_ptr<InputRow>> rows_;
+    std::vector<int> listed_;
 
     juce::Label accelTitle_, accelDesc_;
     juce::Label quantityLabel_, highPassLabel_, tauLabel_, bandLabel_, serialLabel_, rangeLabel_;
@@ -1109,7 +1129,7 @@ class InputsWindow  : public juce::DocumentWindow
 {
 public:
     InputsWindow (SPLMeterAudioProcessor& p, bool light)
-        : juce::DocumentWindow ("Inputs & Sensors", juce::Colour (0xff1c1c1e), juce::DocumentWindow::closeButton)
+        : juce::DocumentWindow ("Inputs and Sensors", juce::Colour (0xff1c1c1e), juce::DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (false);
         content_ = new InputsComponent (p, light);

@@ -832,8 +832,8 @@ public:
             addAndMakeVisible (channelMuteButtons[i]);
         }
 
-        // Inputs & Sensors window: sensor roles, accelerometer calibration (vibration spec §7.1)
-        inputsButton.setButtonText (InputsUi::U ("Inputs & Sensors…"));
+        // Inputs and Sensors window: sensor roles, accelerometer calibration (vibration spec §7.1)
+        inputsButton.setButtonText (InputsUi::U ("Inputs and Sensors…"));
         inputsButton.setTooltip ("Assign microphone / accelerometer roles to the inputs and calibrate the accelerometer");
         inputsButton.onClick = [this]
         {
@@ -894,7 +894,7 @@ public:
         setupDescLabel (descFftLabel,       "Spectral engine behind the L_FFT timeline overlay: window, overlap, resolution.");
         setupDescLabel (descSpectroLabel,   "Time-frequency display shown in the Spectrogram window.");
         setupDescLabel (descAnalysisLabel,  "Reference lines, correction filters, and comparison overlays.");
-        setupDescLabel (descChannelsLabel,  InputsUi::U ("Mute or rename input channels (right-click to rename). Roles and accelerometer calibration: Inputs & Sensors."));
+        setupDescLabel (descChannelsLabel,  InputsUi::U ("Mute or rename input channels (right-click to rename). Roles and accelerometer calibration: Inputs and Sensors."));
         addAndMakeVisible (descGeneralLabel);
         addAndMakeVisible (descFftLabel);
         addAndMakeVisible (descSpectroLabel);

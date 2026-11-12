@@ -611,7 +611,7 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
         st.kind = Kind::Message;
         st.messageIsError = true;
         st.message = "Accelerometer roles are invalid (an axis is assigned twice, or uniaxial is mixed with X/Y/Z)."
-                     " Fix them in Settings > Inputs & Sensors.";
+                     " Fix them in Settings > Inputs and Sensors.";
     }
     else if (validity == SensorConfig::Validity::NoAccelerometer)
     {
