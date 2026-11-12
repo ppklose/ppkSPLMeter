@@ -238,6 +238,9 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
     fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
+
+    nonMicScratch_.setSize (juce::jmax (1, juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)),
+                            samplesPerBlock, false, true, false);
 }
 
 void SPLMeterAudioProcessor::releaseResources()
@@ -324,6 +327,17 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             buffer.clear (ch, 0, numSamples);
     }
 
+    // --- Sensor roles: only Mic inputs feed the SPL mix, bandpass and correction ---
+    // (File mode keeps mixing all file channels; role-aware playback follows with
+    //  multichannel recording, vibration spec §7.5.)
+    bool isMic[SensorConfig::kMaxInputs];
+    bool allMic = true;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        isMic[ch] = channelRoles_[(size_t) ch].load (std::memory_order_relaxed) == (int) SensorRole::Mic;
+        allMic = allMic && (isMic[ch] || ch >= numChannels);
+    }
+
     // --- File mode: pull audio from transport instead of live input ---
     const bool fileMode = fileModeActive.load();
     if (fileMode)
@@ -361,12 +375,14 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 20Hz-20kHz bandpass (48dB/oct) applied per channel before mono mix
     if (apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f)
     {
-        auto applyBP = [this] (juce::AudioBuffer<float>& buf)
+        auto applyBP = [this, &isMic] (juce::AudioBuffer<float>& buf, bool respectRoles)
         {
             const int nCh = std::min (buf.getNumChannels(), 8);
             const int nSa = buf.getNumSamples();
             for (int ch = 0; ch < nCh; ++ch)
             {
+                if (respectRoles && ! isMic[ch])
+                    continue;
                 float* data = buf.getWritePointer (ch);
                 for (int st = 0; st < kBpStages; ++st)
                 {
@@ -375,8 +391,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 }
             }
         };
-        if (fileMode) applyBP (fileReadBuffer);
-        else          applyBP (buffer);
+        if (fileMode) applyBP (fileReadBuffer, false);
+        else          applyBP (buffer, true);
     }
 
     // Correction filter (applied after bandpass, before metering)
@@ -401,8 +417,22 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const auto chClamped = juce::jmin (block.getNumChannels(),
                                                (size_t) correctionPreparedCh_);
             auto sub = block.getSubsetChannelBlock (0, chClamped);
+
+            // The convolution runs on all channels at once: keep non-Mic inputs untouched
+            const bool keepNonMic = ! fileMode && ! allMic
+                                 && numSamples <= nonMicScratch_.getNumSamples();
+            if (keepNonMic)
+                for (int ch = 0; ch < juce::jmin ((int) chClamped, nonMicScratch_.getNumChannels()); ++ch)
+                    if (! isMic[ch])
+                        nonMicScratch_.copyFrom (ch, 0, src, ch, 0, numSamples);
+
             juce::dsp::ProcessContextReplacing<float> ctx (sub);
             correctionConv_.process (ctx);
+
+            if (keepNonMic)
+                for (int ch = 0; ch < juce::jmin ((int) chClamped, nonMicScratch_.getNumChannels()); ++ch)
+                    if (! isMic[ch])
+                        src.copyFrom (ch, 0, nonMicScratch_, ch, 0, numSamples);
         }
     }
 
@@ -413,7 +443,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Muted channels have already been zeroed above, so they contribute 0 here.
     int activeChannels = 0;
     for (int ch = 0; ch < numChannels; ++ch)
-        if (buffer.getMagnitude (ch, 0, numSamples) > 1e-9f)
+        if ((ch >= SensorConfig::kMaxInputs || isMic[ch])
+            && buffer.getMagnitude (ch, 0, numSamples) > 1e-9f)
             ++activeChannels;
     if (activeChannels == 0) activeChannels = 1;   // silence guard
     const float channelScale = 1.0f / static_cast<float> (activeChannels);
@@ -439,7 +470,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         else
         {
             for (int ch = 0; ch < numChannels; ++ch)
-                raw += buffer.getReadPointer (ch)[s];
+                if (ch >= SensorConfig::kMaxInputs || isMic[ch])
+                    raw += buffer.getReadPointer (ch)[s];
             raw *= channelScale;
         }
 
@@ -717,6 +749,7 @@ void SPLMeterAudioProcessor::restoreStateXml (const juce::XmlElement& xml)
     for (int i = 0; i < 32; ++i)
         channelNames_[i] = xml.getStringAttribute ("channelName_" + juce::String (i), "");
     apvts.replaceState (juce::ValueTree::fromXml (xml));
+    loadChannelRolesFromState();
 
     // Apply the non-parameter settings held in UIState
     auto ui = getUiState();
@@ -770,6 +803,38 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         restoreStateXml (*xml);
+}
+
+//==============================================================================
+// Sensor roles — persisted in UIState/Inputs as "role<ch>" (non-Mic entries only)
+void SPLMeterAudioProcessor::setChannelRole (int ch, SensorRole role)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    channelRoles_[(size_t) ch].store ((int) role, std::memory_order_relaxed);
+
+    auto inputs = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+    const juce::Identifier key ("role" + juce::String (ch));
+    if (role == SensorRole::Mic) inputs.removeProperty (key, nullptr);
+    else                         inputs.setProperty (key, (int) role, nullptr);
+}
+
+SensorConfig::Roles SPLMeterAudioProcessor::getChannelRoles() const noexcept
+{
+    SensorConfig::Roles r;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+        r[(size_t) ch] = getChannelRole (ch);
+    return r;
+}
+
+void SPLMeterAudioProcessor::loadChannelRolesFromState()
+{
+    const auto inputs = getUiState().getChildWithName ("Inputs");
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const int v = inputs.isValid() ? (int) inputs.getProperty ("role" + juce::String (ch), 0) : 0;
+        channelRoles_[(size_t) ch].store ((int) SensorConfig::fromInt (v), std::memory_order_relaxed);
+    }
 }
 
 //==============================================================================

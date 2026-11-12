@@ -339,6 +339,7 @@ if(SPLMETER_BUILD_TESTS)
     # JUCE modules (linking juce:: modules again would duplicate symbols).
     add_executable(SPLMeterProcessorTests
         Tests/ProcessorRegressionTests.cpp
+        Tests/SensorRoleTests.cpp
     )
     target_link_libraries(SPLMeterProcessorTests PRIVATE
         SPLMeter

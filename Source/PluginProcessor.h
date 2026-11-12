@@ -8,6 +8,8 @@
 #include "ImpulsivenessEstimator.h"
 #include "TonalityEstimator.h"
 #include "SoundDetective.h"
+#include "SensorConfig.h"
+#include <array>
 #include <atomic>
 #include <deque>
 
@@ -269,6 +271,21 @@ public:
     }
 
     //==========================================================================
+    // Sensor roles per input (vibration spec §3.1). Default: all Mic.
+    // Persisted in UIState/Inputs; mirrored into atomics for the audio thread.
+    SensorRole getChannelRole (int ch) const noexcept
+    {
+        jassert (ch >= 0 && ch < SensorConfig::kMaxInputs);
+        return SensorConfig::fromInt (channelRoles_[(size_t) ch].load (std::memory_order_relaxed));
+    }
+    void setChannelRole (int ch, SensorRole role);
+    SensorConfig::Roles getChannelRoles() const noexcept;
+    SensorConfig::Validity getSensorValidity() const noexcept
+    {
+        return SensorConfig::validate (getChannelRoles(), getTotalNumInputChannels());
+    }
+
+    //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -277,6 +294,14 @@ private:
     //==========================================================================
     AWeightingFilter  aWeightL;
     CWeightingFilter  cWeightL;
+
+    // Sensor roles (audio-thread mirror of UIState/Inputs)
+    std::array<std::atomic<int>, SensorConfig::kMaxInputs> channelRoles_ {};
+    void loadChannelRolesFromState();
+
+    // Accelerometer channels are restored from here after the correction
+    // convolution, which processes all channels at once (allocated in prepareToPlay)
+    juce::AudioBuffer<float> nonMicScratch_;
 
     // 20Hz-20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
     static constexpr int kBpStages = 4;
