@@ -17,6 +17,18 @@
 #include <deque>
 
 //==============================================================================
+// Accelerometer values of one log entry (vibration spec §7.3), SI units of the
+// quantity (m/s², m/s, m). Slots X, Y, Z, Σ as vib::Axis.
+struct VibrationLog
+{
+    bool  valid    = false;   // live accelerometer readings in this entry
+    int   quantity = 0;       // vib::Quantity
+    int   axisMask = 0;       // present X/Y/Z
+    bool  uniaxial = false;
+    float rms[4]  {};
+    float peak[4] {};         // max |x| in the last snapshot interval
+};
+
 struct LogEntry
 {
     juce::int64  timestampMs;
@@ -34,6 +46,7 @@ struct LogEntry
     float psychoAnnoyance  = 0.0f;
     float impulsiveness    = 0.0f;
     float tonality         = 0.0f;
+    VibrationLog vib;
 };
 
 //==============================================================================
@@ -334,6 +347,12 @@ public:
     vib::DisplayUnit getVibrationDisplayUnit() const;
     void setVibrationDisplayUnit (vib::DisplayUnit unit);
 
+    // JSON settings export/import (spec §8): "inputs" (role + calibration per input)
+    // and "accel" (sensor settings). Import ignores absent blocks (older files).
+    juce::var getInputsJson() const;
+    juce::var getAccelJson() const;
+    void setInputsAndAccelFromJson (const juce::var& inputs, const juce::var& accel);
+
     // Calibration date/method per input (UIState/Inputs "calDate<ch>", "calMethod<ch>")
     juce::String getAccelCalInfo (int ch) const;     // e.g. "2026-11-12 · calibrator", empty if never
     void setAccelCalInfo (int ch, const juce::String& method);   // stamps today's date
@@ -384,6 +403,7 @@ private:
     std::atomic<bool>                     vibResetRequest_ { false };
     vib::SeqLock<vib::VibrationSnapshot>  vibSnapshot_;
     vib::VibrationSnapshot                vibWork_;                 // audio thread
+    bool                                  vibLogLive_ = false;      // audio thread: vibWork_ is current
 
     // Input level meters (audio thread writes)
     std::array<std::atomic<float>, SensorConfig::kMaxInputs> inputRms_ {}, inputPeak_ {};

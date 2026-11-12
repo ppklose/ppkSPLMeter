@@ -61,6 +61,13 @@ private:
     juce::ToggleButton tonalityVisButton       { "Tonality" };
     juce::ToggleButton bassComfortVisButton    { "Bass LCeq-LAeq" };
 
+    // Vibration traces X / Y / Z / Σ (vibration spec §7.3), shown when an
+    // accelerometer is configured; they take over the right axis
+    juce::ToggleButton vibVisButtons_[4];
+    bool               vibAvailable_ = false;
+    bool               vibUniaxial_  = false;
+    static const juce::Colour colVib[3];   // X orange, Y cyan, Z violet (Σ: text colour)
+
     // FFT
     static constexpr int   kMaxFftOrder = 19;    // 2^19 = 524288, matches PluginProcessor::kFftCircBufSize
     static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (~240 bands)

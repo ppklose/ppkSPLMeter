@@ -209,9 +209,9 @@ The Settings window has a fixed size and no free space, so the inputs table live
 
 ### 7.3 Timeline (LogComponent)
 
-- `LogEntry` gets an optional `VibrationLog` block: per axis running RMS and peak, plus Σ and the profile's main value.
-- New toggles next to dB SPL / dBA / dBC: **Vib X · Y · Z · Σ**.
-- Vibration traces use the **right y-axis** (already used for psychoacoustic metrics) with its own range in `displayUnit`. If a psychoacoustic metric is shown at the same time, the vibration trace takes precedence on the right axis and the metric falls back to its normalized scale.
+- `LogEntry` has a `VibrationLog` block: per slot (X, Y, Z, Σ) running RMS and interval peak in SI units, plus quantity, axis mask and uniaxial flag; `valid` only for live accelerometer readings (not in file mode). The profile's main value follows with step 9.
+- New toggles in the 4th column of the "Left axis" row: **Vib X · Y · Z · Σ** (persisted as `logShowVib*`; Z and Σ on by default; uniaxial shows a single "Vib" toggle). They appear only with a valid accelerometer configuration.
+- Vibration traces use the **right y-axis** with an automatic range in `displayUnit` (linear: 0 … 1/2/5·10ⁿ above the maximum; dB: 10 dB steps, ≥ 20 dB span). If a psychoacoustic metric is shown at the same time, the vibration trace takes the right-axis labels and the metric keeps its own unlabelled scale. Traces have gaps where an entry has no live reading.
 - Colours: X orange, Y cyan, Z violet, Σ white/black (colourblind-safe against the mic's green/red Dual FFT colours).
 
 ### 7.4 FFT and spectrogram
@@ -230,8 +230,8 @@ Extend recording to **all non-Off channels** (up to 8), and write channel roles 
 ## 8. Persistence and export
 
 - All settings in §3 live in `UIState`, so they persist across launches and are part of the plugin state (DAW sessions).
-- JSON settings export/import: new `inputs` array and `accel` object.
-- CSV log export: added columns `vibX_rms, vibY_rms, vibZ_rms, vibSum_rms, vibX_pk, …, vib_main, vib_unit, vib_profile`. These are empty when no accelerometer is configured, so existing column positions stay the same.
+- JSON settings export/import: new `inputs` array (`channel, role, calDb, calDate, calMethod` for every non-default input) and `accel` object (the `UIState/Accel` keys). Import replaces the input setup; files without these blocks (≤ 3.5.2) leave it unchanged.
+- CSV log export: columns `vibX_rms, vibY_rms, vibZ_rms, vibSum_rms, vibX_pk, vibY_pk, vibZ_pk, vibSum_pk, vib_main, vib_unit, vib_profile` appended after `Marker`, in the display unit (`%.6g`). Absent axes and entries without readings are empty, so column positions never move. `vib_main` is Σ (or the single axis) until profiles define it; `vib_profile` is empty until step 9 (`Source/VibrationCsv.h`).
 
 ## 9. Vibration report
 

@@ -406,6 +406,7 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
             vibSnapshot_.write (vibWork_);
     }
+    vibLogLive_ = vibActive_ != nullptr && vibActive_->hasAxes() && ! fileMode && vibWork_.valid;
 
     // --- Live input level per channel (Inputs table) ---
     const int numLiveInputs = juce::jmin (getTotalNumInputChannels(), numChannels, SensorConfig::kMaxInputs);
@@ -775,6 +776,19 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.impulsiveness  = impulsiveness;
     e.tonality       = tonality;
 
+    if (vibLogLive_)
+    {
+        e.vib.valid    = true;
+        e.vib.quantity = vibWork_.quantity;
+        e.vib.axisMask = vibWork_.axisMask;
+        e.vib.uniaxial = vibWork_.uniaxial;
+        for (int a = 0; a < vib::kNumAxisSlots; ++a)
+        {
+            e.vib.rms[a]  = vibWork_.axis[a].rms;
+            e.vib.peak[a] = vibWork_.axis[a].peak;
+        }
+    }
+
     {
         const float N   = loudnessSone;
         const float R   = roughness   / 100.0f;
@@ -1111,6 +1125,79 @@ vib::DisplayUnit SPLMeterAudioProcessor::getVibrationDisplayUnit() const
 void SPLMeterAudioProcessor::setVibrationDisplayUnit (vib::DisplayUnit unit)
 {
     getUiState().getOrCreateChildWithName (kAccelNode, nullptr).setProperty ("displayUnit", (int) unit, nullptr);
+}
+
+namespace
+{
+    // Keys of UIState/Accel exchanged with JSON settings files
+    const char* const kAccelJsonKeys[] = { "highPassHz", "quantity", "weightingX", "weightingY", "weightingZ",
+                                           "kx", "ky", "kz", "bandLowHz", "bandHighHz", "tauSec",
+                                           "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit" };
+}
+
+juce::var SPLMeterAudioProcessor::getInputsJson() const
+{
+    juce::Array<juce::var> list;
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const auto chs = juce::String (ch);
+        if (getChannelRole (ch) == SensorRole::Mic && ! inputs.hasProperty ("cal" + chs))
+            continue;   // defaults are not written
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("channel", ch);
+        o->setProperty ("role", (int) getChannelRole (ch));
+        o->setProperty ("calDb", getAccelCalDb (ch));
+        o->setProperty ("calDate",   inputs.getProperty ("calDate"   + chs, juce::String()));
+        o->setProperty ("calMethod", inputs.getProperty ("calMethod" + chs, juce::String()));
+        list.add (juce::var (o));
+    }
+    return list;
+}
+
+juce::var SPLMeterAudioProcessor::getAccelJson() const
+{
+    auto* o = new juce::DynamicObject();
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (node.isValid())
+        for (auto* key : kAccelJsonKeys)
+            if (node.hasProperty (key))
+                o->setProperty (key, node.getProperty (key));
+    return juce::var (o);
+}
+
+void SPLMeterAudioProcessor::setInputsAndAccelFromJson (const juce::var& inputs, const juce::var& accel)
+{
+    if (auto* list = inputs.getArray())
+    {
+        auto node = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+        node.removeAllProperties (nullptr);   // the file describes the complete input setup
+        for (const auto& v : *list)
+        {
+            const int ch = v.getProperty ("channel", -1);
+            if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+                continue;
+            const auto chs = juce::String (ch);
+            const auto role = SensorConfig::fromInt (v.getProperty ("role", 0));
+            if (role != SensorRole::Mic)
+                node.setProperty ("role" + chs, (int) role, nullptr);
+            if (v.hasProperty ("calDb"))
+                node.setProperty ("cal" + chs, juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb,
+                                                             (double) v.getProperty ("calDb", 140.0)), nullptr);
+            for (auto* key : { "calDate", "calMethod" })
+                if (v.getProperty (key, juce::String()).toString().isNotEmpty())
+                    node.setProperty (key + chs, v.getProperty (key, {}), nullptr);
+        }
+        loadChannelRolesFromState();
+    }
+    if (auto* obj = accel.getDynamicObject())
+    {
+        auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+        for (auto* key : kAccelJsonKeys)
+            if (obj->hasProperty (key))
+                node.setProperty (key, obj->getProperty (key), nullptr);
+    }
+    rebuildVibrationEngine();   // getters clamp every value
 }
 
 juce::String SPLMeterAudioProcessor::getAccelCalInfo (int ch) const

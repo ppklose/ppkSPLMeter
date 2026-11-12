@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "ProcessorTestHelpers.h"
+#include "VibrationCsv.h"
 
 #include <chrono>
 
@@ -365,6 +366,105 @@ TEST_CASE ("Vibration in processor: calibrator measurement on a live input", "[v
         CHECK_FALSE (rig.proc->takeAccelCalibrationResult (r));
         CHECK (rig.proc->startAccelCalibration (3, 159.2));   // idle again
     }
+}
+
+TEST_CASE ("Vibration in processor: log entries carry the vibration readings", "[vibration][processor][log]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (4);
+    configureTriax (*rig.proc, 1);
+    rig.prepare();
+    rig.run (2.0, [] (int ch, int n) { return ch == 0 ? sine (1000.0, 0.1, n) : sine (80.0, 0.5 * ch, n); });
+
+    const auto log = rig.proc->copyLog();
+    REQUIRE (log.size() > 10);
+    const auto& v = log.back().vib;
+    REQUIRE (v.valid);
+    CHECK (v.axisMask == 0b111);
+    CHECK (v.quantity == (int) vib::Quantity::Acceleration);
+    for (int a = 0; a < 3; ++a)
+        CHECK (v.rms[a] == Approx (0.5 * (a + 1) * kRms).epsilon (0.01));
+    CHECK (v.peak[vib::AxisZ] == Approx (1.5).epsilon (0.01));
+
+    // Without accelerometer roles the block stays invalid
+    Rig mic (2);
+    mic.prepare();
+    mic.run (1.0, [] (int, int n) { return sine (1000.0, 0.1, n); });
+    CHECK_FALSE (mic.proc->copyLog().back().vib.valid);
+}
+
+TEST_CASE ("Vibration CSV columns", "[vibration][csv]")
+{
+    // Empty columns keep the positions when there is no accelerometer
+    const auto header = VibrationCsv::header();
+    CHECK (header.startsWith (",vibX_rms,"));
+    const int numColumns = juce::StringArray::fromTokens (header, ",", "").size() - 1;
+    CHECK (VibrationCsv::columns ({}, vib::DisplayUnit::Linear) == juce::String::repeatedString (",", numColumns));
+
+    VibrationLog v;
+    v.valid = true;
+    v.quantity = (int) vib::Quantity::Acceleration;
+    v.axisMask = 0b101;   // X and Z
+    v.rms[0] = 0.5f; v.rms[2] = 2.0f; v.rms[3] = 2.5f;
+    v.peak[0] = 1.0f; v.peak[2] = 4.0f; v.peak[3] = 4.5f;
+    auto cols = juce::StringArray::fromTokens (VibrationCsv::columns (v, vib::DisplayUnit::Linear).substring (1), ",", "");
+    REQUIRE (cols.size() == numColumns);
+    CHECK (cols[0] == "0.5");     // X rms
+    CHECK (cols[1].isEmpty());    // Y absent
+    CHECK (cols[2] == "2");       // Z rms
+    CHECK (cols[3] == "2.5");     // Σ
+    CHECK (cols[7] == "4.5");     // Σ peak
+    CHECK (cols[8] == "2.5");     // main = Σ
+    CHECK (cols[9] == juce::String::fromUTF8 ("m/s\xc2\xb2"));
+
+    // dB, uniaxial: main value is the single axis, no Σ
+    v.uniaxial = true; v.axisMask = 1;
+    cols = juce::StringArray::fromTokens (VibrationCsv::columns (v, vib::DisplayUnit::Db).substring (1), ",", "");
+    CHECK (cols[3].isEmpty());
+    CHECK (cols[8].getDoubleValue() == Approx (20.0 * std::log10 (0.5 / 1.0e-6)).margin (0.001));
+}
+
+TEST_CASE ("Vibration settings JSON export/import", "[vibration][processor][state]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    auto src = std::make_unique<SPLMeterAudioProcessor>();
+    src->setChannelRole (1, SensorRole::AccelX);
+    src->setChannelRole (2, SensorRole::AccelY);
+    src->setChannelRole (4, SensorRole::Off);
+    src->setAccelCalDb (1, 151.5);
+    src->setAccelCalInfo (1, "datasheet");
+    vib::VibrationSettings s;
+    s.weighting[0] = vib::Weighting::Wd;
+    s.tauSec = 0.5;
+    src->setVibrationSettings (s);
+    src->setAccelSensorInfo ({ "SN 1", 1.0, 5000.0 });
+    src->setVibrationDisplayUnit (vib::DisplayUnit::G);
+
+    // Through JSON text, as in the settings file
+    juce::var root (new juce::DynamicObject());
+    root.getDynamicObject()->setProperty ("inputs", src->getInputsJson());
+    root.getDynamicObject()->setProperty ("accel",  src->getAccelJson());
+    const auto parsed = juce::JSON::parse (juce::JSON::toString (root));
+
+    auto dst = std::make_unique<SPLMeterAudioProcessor>();
+    dst->setChannelRole (7, SensorRole::AccelZ);   // replaced by the file's input setup
+    dst->setInputsAndAccelFromJson (parsed["inputs"], parsed["accel"]);
+    CHECK (dst->getChannelRole (1) == SensorRole::AccelX);
+    CHECK (dst->getChannelRole (2) == SensorRole::AccelY);
+    CHECK (dst->getChannelRole (4) == SensorRole::Off);
+    CHECK (dst->getChannelRole (7) == SensorRole::Mic);
+    CHECK (dst->getAccelCalDb (1) == Approx (151.5));
+    CHECK (dst->getAccelCalInfo (1).endsWith ("datasheet"));
+    CHECK (dst->getVibrationSettings().weighting[0] == vib::Weighting::Wd);
+    CHECK (dst->getVibrationSettings().tauSec == Approx (0.5));
+    CHECK (dst->getAccelSensorInfo().serial == "SN 1");
+    CHECK (dst->getVibrationDisplayUnit() == vib::DisplayUnit::G);
+
+    // Files from ≤ 3.5.2 have neither block: nothing changes
+    dst->setInputsAndAccelFromJson (juce::var(), juce::var());
+    CHECK (dst->getChannelRole (1) == SensorRole::AccelX);
 }
 
 TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][performance]")
