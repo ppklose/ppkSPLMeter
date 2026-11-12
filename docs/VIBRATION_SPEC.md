@@ -1,6 +1,6 @@
 # SPLMeter — Vibration Measurement (Accelerometer) Specification
 
-Status: **Draft v0.2** · 2026-11-12 · target: next minor version after v3.5.2
+Status: **Draft v0.2** · 2026-11-12 · target: **v3.6.0**
 (v0.2: open points resolved, weighting parameters and limit values cross-checked against public sources — see §14)
 
 ## 1. Goals
@@ -322,7 +322,7 @@ Manual verification: handheld calibrator per axis; compare a short machinery and
 10. Accumulating detectors: a_w,rms, MTVV, VDV, crest factor, PPV + f_dom, KB_F/KB_Fmax/KB_FTr; session reset integration.
 11. Assessment engine with editable limits (§9.3) and the panel's status dot.
 12. HTML report (§9) with inline SVG charts.
-13. README + user documentation; version bump.
+13. README + user documentation; version bump to **v3.6.0** (CMakeLists.txt, SPLMeter.jucer, JucePluginDefines.h, PluginEditor version label).
 
 ### Later
 
