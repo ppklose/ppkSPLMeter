@@ -39,7 +39,8 @@ struct Scenario
     SignalFn                             signal;
     std::function<void (SPLMeterAudioProcessor&)> configure;
     // Cross-platform absolute tolerance (tolerance mode only; exact mode is always bit-identical)
-    float crossPlatformTol = 1.0e-3f;
+    float crossPlatformTol = 1.0e-3f;   // meter/log values (dB, metric units)
+    float crossPlatformFftTol = 1.0e-6f; // FFT ring-buffer samples (linear FS)
 };
 
 float sine (double freq, double amp, int n)
@@ -92,9 +93,9 @@ std::vector<Scenario> scenarios()
           [] (SPLMeterAudioProcessor& p) { setParam (p, "bandpassEnabled", 1.0f); },
           // The 8th-order float bandpass drives the 5 Hz tone deep into its stopband;
           // rounding residues there differ between arm64/macOS and x86/Linux libm+FMA
-          // (measured max diff 0.067, peak SPL 0.015 dB) and the psychoacoustic
-          // estimators amplify them slightly.
-          0.1f },
+          // (measured max diff 0.067, peak SPL 0.015 dB; FFT samples 2.6e-4 ≈ -72 dBFS)
+          // and the psychoacoustic estimators amplify them slightly.
+          0.1f, 1.0e-3f },
 
         { "stereo_slow_muted", 2, 3.0,
           [] (int ch, int n) { return ch == 0 ? noise (ch, n, 0.1f) : sine (2000.0, 0.5, n); },
@@ -201,13 +202,13 @@ bool envSet (const char* name)
 
 // Tolerance for cross-platform runs: libm and FMA contraction differ between
 // compilers/architectures. Tight enough that any real behaviour change fails.
-bool closeEnough (const std::string& key, float expected, float actual, float absTol)
+bool closeEnough (const std::string& key, float expected, float actual, float absTol, float fftAbsTol)
 {
     if (expected == actual) return true;
     if (std::isnan (expected) || std::isnan (actual)) return std::isnan (expected) && std::isnan (actual);
     const float diff = std::fabs (expected - actual);
     if (key.rfind ("fft", 0) == 0)
-        return diff <= absTol * 1.0e-3f + 1.0e-5f * std::fabs (expected);
+        return diff <= fftAbsTol + 1.0e-5f * std::fabs (expected);
     return diff <= absTol + 1.0e-4f * std::fabs (expected);
 }
 } // namespace
@@ -261,7 +262,8 @@ TEST_CASE ("Processor regression: outputs match golden files", "[regression]")
                 const auto& [key, actual] = values[i];
                 REQUIRE (key == expected[i].first);
                 const bool ok = exact ? (formatValue (actual) == formatValue (expected[i].second))
-                                      : closeEnough (key, expected[i].second, actual, sc.crossPlatformTol);
+                                      : closeEnough (key, expected[i].second, actual,
+                                                     sc.crossPlatformTol, sc.crossPlatformFftTol);
                 if (ok) continue;
                 maxDiff = std::max (maxDiff, std::fabs (actual - expected[i].second));
                 if (++mismatches <= 20)
