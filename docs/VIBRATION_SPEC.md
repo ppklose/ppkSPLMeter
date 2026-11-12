@@ -158,6 +158,12 @@ Unit tests (`Tests/VibrationDspTests.cpp`):
 
 Accumulating detectors (a_w,rms, MTVV, VDV, PPV, KB_FTr) reset together with the existing session reset (the same button that resets `sessionPeakDBCSPL_`). They pause during DAW-sync pauses, like the log.
 
+Implementation (step 10, `Source/Vibration/Detectors.h`): every axis detector accumulates a_w,rms (linear), MTVV (exponential τ = 1 s, independent of the running-RMS τ), VDV, crest factor (peak since reset / a_w,rms), KB_Fmax and KB_FTr (τ = 0.125 s; completed 30 s cycles, the running cycle until the first one completes) and the dominant frequency at the PPV (interpolated zero crossings around the peak; for a peak in the first half-cycle of an event, the following half-cycle). Σ combines the axes with the k-factors: a_w,rms and MTVV as √Σ k²·x², VDV_total = (Σ (k·VDV)⁴)^¼ (ISO 2631-1). A(8) = a_w · √(T / 8 h) with the daily exposure time T (`exposureHours`, default 8 h, in the accelerometer group).
+
+Settling: after an engine is built (start, settings or role change) the filters run for `0.8 s / highPassHz` (0.5 … 10 s) before the detectors start, so the start-up transient of the high-pass, integrators and weightings does not reach PPV, MTVV, KB_Fmax or the crest factor. The readout shows "--" meanwhile. A session reset does not need settling.
+
+Final main values: health = max k·a_w,rms, comfort = Σ a_w,rms (a_v), hand-arm = Σ a_w,rms (a_hv), building perception = max axis KB_Fmax. The panel shows a results line under the header: measured time, then per main value A(8), VDV, MTVV and crest factor (a_w types), KB_FTr (KB), or the PPV axis and f_dom (PPV).
+
 ### 5.4 Publishing to the GUI
 
 As for SPL: the audio thread writes `std::atomic<float>` values, and the GUI polls them at 30 Hz. A `VibrationSnapshot` struct (per axis + Σ: running RMS, peak, plus the profile values) is published through a seqlock, or via a set of atomics with a version counter, so all values in one GUI frame are consistent.
@@ -178,7 +184,7 @@ A profile sets the defaults for weighting, quantity, filters, detectors, k-facto
 | Building – structural (DIN 4150-3) | v | band 1–315 Hz | 0.5 Hz | — | PPV per axis + f_dom | Guideline lines |
 | Custom | any | any | any | any | — | — |
 
-Implementation (step 9, `Source/Vibration/Profiles.h`): the profile is stored as the *base* profile (`UIState/Accel` `profile`); applying it writes its settings, RMS τ (0.125 s for structure-borne and both building profiles, 1 s otherwise), main value and display unit (dB for structure-borne, linear otherwise). "Custom (based on …)" is derived by comparing the current settings with the base profile (the display unit does not count). The main value (`MainValue`: max axis RMS, max k·axis RMS, Σ RMS, max axis peak since reset) is computed into every snapshot and log entry, shown in the panel header and written to the CSV `vib_main`; `vib_profile` holds the profile key, e.g. `custom(hand-arm)`. It can also be chosen freely in the Inputs and Sensors window. Until step 10 the profiles whose main value needs accumulating detectors use the closest running value: health and hand-arm use running RMS instead of a_w,rms / A(8), building perception uses KB_F(t) instead of KB_Fmax / KB_FTr, structural PPV is already the maximum |v| since reset (f_dom follows).
+Implementation (step 9, `Source/Vibration/Profiles.h`): the profile is stored as the *base* profile (`UIState/Accel` `profile`); applying it writes its settings, RMS τ (0.125 s for structure-borne and both building profiles, 1 s otherwise), main value and display unit (dB for structure-borne, linear otherwise). "Custom (based on …)" is derived by comparing the current settings with the base profile (the display unit does not count). The main value (`MainValue`: max axis RMS, max k·axis RMS, Σ RMS, max axis peak since reset) is computed into every snapshot and log entry, shown in the panel header and written to the CSV `vib_main`; `vib_profile` holds the profile key, e.g. `custom(hand-arm)`. It can also be chosen freely in the Inputs and Sensors window. Since step 10 the main values use the accumulating detectors (§5.3).
 
 ## 7. UI
 

@@ -414,7 +414,7 @@ TEST_CASE ("Vibration profiles: definitions follow spec §6", "[vibration][profi
     CHECK (health.k[0] == Approx (1.4));
     CHECK (health.k[2] == Approx (1.0));
     CHECK (health.highPassHz == Approx (0.1));
-    CHECK (health.main == MainValue::MaxAxisKRms);
+    CHECK (health.main == MainValue::MaxAxisKAw);
 
     const auto machinery = def (Profile::MachineryIso20816);
     CHECK (machinery.quantity == Quantity::Velocity);
@@ -424,7 +424,9 @@ TEST_CASE ("Vibration profiles: definitions follow spec §6", "[vibration][profi
     CHECK (def (Profile::MachineryLowSpeed).bandLowHz == Approx (2.0));
 
     CHECK (def (Profile::HandArm).weighting[2] == Weighting::Wh);
-    CHECK (def (Profile::HandArm).main == MainValue::SumRms);
+    CHECK (def (Profile::HandArm).main == MainValue::SumAw);
+    CHECK (def (Profile::WholeBodyComfort).main == MainValue::SumAw);
+    CHECK (def (Profile::BuildingPerception).main == MainValue::MaxAxisKbFmax);
     CHECK (def (Profile::BuildingPerception).weighting[0] == Weighting::KB);
     CHECK (def (Profile::BuildingPerception).tauSec == Approx (0.125));   // KB_F(t)
     CHECK (def (Profile::BuildingStructural).bandHighHz == Approx (315.0));
@@ -482,4 +484,122 @@ TEST_CASE ("Vibration main values", "[vibration][profiles]")
     s.axisMask = 0b100;
     CHECK (computeMainValue (MainValue::SumRms, s, k) == Approx (0.35));
     CHECK (computeMainValue (MainValue::MaxAxisKRms, s, k) == Approx (0.35));
+}
+
+//==============================================================================
+namespace
+{
+template <typename Signal>
+AxisValues runDetector (double fs, double seconds, Signal&& x, double tau = 0.125)
+{
+    AxisDetector d;
+    d.prepare (fs, tau);
+    const auto n = (long long) (seconds * fs);
+    for (long long i = 0; i < n; ++i)
+        d.process (x (i / fs));
+    return d.values();
+}
+} // namespace
+
+TEST_CASE ("Vibration accumulating detectors: a_w,rms, VDV, MTVV, crest factor", "[vibration][detectors]")
+{
+    const double twoPi = 2.0 * kPi, fs = 4000.0;
+    const double A = 2.0, a = A / std::sqrt (2.0), T = 20.0;
+    const auto v = runDetector (fs, T, [&] (double t) { return A * std::sin (twoPi * 50.0 * t); });
+
+    CHECK (v.awRms == Approx (a).epsilon (1e-4));                                  // linear RMS
+    CHECK (v.vdv   == Approx (a * std::pow (1.5 * T, 0.25)).epsilon (1e-4));       // spec §11
+    CHECK (v.mtvv  == Approx (a).epsilon (0.01));
+    CHECK (v.crest == Approx (std::sqrt (2.0)).epsilon (1e-3));
+
+    // MTVV catches a 3 s burst that the linear RMS averages away
+    const auto b = runDetector (fs, 30.0, [&] (double t)
+    {
+        return (t > 10.0 && t < 13.0 ? A : 0.1 * A) * std::sin (twoPi * 50.0 * t);
+    });
+    CHECK (b.mtvv  == Approx (a * std::sqrt (1.0 - std::exp (-3.0))).epsilon (0.02));
+    const double awBurst = a * std::sqrt ((3.0 + 0.01 * 27.0) / 30.0);
+    CHECK (b.awRms == Approx (awBurst).epsilon (0.01));
+    CHECK (b.crest == Approx (A / awBurst).epsilon (0.01));
+}
+
+TEST_CASE ("Vibration accumulating detectors: PPV with dominant frequency", "[vibration][detectors]")
+{
+    const double twoPi = 2.0 * kPi, fs = 4000.0;
+    for (double f : { 4.0, 25.0, 80.0 })
+    {
+        INFO ("f = " << f);
+        // Decaying sine starting at 1 s: the first peak is the PPV
+        const auto v = runDetector (fs, 4.0, [&] (double t)
+        {
+            return t < 1.0 ? 0.0 : 0.012 * std::exp (-1.5 * (t - 1.0)) * std::sin (twoPi * f * (t - 1.0) + 0.3);
+        });
+        CHECK (v.peakMax == Approx (0.012).epsilon (0.15));
+        CHECK (v.fDom == Approx (f).epsilon (0.05));
+    }
+}
+
+TEST_CASE ("Vibration accumulating detectors: KB_Fmax and KB_FTr over 30 s cycles", "[vibration][detectors]")
+{
+    const double twoPi = 2.0 * kPi, fs = 2000.0;
+    // Cycle 1: 0.5 mm/s peak, cycle 2: 1 mm/s, cycle 3: 2 mm/s (rising, so no cycle
+    // inherits the decay of a louder one)
+    const auto v = runDetector (fs, 90.0, [&] (double t)
+    {
+        const double A = t < 30.0 ? 0.5e-3 : (t < 60.0 ? 1.0e-3 : 2.0e-3);
+        return A * std::sin (twoPi * 100.0 * t);
+    }, 1.0);   // the KB detectors use τ = 0.125 s regardless of the running RMS τ
+
+    const double r = 1.0 / std::sqrt (2.0);
+    CHECK (v.kbFmax == Approx (2.0e-3 * r).epsilon (0.01));
+    CHECK (v.kbFTr  == Approx (r * 1.0e-3 * std::sqrt ((0.25 + 1.0 + 4.0) / 3.0)).epsilon (0.01));
+
+    // Before the first cycle completes, KB_FTr is the running cycle's maximum
+    const auto early = runDetector (fs, 10.0, [&] (double t) { return 1.0e-3 * std::sin (twoPi * 100.0 * t); }, 1.0);
+    CHECK (early.kbFTr == Approx (1.0e-3 * r).epsilon (0.01));
+}
+
+TEST_CASE ("Vibration engine: vector sum of the accumulated values", "[vibration][detectors]")
+{
+    VibrationSettings s;
+    s.k[0] = 1.4; s.k[1] = 1.4; s.k[2] = 1.0;
+    s.highPassHz = 1.0;
+    AxisInput axes[3] { { 0, 120.0 }, { 1, 120.0 }, { 2, 120.0 } };   // 1 FS = 1 m/s²
+    VibrationEngine engine (48000.0, s, axes, false);
+
+    const double twoPi = 2.0 * kPi, fs = 48000.0;
+    const double A[3] { 0.5, 0.8, 1.2 };
+    std::vector<float> buf[3];
+    for (auto& b : buf) b.resize (480);
+    VibrationSnapshot snap;
+    long long n = 0;
+    for (int block = 0; block < 1000; ++block)   // 10 s
+    {
+        for (int i = 0; i < 480; ++i, ++n)
+            for (int a = 0; a < 3; ++a)
+                buf[a][(size_t) i] = (float) (A[a] * std::sin (twoPi * (40.0 + 20.0 * a) * n / fs));
+        const float* in[3] { buf[0].data(), buf[1].data(), buf[2].data() };
+        engine.process (in, 480, true, snap);
+    }
+    REQUIRE (snap.valid);
+    double sumAw2 = 0.0, sumVdv4 = 0.0;
+    for (int a = 0; a < 3; ++a)
+    {
+        sumAw2  += s.k[a] * s.k[a] * snap.axis[a].awRms * snap.axis[a].awRms;
+        sumVdv4 += std::pow (s.k[a] * snap.axis[a].vdv, 4.0);
+    }
+    CHECK (snap.axis[AxisSum].awRms == Approx (std::sqrt (sumAw2)).epsilon (1e-4));
+    CHECK (snap.axis[AxisSum].vdv   == Approx (std::pow (sumVdv4, 0.25)).epsilon (1e-4));
+    CHECK (snap.axis[AxisZ].awRms   == Approx (1.2 / std::sqrt (2.0)).epsilon (0.01));
+    CHECK (snap.axis[AxisSum].mtvv  == Approx (std::sqrt (sumAw2)).epsilon (0.02));
+
+    // Main values over the measurement
+    CHECK (computeMainValue (MainValue::MaxAxisKAw, snap, s.k)
+           == Approx (std::max ({ 1.4 * snap.axis[0].awRms, 1.4 * snap.axis[1].awRms, (double) snap.axis[2].awRms })));
+    CHECK (computeMainValue (MainValue::SumAw, snap, s.k) == Approx (snap.axis[AxisSum].awRms));
+
+    const auto summary = summarize (snap, MainValue::SumAw, s.k);
+    CHECK (summary.vdv == Approx (snap.axis[AxisSum].vdv));
+    CHECK (summary.ppvAxis == AxisZ);
+    CHECK (dailyExposureA8 (0.5, 2.0) == Approx (0.25));
 }

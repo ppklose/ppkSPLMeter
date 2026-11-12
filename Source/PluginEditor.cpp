@@ -571,6 +571,9 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
     st.tauSec = settings.tauSec;
     st.profileLabel = audioProcessor.getVibrationProfileLabel();
     st.mainLabel    = audioProcessor.getVibrationMainLabel();
+    for (int a = 0; a < 3; ++a)
+        st.k[a] = settings.k[a];
+    st.exposureHours = audioProcessor.getAccelSensorInfo().exposureHours;
     const auto missingText = missing.isEmpty() ? juce::String()
                            : missing.joinIntoString (", ") + (missing.size() == 1 ? " is" : " are")
                              + " not available on this input";

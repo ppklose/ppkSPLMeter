@@ -51,8 +51,8 @@ inline VibrationSettings makeSettings (Quantity q, Weighting wx, Weighting wy, W
     return s;
 }
 
-// Main values that need the accumulating detectors of step 10 (VDV, A(8), KB_FTr,
-// f_dom) use the closest running value until then.
+// Main values: a_w and a_hv are linear RMS values over the measurement; VDV,
+// A(8), KB_FTr and f_dom are secondary values (panel, report).
 inline const ProfileDefinition& profileDefinition (Profile p)
 {
     using Q = Quantity;
@@ -71,16 +71,16 @@ inline const ProfileDefinition& profileDefinition (Profile p)
           makeSettings (Q::Velocity, W::BandLimit, W::BandLimit, W::BandLimit, 2.0, 1000.0, 1.0, 1, 1, 1, 1.0, M::MaxAxisRms),
           DisplayUnit::Linear },
         { "Whole-body health (ISO 2631-1)", "whole-body-health", "a_w",
-          makeSettings (Q::Acceleration, W::Wd, W::Wd, W::Wk, 10.0, 1000.0, 0.1, 1.4, 1.4, 1.0, 1.0, M::MaxAxisKRms),
+          makeSettings (Q::Acceleration, W::Wd, W::Wd, W::Wk, 10.0, 1000.0, 0.1, 1.4, 1.4, 1.0, 1.0, M::MaxAxisKAw),
           DisplayUnit::Linear },
         { "Whole-body comfort (ISO 2631-1)", "whole-body-comfort", "a_v",
-          makeSettings (Q::Acceleration, W::Wd, W::Wd, W::Wk, 10.0, 1000.0, 0.1, 1, 1, 1, 1.0, M::SumRms),
+          makeSettings (Q::Acceleration, W::Wd, W::Wd, W::Wk, 10.0, 1000.0, 0.1, 1, 1, 1, 1.0, M::SumAw),
           DisplayUnit::Linear },
         { "Hand-arm (ISO 5349-1)", "hand-arm", "a_hv",
-          makeSettings (Q::Acceleration, W::Wh, W::Wh, W::Wh, 10.0, 1000.0, 2.0, 1, 1, 1, 1.0, M::SumRms),
+          makeSettings (Q::Acceleration, W::Wh, W::Wh, W::Wh, 10.0, 1000.0, 2.0, 1, 1, 1, 1.0, M::SumAw),
           DisplayUnit::Linear },
-        { "Building, perception (DIN 4150-2)", "building-perception", "KB_F",
-          makeSettings (Q::Velocity, W::KB, W::KB, W::KB, 10.0, 1000.0, 0.5, 1, 1, 1, 0.125, M::MaxAxisRms),
+        { "Building, perception (DIN 4150-2)", "building-perception", "KB_Fmax",
+          makeSettings (Q::Velocity, W::KB, W::KB, W::KB, 10.0, 1000.0, 0.5, 1, 1, 1, 0.125, M::MaxAxisKbFmax),
           DisplayUnit::Linear },
         { "Building, structural (DIN 4150-3)", "building-structural", "PPV",
           makeSettings (Q::Velocity, W::BandLimit, W::BandLimit, W::BandLimit, 1.0, 315.0, 0.5, 1, 1, 1, 0.125, M::MaxAxisPeakMax),
@@ -127,6 +127,48 @@ inline std::string profileLabel (const VibrationSettings& s, Profile base)
     return std::string ("Custom (based on ") + profileDefinition (base).name + ")";
 }
 
+//==============================================================================
+// Daily exposure A(8) = a_w · √(T / 8 h) (EU 2002/44/EC; ISO 2631-1, ISO 5349-1)
+inline double dailyExposureA8 (double aw, double exposureHours) noexcept
+{
+    return aw * std::sqrt (std::max (0.0, exposureHours) / 8.0);
+}
+
+// Secondary values shown with a main value (panel results line, report)
+struct MeasurementSummary
+{
+    float vdv = 0.0f;     // Σ: VDV_total, max axis: max k·VDV
+    float mtvv = 0.0f;    // Σ or max k·MTVV
+    float crest = 0.0f;   // largest axis crest factor
+    float kbFTr = 0.0f;   // largest axis KB_FTr
+    float ppv = 0.0f;     // largest axis peak since reset
+    float fDom = 0.0f;    // dominant frequency at that peak
+    int   ppvAxis = -1;   // axis of ppv (0–2)
+};
+
+inline MeasurementSummary summarize (const VibrationSnapshot& s, MainValue m, const double (&k)[3]) noexcept
+{
+    MeasurementSummary r;
+    int axes = 0;
+    for (int a = 0; a < 3; ++a)
+    {
+        if (! (s.axisMask & (1 << a))) continue;
+        ++axes;
+        const auto& v = s.axis[a];
+        r.vdv   = std::max (r.vdv,  (float) k[a] * v.vdv);
+        r.mtvv  = std::max (r.mtvv, (float) k[a] * v.mtvv);
+        r.crest = std::max (r.crest, v.crest);
+        r.kbFTr = std::max (r.kbFTr, v.kbFTr);
+        if (v.peakMax > r.ppv) { r.ppv = v.peakMax; r.fDom = v.fDom; r.ppvAxis = a; }
+    }
+    if ((m == MainValue::SumAw || m == MainValue::SumRms) && axes > 1 && ! s.uniaxial)
+    {
+        r.vdv  = s.axis[AxisSum].vdv;
+        r.mtvv = s.axis[AxisSum].mtvv;
+    }
+    return r;
+}
+
 // Symbol of the main value for the panel and report
 inline std::string mainValueLabel (const VibrationSettings& s, Profile base)
 {
@@ -138,6 +180,9 @@ inline std::string mainValueLabel (const VibrationSettings& s, Profile base)
         case MainValue::MaxAxisKRms:    return "max k\xc2\xb7RMS";
         case MainValue::SumRms:         return "\xce\xa3 RMS";
         case MainValue::MaxAxisPeakMax: return "max peak";
+        case MainValue::MaxAxisKAw:     return "max k\xc2\xb7" "a_w";
+        case MainValue::SumAw:          return "\xce\xa3 a_w";
+        case MainValue::MaxAxisKbFmax:  return "KB_Fmax";
         case MainValue::None:           break;
     }
     return {};

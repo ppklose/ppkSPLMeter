@@ -1028,7 +1028,7 @@ vib::VibrationSettings SPLMeterAudioProcessor::getVibrationSettings() const
     s.bandLowHz  = juce::jlimit (0.1, 1000.0, (double) node.getProperty ("bandLowHz",  s.bandLowHz));
     s.bandHighHz = juce::jlimit (1.0, 20000.0, (double) node.getProperty ("bandHighHz", s.bandHighHz));
     s.tauSec     = juce::jlimit (0.01, 10.0, (double) node.getProperty ("tauSec", s.tauSec));
-    s.main       = static_cast<vib::MainValue> (juce::jlimit (0, (int) vib::MainValue::MaxAxisPeakMax,
+    s.main       = static_cast<vib::MainValue> (juce::jlimit (0, vib::kNumMainValues - 1,
                                                               (int) node.getProperty ("mainValue", 0)));
     return s;
 }
@@ -1152,6 +1152,7 @@ SPLMeterAudioProcessor::AccelSensorInfo SPLMeterAudioProcessor::getAccelSensorIn
     info.serial       = node.getProperty ("sensorSerial", juce::String()).toString();
     info.lowerLimitHz = juce::jlimit (0.01, 1000.0,  (double) node.getProperty ("lowerLimitHz", info.lowerLimitHz));
     info.upperLimitHz = juce::jlimit (1.0, 100000.0, (double) node.getProperty ("upperLimitHz", info.upperLimitHz));
+    info.exposureHours = juce::jlimit (0.01, 24.0, (double) node.getProperty ("exposureHours", info.exposureHours));
     return info;
 }
 
@@ -1161,6 +1162,7 @@ void SPLMeterAudioProcessor::setAccelSensorInfo (const AccelSensorInfo& info)
     node.setProperty ("sensorSerial", info.serial,       nullptr);
     node.setProperty ("lowerLimitHz", info.lowerLimitHz, nullptr);
     node.setProperty ("upperLimitHz", info.upperLimitHz, nullptr);
+    node.setProperty ("exposureHours", info.exposureHours, nullptr);
 }
 
 vib::Profile SPLMeterAudioProcessor::getVibrationProfile() const
@@ -1216,7 +1218,7 @@ namespace
     const char* const kAccelJsonKeys[] = { "highPassHz", "quantity", "weightingX", "weightingY", "weightingZ",
                                            "kx", "ky", "kz", "bandLowHz", "bandHighHz", "tauSec",
                                            "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit",
-                                           "mainValue", "profile" };
+                                           "mainValue", "profile", "exposureHours" };
 }
 
 juce::var SPLMeterAudioProcessor::getInputsJson() const

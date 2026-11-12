@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "Vibration/Detectors.h"
 #include "Vibration/Units.h"
+#include "Vibration/Profiles.h"
 
 //==============================================================================
 // Vibration readout below the SPL meter (vibration spec §7.2): one row per axis
@@ -22,6 +23,8 @@ public:
         double            tauSec = 1.0;
         juce::String      profileLabel;     // "Whole-body health (ISO 2631-1)", "Custom (based on …)"
         juce::String      mainLabel;        // symbol of snap.main, e.g. "a_w"
+        double            k[3] { 1.0, 1.0, 1.0 };
+        double            exposureHours = 8.0;   // for A(8)
     };
 
     std::function<void (vib::DisplayUnit)> onUnitChange;
@@ -46,7 +49,7 @@ public:
             case State::Kind::Message: return kPad * 2 + kHeaderH + kRowH;
             case State::Kind::Running: break;
         }
-        return kPad * 2 + kHeaderH + numRows() * kRowH;
+        return kPad * 2 + kHeaderH + kResultsH + numRows() * kRowH;
     }
 
     void setState (const State& s)
@@ -127,6 +130,14 @@ public:
         g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
         g.drawText (headerSummary(), header, juce::Justification::centredLeft, true);
 
+        if (state_.kind == State::Kind::Running)
+        {
+            g.setColour (textSec);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+            g.drawText (resultsLine(), content.removeFromTop (kResultsH).withTrimmedLeft (90),
+                        juce::Justification::centredLeft, true);
+        }
+
         if (state_.kind == State::Kind::Message)
         {
             g.setColour (state_.messageIsError ? bad : textSec);
@@ -197,7 +208,43 @@ public:
     }
 
 private:
-    static constexpr int kMargin = 20, kPad = 8, kHeaderH = 24, kRowH = 28;
+    static constexpr int kMargin = 20, kPad = 8, kHeaderH = 24, kResultsH = 20, kRowH = 28;
+
+    // Accumulated values for the profile's main value (spec §5.3, §6)
+    juce::String resultsLine() const
+    {
+        const auto& s = state_.snap;
+        const auto dot = juce::String::fromUTF8 ("  \xc2\xb7  ");
+        juce::String text = "Measured " + juce::String (s.seconds, 1) + " s";
+        if (! s.valid)
+            return text;
+        const auto q = quantity();
+        const auto unit = juce::String::fromUTF8 (vib::units::label (state_.unit, q));
+        auto value = [&] (float si) { return juce::String (vib::units::format (si, state_.unit, q)) + " " + unit; };
+        const auto m = (vib::MainValue) s.mainKind;
+        const auto sum = vib::summarize (s, m, state_.k);
+
+        if (m == vib::MainValue::MaxAxisKAw || m == vib::MainValue::SumAw)
+        {
+            text << dot << "A(8) " << value ((float) vib::dailyExposureA8 (s.main, state_.exposureHours))
+                 << " (T = " << juce::String (state_.exposureHours, state_.exposureHours < 10.0 ? 2 : 1) << " h)";
+            if (q == vib::Quantity::Acceleration)
+                text << dot << "VDV " << juce::String (sum.vdv, 3) << " m/s^1.75";
+            text << dot << "MTVV " << value (sum.mtvv)
+                 << dot << "crest factor " << juce::String (sum.crest, 1);
+        }
+        else if (m == vib::MainValue::MaxAxisKbFmax)
+        {
+            text << dot << "KB_FTr " << value (sum.kbFTr);
+        }
+        else if (m == vib::MainValue::MaxAxisPeakMax && sum.ppvAxis >= 0)
+        {
+            const char* axis[3] = { "X", "Y", "Z" };
+            text << dot << "on " << (s.uniaxial ? "the axis" : axis[sum.ppvAxis])
+                 << dot << "f_dom " << (sum.fDom > 0.0f ? juce::String (sum.fDom, 1) + " Hz" : juce::String ("--"));
+        }
+        return text;
+    }
 
     struct Row { int slot; juce::String label; juce::Colour colour; };
 

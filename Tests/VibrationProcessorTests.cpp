@@ -95,7 +95,8 @@ TEST_CASE ("Vibration in processor: triaxial RMS, peak, peak-to-peak and vector 
     CHECK (s.axis[vib::AxisX].p2p  == Approx (2.0).epsilon (0.01));
     CHECK (s.axis[vib::AxisY].peakMax == Approx (2.0).epsilon (0.01));
     CHECK (s.axis[vib::AxisSum].rms == Approx (std::sqrt (0.5 + 2.0 + 0.125)).epsilon (0.01));
-    CHECK (s.seconds == Approx (3.0).margin (0.15));
+    // Metered time excludes the filter settling after the engine was built
+    CHECK (s.seconds == Approx (3.0 - vib::VibrationEngine::settlingSeconds (1.0)).margin (0.15));
 
     // The microphone path is unaffected: 0.1 peak sine = −23 dBFS → 104 dB at calOffset 127
     CHECK (rig.proc->getRMSSPL() == Approx (103.99).margin (0.05));
@@ -163,7 +164,7 @@ TEST_CASE ("Vibration in processor: calibration, integration and weighting", "[v
         Rig rig (3);
         configureTriax (*rig.proc, 0, s, 1.0);
         rig.prepare();
-        rig.run (10.0, [] (int, int n) { return sine (8.0, 1.0, n); });
+        rig.run (18.0, [] (int, int n) { return sine (8.0, 1.0, n); });   // 8 s settling at 0.1 Hz
         const auto snap = rig.snap();
         REQUIRE (snap.valid);
         CHECK (snap.weighting[2] == (int) vib::Weighting::Wk);
@@ -524,7 +525,7 @@ TEST_CASE ("Vibration WAV recording: tracks, metadata and file playback", "[vibr
         rig.proc->loadFile (tmp);
         CHECK (rig.proc->fileHasAccelerometer());
         CHECK (rig.proc->isVibrationAvailable());
-        rig.run (4.0, [] (int, int) { return 0.0f; });
+        rig.run (4.8, [] (int, int) { return 0.0f; });   // < 5 s file; settling + τ = 1 s
 
         const auto snap = rig.snap();
         REQUIRE (snap.valid);
@@ -629,6 +630,65 @@ TEST_CASE ("Vibration profiles in processor: apply, custom, main value, persiste
     restored->applyVibrationProfile (vib::Profile::Custom);
     CHECK (restored->getVibrationSettings().highPassHz == Approx (5.0));
     CHECK (restored->getVibrationProfileLabel() == "Custom");
+}
+
+TEST_CASE ("Vibration in processor: accumulated values and session reset", "[vibration][processor][detectors]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (4);
+    configureTriax (*rig.proc, 1);
+    rig.proc->applyVibrationProfile (vib::Profile::HandArm);   // Wh, a_hv = Σ a_w
+    rig.prepare();
+    // 80 Hz (inside the Wh band): 2 / 4 / 6 m/s² peak
+    auto loud  = [] (int ch, int n) { return ch == 0 ? 0.0f : sine (80.0, 2.0 * ch, n); };
+    auto quiet = [] (int ch, int n) { return ch == 0 ? 0.0f : sine (80.0, 0.2 * ch, n); };
+    rig.run (6.0, loud);
+
+    auto snap = rig.snap();
+    REQUIRE (snap.valid);
+    const double settle = vib::VibrationEngine::settlingSeconds (2.0);   // hand-arm HP
+    CHECK (snap.seconds == Approx (6.0 - settle).margin (0.02));
+    CHECK (snap.mainKind == (int) vib::MainValue::SumAw);
+    CHECK (snap.main == Approx (snap.axis[vib::AxisSum].awRms));
+    const float ahvLoud = snap.main;
+    CHECK (ahvLoud > 1.0f);
+
+    // a_w is linear over the measurement: loud part + 6 s quiet
+    rig.run (6.0, quiet);
+    snap = rig.snap();
+    const double tl = 6.0 - settle;
+    CHECK (snap.main == Approx (ahvLoud * std::sqrt ((tl + 0.01 * 6.0) / (tl + 6.0))).epsilon (0.03));
+    CHECK (snap.axis[vib::AxisSum].mtvv == Approx (ahvLoud).epsilon (0.03));   // MTVV keeps the loud part
+
+    // Session reset (the main Reset button) starts all accumulators afresh
+    rig.proc->resetSessionPeak();
+    rig.run (3.0, quiet);
+    snap = rig.snap();
+    CHECK (snap.seconds == Approx (3.0).epsilon (0.02));
+    CHECK (snap.main == Approx (ahvLoud * 0.1f).epsilon (0.05));
+    CHECK (snap.axis[vib::AxisSum].mtvv < 0.2f * ahvLoud);
+}
+
+TEST_CASE ("Vibration in processor: PPV and f_dom are free of the start-up transient", "[vibration][processor][detectors]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (4);
+    configureTriax (*rig.proc, 1);
+    rig.proc->applyVibrationProfile (vib::Profile::BuildingStructural);   // v, 1–315 Hz, HP 0.5 Hz
+    rig.prepare();
+    // Z: 24 Hz, 1.2 m/s² peak → v = 1.2 / (2π·24) = 7.96 mm/s
+    rig.run (6.0, [] (int ch, int n) { return ch == 3 ? sine (24.0, 1.2, n) : 0.0f; });
+
+    const auto snap = rig.snap();
+    REQUIRE (snap.valid);
+    const double ppv = 1.2 / (2.0 * juce::MathConstants<double>::pi * 24.0)
+                     * vib::analogMagnitude (vib::Weighting::BandLimit, 24.0, 1.0, 315.0);
+    CHECK (snap.main == Approx (ppv).epsilon (0.02));
+    CHECK (snap.axis[vib::AxisZ].fDom == Approx (24.0).epsilon (0.02));
+    const auto summary = vib::summarize (snap, vib::MainValue::MaxAxisPeakMax, { 1.0, 1.0, 1.0 });
+    CHECK (summary.ppvAxis == vib::AxisZ);
 }
 
 TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][performance]")

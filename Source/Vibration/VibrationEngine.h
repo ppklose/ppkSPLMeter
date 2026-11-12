@@ -13,8 +13,12 @@ enum class MainValue : int
     MaxAxisRms,       // largest axis running RMS (machinery v_rms, KB_F)
     MaxAxisKRms,      // largest k-weighted axis RMS (ISO 2631-1 health: 1.4·a_wx, 1.4·a_wy, a_wz)
     SumRms,           // vector sum Σ (a_v, a_hv); the axis for a single axis
-    MaxAxisPeakMax    // largest |x| since reset over the axes (PPV)
+    MaxAxisPeakMax,   // largest |x| since reset over the axes (PPV)
+    MaxAxisKAw,       // largest k-weighted a_w,rms over the measurement (ISO 2631-1 health)
+    SumAw,            // Σ of the a_w,rms over the measurement (a_v comfort, a_hv)
+    MaxAxisKbFmax     // largest KB_Fmax over the axes (DIN 4150-2)
 };
+constexpr int kNumMainValues = 8;
 
 inline float computeMainValue (MainValue m, const VibrationSnapshot& s, const double (&k)[3]) noexcept
 {
@@ -30,11 +34,15 @@ inline float computeMainValue (MainValue m, const VibrationSnapshot& s, const do
             case MainValue::MaxAxisKRms:    best = std::max (best, (float) k[a] * s.axis[a].rms); break;
             case MainValue::SumRms:         best = std::max (best, s.axis[a].rms); break;
             case MainValue::MaxAxisPeakMax: best = std::max (best, s.axis[a].peakMax); break;
+            case MainValue::MaxAxisKAw:     best = std::max (best, (float) k[a] * s.axis[a].awRms); break;
+            case MainValue::SumAw:          best = std::max (best, s.axis[a].awRms); break;
+            case MainValue::MaxAxisKbFmax:  best = std::max (best, s.axis[a].kbFmax); break;
             case MainValue::None:           break;
         }
     }
-    if (m == MainValue::SumRms && axes > 1 && ! s.uniaxial)
-        return s.axis[AxisSum].rms;
+    const bool hasSum = axes > 1 && ! s.uniaxial;
+    if (m == MainValue::SumRms && hasSum) return s.axis[AxisSum].rms;
+    if (m == MainValue::SumAw  && hasSum) return s.axis[AxisSum].awRms;
     return best;
 }
 
@@ -68,6 +76,14 @@ class VibrationEngine
 public:
     static constexpr double kSnapshotInterval = 0.125;   // s, like the SPL log
 
+    // Filters settle before the detectors start: the start-up transient of the
+    // high-pass, integrators and weightings would otherwise end up in the
+    // since-reset values (PPV, MTVV, KB_Fmax, crest factor)
+    static double settlingSeconds (double highPassHz) noexcept
+    {
+        return std::clamp (0.8 / std::max (highPassHz, 1.0e-3), 0.5, 10.0);
+    }
+
     VibrationEngine (double fs, const VibrationSettings& settings,
                      const AxisInput (&axes)[3], bool uniaxial)
         : settings_ (settings), uniaxial_ (uniaxial)
@@ -92,6 +108,7 @@ public:
         for (auto& d : detector_)
             d.prepare (fsd_, settings.tauSec);
         intervalSamples_ = std::max (1, (int) std::lround (kSnapshotInterval * fsd_));
+        settleRemaining_ = (long long) std::llround (settlingSeconds (settings.highPassHz) * fsd_);
     }
 
     int  inputChannel (int axis) const noexcept { return input_[axis]; }
@@ -108,6 +125,7 @@ public:
         {
             for (auto& d : detector_) d.reset();
             meteredSamples_ = 0;
+            mtvvSumSq_ = 0.0;
             resetPending_ = false;
         }
 
@@ -123,7 +141,14 @@ public:
                 // All axes share the decimator phase, so they produce samples together
                 produced = channel_[a].process (in[a] != nullptr ? in[a][s] : 0.0f, full, decimated[a]);
             }
-            if (! produced || ! metering)
+            if (! produced)
+                continue;
+            if (settleRemaining_ > 0)
+            {
+                --settleRemaining_;   // filters run, detectors wait (snapshot stays invalid)
+                continue;
+            }
+            if (! metering)
                 continue;
 
             double sumSq = 0.0;
@@ -136,6 +161,13 @@ public:
             }
             detector_[AxisSum].process (std::sqrt (sumSq));
             ++meteredSamples_;
+
+            // Σ MTVV: running 1 s values of the axes, combined with the k-factors
+            double ms1 = 0.0;
+            for (int a = 0; a < 3; ++a)
+                if (input_[a] >= 0)
+                    ms1 += settings_.k[a] * settings_.k[a] * detector_[a].meanSquare1s();
+            mtvvSumSq_ = std::max (mtvvSumSq_, ms1);
 
             if (++intervalCount_ >= intervalSamples_)
             {
@@ -156,19 +188,31 @@ private:
         out.axisMask  = axisMask_;
         out.quantity  = static_cast<int> (settings_.quantity);
         out.seconds   = meteredSamples_ / fsd_;
-        double sumMs  = 0.0;
+        double sumMs = 0.0, sumLin = 0.0, sumVdv4 = 0.0;
         for (int a = 0; a < 3; ++a)
         {
             out.weighting[a] = static_cast<int> (settings_.weighting[a]);
             out.axis[a] = input_[a] >= 0 ? detector_[a].values() : AxisValues {};
             if (input_[a] >= 0)
-                sumMs += settings_.k[a] * settings_.k[a] * detector_[a].meanSquare();
+            {
+                const double k2 = settings_.k[a] * settings_.k[a];
+                sumMs   += k2 * detector_[a].meanSquare();
+                sumLin  += k2 * detector_[a].linearMeanSquare();
+                sumVdv4 += k2 * k2 * detector_[a].fourthPowerIntegral();
+            }
         }
-        // Σ: RMS from the k-weighted axis mean squares (ISO 2631-1 a_v); peaks
-        // from the sample-wise vector magnitude
-        out.axis[AxisSum]     = detector_[AxisSum].values();
-        out.axis[AxisSum].rms = (float) std::sqrt (sumMs);
-        out.axis[AxisSum].p2p = 0.0f;   // not defined for a magnitude
+        // Σ from the k-weighted axis values (ISO 2631-1: a_v, MTVV, VDV_total =
+        // (Σ (k·VDV)⁴)^¼); peaks from the sample-wise vector magnitude
+        auto& sum = out.axis[AxisSum];
+        sum        = detector_[AxisSum].values();
+        sum.rms    = (float) std::sqrt (sumMs);
+        sum.p2p    = 0.0f;   // not defined for a magnitude
+        sum.awRms  = (float) std::sqrt (sumLin);
+        sum.mtvv   = (float) std::sqrt (mtvvSumSq_);
+        sum.vdv    = (float) std::pow (sumVdv4, 0.25);
+        sum.crest  = sum.awRms > 0.0f ? sum.peakMax / sum.awRms : 0.0f;
+        sum.fDom   = 0.0f;
+        sum.kbFmax = sum.kbFTr = 0.0f;   // DIN 4150-2 assesses single axes
         out.mainKind = static_cast<int> (settings_.main);
         out.main     = computeMainValue (settings_.main, out, settings_.k);
     }
@@ -182,6 +226,8 @@ private:
     double            fsd_ = 12000.0;
     int               intervalSamples_ = 1500, intervalCount_ = 0;
     long long         meteredSamples_ = 0;
+    double            mtvvSumSq_ = 0.0;
+    long long         settleRemaining_ = 0;
     bool              resetPending_ = false;
 };
 } // namespace vib

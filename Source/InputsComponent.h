@@ -732,6 +732,9 @@ public:
         mainCombo_.addItem (U ("Max k\xc2\xb7" "axis RMS"), 3);
         mainCombo_.addItem (U ("\xce\xa3 RMS (vector sum)"), 4);
         mainCombo_.addItem ("Max axis peak since reset", 5);
+        mainCombo_.addItem (U ("Max k\xc2\xb7" "a_w over the measurement"), 6);
+        mainCombo_.addItem (U ("\xce\xa3 a_w over the measurement"), 7);
+        mainCombo_.addItem ("Max axis KB_Fmax", 8);
         mainCombo_.onChange = [this] { auto s = processor_.getVibrationSettings();
                                        s.main = (vib::MainValue) (mainCombo_.getSelectedId() - 1);
                                        processor_.setVibrationSettings (s); };
@@ -791,6 +794,11 @@ public:
                                               i.serial = serialEditor_.getText().trim();
                                               processor_.setAccelSensorInfo (i); };
         addAndMakeVisible (serialEditor_);
+        setupLabel (exposureLabel_, "Exposure / day");
+        exposure_.setTooltip (U ("Daily exposure time T for A(8) = a_w \xc2\xb7 sqrt(T / 8 h)"));
+        exposure_.onValueChange = [this] (double v) { auto i = processor_.getAccelSensorInfo();
+                                                      i.exposureHours = v; processor_.setAccelSensorInfo (i); };
+        addAndMakeVisible (exposure_);
         setupLabel (rangeLabel_, "Usable range");
         lowerLimit_.onValueChange = [this] (double v) { auto i = processor_.getAccelSensorInfo();
                                                         i.lowerLimitHz = v; processor_.setAccelSensorInfo (i); };
@@ -822,12 +830,12 @@ public:
             l->setColour (juce::Label::textColourId, pal_.subtext.withAlpha (0.85f));
         for (auto& l : headerLabels_)
             l.setColour (juce::Label::textColourId, pal_.subtext);
-        for (auto* l : { &profileLabel_, &mainLabel_,
+        for (auto* l : { &profileLabel_, &mainLabel_, &exposureLabel_,
                          &quantityLabel_, &highPassLabel_, &tauLabel_, &bandLabel_, &serialLabel_, &rangeLabel_,
                          &weightingLabels_[0], &weightingLabels_[1], &weightingLabels_[2],
                          &kLabels_[0], &kLabels_[1], &kLabels_[2] })
             l->setColour (juce::Label::textColourId, pal_.text);
-        for (auto* f : { &highPass_, &bandLow_, &bandHigh_, &lowerLimit_, &upperLimit_,
+        for (auto* f : { &exposure_, &highPass_, &bandLow_, &bandHigh_, &lowerLimit_, &upperLimit_,
                          &kFields_[0], &kFields_[1], &kFields_[2] })
             f->style (pal_);
         for (auto* c : { &profileCombo_, &mainCombo_, &quantityCombo_, &tauCombo_,
@@ -863,7 +871,7 @@ public:
         accelCard_ = {};
         if (accelVisible_)
         {
-            accelCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 5 * 28 + 4 * 6);
+            accelCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 6 * 28 + 5 * 6);
             page.removeFromBottom (16);
             auto c = accelCard_.reduced (pad);
             accelTitle_.setBounds (c.removeFromTop (16));
@@ -915,6 +923,9 @@ public:
                 r.removeFromRight (8);
                 bandLow_.setBounds (r.reduced (0, 2));
             }
+            c.removeFromTop (6);
+            row = c.removeFromTop (28);
+            cell (row, 0, exposureLabel_, exposure_);
         }
 
         inputsCard_ = page;
@@ -1031,6 +1042,7 @@ private:
             serialEditor_.setText (info.serial, false);
         if (! lowerLimit_.isBeingEdited()) lowerLimit_.setValue (info.lowerLimitHz);
         if (! upperLimit_.isBeingEdited()) upperLimit_.setValue (info.upperLimitHz);
+        if (! exposure_.isBeingEdited())   exposure_.setValue (info.exposureHours);
     }
 
     void timerCallback() override
@@ -1131,7 +1143,7 @@ private:
                                           &mainLabel_, &mainCombo_, &quantityLabel_, &quantityCombo_,
                                           &highPassLabel_, &highPass_, &tauLabel_, &tauCombo_,
                                           &bandLabel_, &bandLow_, &bandHigh_, &serialLabel_, &serialEditor_,
-                                          &rangeLabel_, &lowerLimit_, &upperLimit_ };
+                                          &rangeLabel_, &lowerLimit_, &upperLimit_, &exposureLabel_, &exposure_ };
         for (int a = 0; a < 3; ++a)
         {
             v.push_back (&weightingLabels_[a]); v.push_back (&weightingCombos_[a]);
@@ -1166,6 +1178,8 @@ private:
     NumberField bandLow_ { 0.1, 1000.0, 1, "Hz" }, bandHigh_ { 1.0, 20000.0, 0, "Hz" };
     juce::TextEditor serialEditor_;
     NumberField lowerLimit_ { 0.01, 1000.0, 2, "Hz" }, upperLimit_ { 1.0, 100000.0, 0, "Hz" };
+    juce::Label exposureLabel_;
+    NumberField exposure_ { 0.01, 24.0, 2, "h" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InputsComponent)
 };

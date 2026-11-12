@@ -357,6 +357,7 @@ public:
         juce::String serial;
         double lowerLimitHz = 0.5;      // usable range from the datasheet (spec §3.2)
         double upperLimitHz = 10000.0;
+        double exposureHours = 8.0;     // daily exposure time T for A(8)
     };
     AccelSensorInfo getAccelSensorInfo() const;
     void setAccelSensorInfo (const AccelSensorInfo& info);
