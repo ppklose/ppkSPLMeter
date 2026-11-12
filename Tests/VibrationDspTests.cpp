@@ -1,0 +1,291 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "Vibration/AccelChannel.h"
+
+#include <cmath>
+#include <string>
+#include <vector>
+
+// Vibration spec §4, §5.1, §5.2: calibration, decimation, integration and
+// ISO 8041 weightings of the accelerometer signal chain.
+
+using Catch::Approx;
+using namespace vib;
+
+namespace
+{
+double dB (double m) { return 20.0 * std::log10 (m); }
+
+// 1/3-octave band n: nominal (preferred-number) and exact (10^(n/10)) centre frequencies
+double exactFreq (int band) { return std::pow (10.0, band / 10.0); }
+
+struct RefRow { int band; double nominal; std::vector<double> values; };
+
+// Reference weightings in dB from Virtins Technology (2024), "Frequency Weightings for
+// Sound and Vibration Perceived by Humans" (spec §14 [V]). Only the cleanly extracted
+// rows are used. That table evaluates Wm and Wh at exact 1/3-octave frequencies and
+// the other weightings at nominal frequencies.
+const std::vector<Weighting> kLowCols { Weighting::Wk, Weighting::Wd, Weighting::Wf, Weighting::Wc,
+                                        Weighting::We, Weighting::Wj, Weighting::Wm, Weighting::Wb };
+const std::vector<RefRow> kLowRows {
+    { -10, 0.1,   { -30.11, -24.09,  -3.16, -24.11, -24.08, -30.18, -36.00, -32.04 } },
+    {  -9, 0.125, { -26.26, -20.24,  -0.96, -20.25, -20.22, -26.32, -32.00, -28.20 } },
+    {  -8, 0.16,  { -22.05, -16.01,   0.05, -16.03, -15.98, -22.11, -28.01, -23.98 } },
+    {  -7, 0.2,   { -18.33, -12.28,  -0.07, -12.30, -12.23, -18.38, -24.02, -20.23 } },
+    {  -6, 0.25,  { -14.81,  -8.75,  -1.37,  -8.78,  -8.67, -14.86, -20.05, -16.71 } },
+    {  -5, 0.315, { -11.60,  -5.52,  -4.17,  -5.56,  -5.41, -11.65, -16.12, -13.51 } },
+    {  -4, 0.4,   {  -9.07,  -2.94,  -8.31,  -3.01,  -2.81,  -9.10, -12.29, -10.98 } },
+    {  -3, 0.5,   {  -7.57,  -1.38, -13.00,  -1.48,  -1.29,  -7.60,  -8.67,  -9.53 } },
+    {  -2, 0.63,  {  -6.77,  -0.50, -18.69,  -0.64,  -0.55,  -6.78,  -5.51,  -8.71 } },
+};
+const std::vector<Weighting> kHighCols { Weighting::Wk, Weighting::Wd, Weighting::Wc, Weighting::We,
+                                         Weighting::Wj, Weighting::Wm, Weighting::Wb, Weighting::Wh };
+const std::vector<RefRow> kHighRows {
+    { 10,  10.0, {  -0.10, -13.91,  -2.20, -19.98,   0.26,  -6.12,  -0.23,  -0.43 } },
+    { 11,  12.5, {  -0.89, -15.87,  -3.79, -21.93,   0.22,  -7.71,  -0.85,  -0.38 } },
+    { 12,  16.0, {  -2.28, -18.03,  -5.82, -24.08,   0.16,  -9.44,  -1.83,  -0.96 } },
+    { 13,  20.0, {  -3.93, -19.99,  -7.77, -26.02,   0.10, -11.25,  -3.00,  -2.14 } },
+    { 14,  25.0, {  -5.80, -21.94,  -9.76, -27.97,   0.06, -13.14,  -4.44,  -3.78 } },
+    { 15,  31.5, {  -7.86, -23.98, -11.84, -30.01,   0.00, -15.09,  -6.16,  -5.69 } },
+    { 16,  40.0, { -10.05, -26.13, -14.02, -32.15,  -0.08, -17.10,  -8.11,  -7.72 } },
+    { 17,  50.0, { -12.19, -28.22, -16.13, -34.24,  -0.24, -19.23, -10.09,  -9.78 } },
+    { 18,  63.0, { -14.61, -30.60, -18.53, -36.62,  -0.62, -21.58, -12.43, -11.83 } },
+    { 19,  80.0, { -17.56, -33.53, -21.47, -39.55,  -1.48, -24.38, -15.34, -13.88 } },
+    { 20, 100.0, { -21.04, -36.99, -24.94, -43.01,  -3.01, -27.93, -18.72, -15.91 } },
+    { 21, 125.0, { -25.35, -41.28, -29.24, -47.31,  -5.36, -32.37, -23.00, -17.93 } },
+    { 22, 160.0, { -30.91, -46.84, -34.80, -52.86,  -8.78, -37.55, -28.56, -19.94 } },
+    { 23, 200.0, { -36.38, -52.30, -40.26, -58.33, -12.30, -43.18, -34.03, -21.95 } },
+    { 24, 250.0, { -42.04, -57.97, -45.92, -63.99, -16.03, -49.02, -39.69, -23.96 } },
+    { 25, 315.0, { -48.00, -63.92, -51.88, -69.94, -19.98, -54.95, -45.65, -25.97 } },
+    { 26, 400.0, { -54.20, -70.12, -58.08, -76.14, -24.10, -60.92, -51.84, -28.00 } },
+};
+const std::vector<std::pair<int, double>> kWhHigh {   // Wh only, 500 Hz … 4 kHz
+    { 27, -30.07 }, { 28, -32.23 }, { 29, -34.60 }, { 30, -37.42 }, { 31, -40.97 },
+    { 32, -45.42 }, { 33, -50.60 }, { 34, -56.23 }, { 35, -62.07 }, { 36, -68.01 },
+};
+
+double refFreq (Weighting w, const RefRow& r)
+{
+    return (w == Weighting::Wm || w == Weighting::Wh) ? exactFreq (r.band) : r.nominal;
+}
+
+// Wb rests on a single source and deviates systematically by up to 0.05 dB (spec §13)
+double refTol (Weighting w) { return w == Weighting::Wb ? 0.06 : 0.02; }
+
+const char* nameOf (Weighting w)
+{
+    static const char* names[] = { "None", "BandLimit", "Wb", "Wc", "Wd", "We", "Wf", "Wh", "Wj", "Wk", "Wm", "KB" };
+    return names[static_cast<int> (w)];
+}
+
+// Steady-state RMS of a processed sine (skips the settling time)
+template <typename Fn>
+double sineRms (Fn&& process, double f, double fs, double amp, double settleSec, double measureSec)
+{
+    const int settle  = (int) (settleSec * fs);
+    const int measure = (int) (measureSec * fs);
+    double sum = 0.0; int count = 0;
+    for (int n = 0; n < settle + measure; ++n)
+    {
+        double y;
+        const bool produced = process (amp * std::sin (2.0 * kPi * f * n / fs), y);
+        if (produced && n >= settle) { sum += y * y; ++count; }
+    }
+    return std::sqrt (sum / count);
+}
+} // namespace
+
+//==============================================================================
+TEST_CASE ("Vibration weightings: parameters reproduce the public reference table", "[vibration][weighting]")
+{
+    for (const auto& row : kLowRows)
+        for (size_t c = 0; c < kLowCols.size(); ++c)
+        {
+            const auto w = kLowCols[c];
+            INFO (nameOf (w) << " at " << row.nominal << " Hz");
+            CHECK (dB (analogMagnitude (w, refFreq (w, row))) == Approx (row.values[c]).margin (refTol (w)));
+        }
+    for (const auto& row : kHighRows)
+        for (size_t c = 0; c < kHighCols.size(); ++c)
+        {
+            const auto w = kHighCols[c];
+            INFO (nameOf (w) << " at " << row.nominal << " Hz");
+            CHECK (dB (analogMagnitude (w, refFreq (w, row))) == Approx (row.values[c]).margin (refTol (w)));
+        }
+    for (const auto& [band, value] : kWhHigh)
+    {
+        INFO ("Wh at band " << band);
+        CHECK (dB (analogMagnitude (Weighting::Wh, exactFreq (band))) == Approx (value).margin (0.02));
+    }
+}
+
+TEST_CASE ("Vibration weightings: digital filters match the analog definition", "[vibration][weighting]")
+{
+    // Nominal frequency range per weighting (ISO 2631-1/-2/-4, ISO 5349-1, DIN 4150-2).
+    // Inside: ±0.1 dB (±0.2 dB in the top 1/3 octave, where bilinear warping starts).
+    // Up to two octaves outside: never more than 1 dB *less* attenuation than the analog
+    // weighting; more attenuation is fine once the response is below −40 dB (near the
+    // decimated Nyquist frequency bilinear warping adds attenuation).
+    struct Range { Weighting w; int bandLo, bandHi; };
+    const std::vector<Range> ranges {
+        { Weighting::Wb, -3, 19 }, { Weighting::Wc, -3, 19 }, { Weighting::Wd, -3, 19 },
+        { Weighting::We, -3, 19 }, { Weighting::Wj, -3, 19 }, { Weighting::Wk, -3, 19 },
+        { Weighting::Wm,  0, 19 }, { Weighting::Wf, -10, -3 }, { Weighting::Wh,  9, 30 },
+        { Weighting::KB,  0, 19 },
+    };
+    for (double fs : { 11025.0, 12000.0 })   // decimated rates for 44.1 / 48 / 96 kHz
+        for (const auto& r : ranges)
+        {
+            WeightingFilter filter;
+            filter.prepare (r.w, fs);
+            for (int band = r.bandLo - 6; band <= r.bandHi + 6; ++band)
+            {
+                const double f   = exactFreq (band);
+                const double ref = dB (analogMagnitude (r.w, f));
+                const double dig = dB (filter.magnitude (f));
+                INFO (nameOf (r.w) << " at " << f << " Hz, fs " << fs << ", analog " << ref
+                                   << " dB, digital " << dig << " dB");
+                if (band >= r.bandLo && band <= r.bandHi)
+                {
+                    CHECK (dig == Approx (ref).margin (band == r.bandHi ? 0.2 : 0.1));
+                }
+                else
+                {
+                    CHECK (dig <= ref + 1.0);
+                    if (ref > -40.0)
+                        CHECK (dig >= ref - 1.0);
+                }
+            }
+        }
+}
+
+TEST_CASE ("Vibration weightings: KB and band-limit", "[vibration][weighting]")
+{
+    // KB: first-order high-pass at 5.6 Hz → -3 dB at 5.6 Hz (plus small band-limit effect)
+    CHECK (dB (analogMagnitude (Weighting::KB, 5.6)) == Approx (-3.01).margin (0.05));
+    CHECK (dB (analogMagnitude (Weighting::KB, 20.0)) == Approx (-0.33).margin (0.05));
+
+    // Band-limit 10–1000 Hz (ISO 20816): -3 dB at both corners, flat in between
+    WeightingFilter bl;
+    bl.prepare (Weighting::BandLimit, 12000.0, 10.0, 1000.0);
+    CHECK (dB (bl.magnitude (10.0))   == Approx (-3.01).margin (0.05));
+    CHECK (dB (bl.magnitude (1000.0)) == Approx (-3.01).margin (0.05));
+    CHECK (dB (bl.magnitude (100.0))  == Approx (0.0).margin (0.01));
+
+    WeightingFilter none;
+    none.prepare (Weighting::None, 12000.0);
+    CHECK (none.magnitude (3.0) == Approx (1.0));
+}
+
+//==============================================================================
+TEST_CASE ("Vibration decimator: rate selection, passband and ≥ 90 dB stopband", "[vibration][decimator]")
+{
+    Decimator d;
+    d.prepare (48000.0);  CHECK (d.factor() == 4);  CHECK (d.outputRate (48000.0) == 12000.0);
+    d.prepare (44100.0);  CHECK (d.factor() == 4);  CHECK (d.outputRate (44100.0) == 11025.0);
+    d.prepare (96000.0);  CHECK (d.factor() == 8);
+    d.prepare (192000.0); CHECK (d.factor() == 16);
+    d.prepare (8000.0);   CHECK (d.factor() == 1);
+
+    const HalfBandStage stage;
+    double worstPass = 0.0, worstStop = -1000.0;
+    for (double fn = 0.0; fn <= 0.2; fn += 0.002)  worstPass = std::max (worstPass, std::fabs (dB (stage.magnitude (fn))));
+    for (double fn = 0.3; fn <= 0.5; fn += 0.001)  worstStop = std::max (worstStop, dB (stage.magnitude (fn)));
+    INFO ("passband ripple " << worstPass << " dB, stopband " << worstStop << " dB");
+    CHECK (worstPass < 0.01);
+    CHECK (worstStop < -90.0);
+}
+
+TEST_CASE ("Vibration decimator: passes in-band tones, rejects aliases", "[vibration][decimator]")
+{
+    const double fs = 48000.0;
+    auto rmsAfter = [&] (double f)
+    {
+        Decimator d;
+        d.prepare (fs);
+        return sineRms ([&] (double x, double& y) { return d.push (x, y); }, f, fs, 1.0, 0.05, 0.5);
+    };
+    CHECK (dB (rmsAfter (1000.0) * std::sqrt (2.0)) == Approx (0.0).margin (0.01));
+    CHECK (dB (rmsAfter (4000.0) * std::sqrt (2.0)) == Approx (0.0).margin (0.01));
+    CHECK (dB (rmsAfter (20000.0) * std::sqrt (2.0)) < -90.0);   // would alias to 4 kHz
+    CHECK (dB (rmsAfter (8000.0) * std::sqrt (2.0)) < -90.0);    // would alias to 4 kHz in stage 2
+}
+
+//==============================================================================
+TEST_CASE ("Vibration calibration: calibrator and datasheet methods", "[vibration][calibration]")
+{
+    // A 10 m/s² RMS calibrator reading −20 dBFS RMS → 160 dB; one FS unit = 100 m/s²
+    const double rmsFS = std::pow (10.0, -20.0 / 20.0);
+    const double calDb = calibration::calDbFromCalibrator (rmsFS);
+    CHECK (calDb == Approx (160.0));
+    CHECK (calibration::scale (calDb) * rmsFS == Approx (10.0));
+    CHECK (calibration::levelDb (10.0) == Approx (140.0));
+
+    // Datasheet: 100 mV/g sensor, interface +4 dBu at 0 dBFS
+    const double S   = calibration::mVperMs2FromMVperG (100.0);   // 10.197 mV/(m/s²)
+    const double Vfs = calibration::dBuToVrms (4.0);               // 1.228 Vrms
+    const double cal = calibration::calDbFromDatasheet (Vfs, S);
+    // A full-scale sine (RMS 1/√2 FS) must read V_FS,rms / S m/s² RMS
+    CHECK (calibration::scale (cal) / std::sqrt (2.0) == Approx (Vfs * 1000.0 / S).epsilon (1e-9));
+    CHECK (cal == Approx (120.0 + 20.0 * std::log10 (std::sqrt (2.0) * Vfs * 1000.0 / S)));
+}
+
+//==============================================================================
+TEST_CASE ("Vibration chain: integration to velocity and displacement", "[vibration][chain]")
+{
+    const double fs = 48000.0;
+    const double a  = 1.0;   // m/s² peak
+    for (double f : { 5.0, 10.0, 50.0, 200.0, 1000.0 })
+    {
+        for (auto q : { Quantity::Velocity, Quantity::Displacement })
+        {
+            AccelChannelConfig cfg;
+            cfg.calDb      = 120.0;   // 1 FS unit = 1 m/s²
+            cfg.highPassHz = 1.0;     // f ≥ 5 × corner
+            cfg.quantity   = q;
+            AccelChannel ch;
+            ch.prepare (fs, cfg);
+
+            const double rms = sineRms ([&] (double x, double& y)
+                                        { double full; return ch.process ((float) x, full, y); },
+                                        f, fs, a, 3.0, 2.0);
+            const double w        = 2.0 * kPi * f;
+            const double expected = (q == Quantity::Velocity ? a / w : a / (w * w)) / std::sqrt (2.0);
+            INFO ((q == Quantity::Velocity ? "velocity" : "displacement") << " at " << f << " Hz");
+            CHECK (rms == Approx (expected).epsilon (0.005));
+        }
+    }
+}
+
+TEST_CASE ("Vibration chain: calibrated, weighted acceleration end to end", "[vibration][chain]")
+{
+    const double fs = 48000.0;
+
+    // −20 dBFS sine on a channel calibrated with a 10 m/s² calibrator at −20 dBFS
+    AccelChannelConfig cfg;
+    cfg.calDb      = calibration::calDbFromCalibrator (std::pow (10.0, -20.0 / 20.0));
+    cfg.highPassHz = 0.1;
+    cfg.weighting  = Weighting::Wk;
+    AccelChannel ch;
+    ch.prepare (fs, cfg);
+    CHECK (ch.decimatedRate() == 12000.0);
+
+    const double amp = std::pow (10.0, -20.0 / 20.0) * std::sqrt (2.0);   // −20 dBFS RMS
+    for (double f : { 2.0, 8.0, 31.5 })
+    {
+        ch.reset();
+        double fullSum = 0.0; int fullCount = 0;
+        const double rms = sineRms ([&] (double x, double& y)
+                                    {
+                                        double full;
+                                        const bool produced = ch.process ((float) x, full, y);
+                                        fullSum += full * full; ++fullCount;
+                                        return produced;
+                                    },
+                                    f, fs, amp, 8.0, 4.0);
+        INFO ("Wk at " << f << " Hz");
+        // full-rate acceleration (incl. settling) ≈ 10 m/s² RMS
+        CHECK (std::sqrt (fullSum / fullCount) == Approx (10.0).epsilon (0.01));
+        CHECK (dB (rms / 10.0) == Approx (dB (analogMagnitude (Weighting::Wk, f))).margin (0.1));
+    }
+}

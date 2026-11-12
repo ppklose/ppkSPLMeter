@@ -82,8 +82,8 @@ Calibration works like `calOffset`: a per-channel dB offset that maps dBFS to **
 Two methods are available, per axis, in a calibration dialog:
 
 1. **Handheld calibrator** (preferred): the user mounts the sensor on a calibrator and selects the reference (default **10 m/s² RMS at 159.2 Hz = 140 dB**; also 1 g = 9.80665 m/s² and a custom value). SPLMeter measures for 3 s with a narrow bandpass around the reference frequency and sets `calDb`. It rejects the measurement if the frequency deviates by more than ±5 % or the level fluctuates by more than ±0.2 dB.
-2. **Datasheet**: sensitivity *S* in mV/(m/s²) or mV/g, plus the interface's full-scale input voltage *V_FS* (Vrms or dBu at 0 dBFS).
-   `calDb = 120 + 20·log10(V_FS / S)` with *V_FS* in mV and *S* in mV/(m/s²).
+2. **Datasheet**: sensitivity *S* in mV/(m/s²) or mV/g, plus the interface's full-scale input voltage *V_FS* (Vrms of a full-scale sine, or dBu at 0 dBFS).
+   `calDb = 120 + 20·log10(√2 · V_FS / S)` with *V_FS* in mV RMS and *S* in mV/(m/s²). The √2 is there because sample value 1.0 is the *peak* of a full-scale sine (implemented in `Source/Vibration/Calibration.h`).
 
 The calibration range is wider than `calOffset` (80–180): **60–220 dB**.
 
@@ -94,12 +94,13 @@ The calibration range is wider than `calOffset` (80–180): **60–220 dB**.
 ```
 raw (FS) ─► ×cal (m/s²) ─► HP (Butterworth, 2nd order, highPassHz)
         ├─► full-rate path: FFT buffer, structure-borne detectors, WAV recording
-        └─► decimate ÷D ─► quantity (a / v = ∫a / d = ∬a) ─► weighting ─► detectors
+        └─► quantity (a / v = ∫a / d = ∬a) ─► decimate ÷D ─► weighting ─► detectors
 ```
 
 - **Precision**: all IIR filters in the vibration path use `double` biquads (TDF-II). Poles at 0.4 Hz are very close to z = 1 at 48 kHz.
-- **Decimation**: the low-frequency path runs at `fs_d = fs / D`, where D is the largest power of two that keeps `fs_d ≥ 8 kHz` (44.1 kHz → D = 4, 11.025 kHz; 48 kHz → D = 4, 12 kHz; 96 kHz → D = 8, 12 kHz). 8 kHz is the lowest rate NI supports for Wh (upper band limit 1250 Hz); the whole-body weightings are supported from 1 kHz upward, so one shared decimated rate covers all weightings. A cascade of half-band FIR decimators with ≥ 90 dB stopband rejection is used. Structure-borne profiles use the full-rate path.
-- **Integration**: trapezoidal (bilinear) integrator `H(s) = 1/s`, always cascaded after the HP, so the overall response is stable. Displacement uses two integrators, and the second gets its own HP at the same corner frequency.
+- **Implementation**: header-only classes in `Source/Vibration/` (`Biquad.h`, `Weighting.h`, `Decimator.h`, `Calibration.h`, `AccelChannel.h`), no JUCE dependency, unit-tested in `Tests/VibrationDspTests.cpp`.
+- **Decimation**: the low-frequency path runs at `fs_d = fs / D`, where D is the largest power of two that keeps `fs_d ≥ 8 kHz` (44.1 kHz → D = 4, 11.025 kHz; 48 kHz → D = 4, 12 kHz; 96 kHz → D = 8, 12 kHz). 8 kHz is the lowest rate NI supports for Wh (upper band limit 1250 Hz); the whole-body weightings are supported from 1 kHz upward, so one shared decimated rate covers all weightings. A cascade of half-band FIR decimators (75 taps, Kaiser β = 9: passband ripple 0.0002 dB up to 0.2·fs_in, stopband −92 dB from 0.3·fs_in) is used. Structure-borne profiles use the full-rate path.
+- **Integration**: each integrator is the section `s / (s² + ω_c/Q·s + ω_c²)` at the HP corner (Q = 1/√2), mapped bilinearly: it equals `1/s` above the corner but has no pole at DC, so offsets cannot make it drift. Displacement uses two of them. Integration runs at the **full** rate (0.14 % error at 1 kHz; at 12 kHz it would be 2.3 %), before the decimator.
 
 ### 5.2 Frequency weightings (ISO 8041-1)
 
@@ -132,7 +133,9 @@ Additionally:
 - **Band-limit only**: Butterworth HP/LP with user-defined corners (e.g. 10–1000 Hz for ISO 20816).
 - **None**: unweighted, full band.
 
-Unit tests check each weighting at the nominal 1/3-octave frequencies (0.02 Hz – 4 kHz) against the reference dB table in [V]. The table is computed from the analog transfer functions, which is exactly what our digital filter must reproduce. Tolerance: ±0.1 dB inside the passband.
+Unit tests (`Tests/VibrationDspTests.cpp`):
+- **Parameters vs. reference table [V]** (~300 values): ≤ 0.02 dB for all weightings except Wb (≤ 0.06 dB, systematic ~0.05 dB deviation, single source). Note: [V] evaluates Wm and Wh at exact 1/3-octave frequencies (10^(n/10)) and the others at nominal frequencies.
+- **Digital vs. analog** at fs_d = 11.025 and 12 kHz, within each weighting's nominal range (Wk/Wd/Wc/We/Wj/Wb 0.5–80 Hz, Wm/KB 1–80 Hz, Wf 0.1–0.5 Hz, Wh 8–1000 Hz): ±0.1 dB (±0.2 dB in the top band). Two octaves outside: never more than 1 dB less attenuation than analog.
 
 ### 5.3 Detectors (per axis and for the vector sum)
 

@@ -317,6 +317,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/StateSerializationTests.cpp
         Tests/MarkerTests.cpp
         Tests/LeqTests.cpp
+        Tests/VibrationDspTests.cpp
     )
 
     target_include_directories(SPLMeterTests PRIVATE Source)
