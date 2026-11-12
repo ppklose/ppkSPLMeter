@@ -398,3 +398,88 @@ TEST_CASE ("Vibration display units: conversion, ISO 1683 levels and labels", "[
     CHECK (format (0.0012345, DisplayUnit::Linear, Quantity::Velocity) == "1.23");
     CHECK (format (10.0, DisplayUnit::Db, Quantity::Acceleration) == "140.0");
 }
+
+//==============================================================================
+#include "Vibration/Profiles.h"
+
+TEST_CASE ("Vibration profiles: definitions follow spec §6", "[vibration][profiles]")
+{
+    auto def = [] (Profile p) { return profileDefinition (p).settings; };
+
+    const auto health = def (Profile::WholeBodyHealth);
+    CHECK (health.quantity == Quantity::Acceleration);
+    CHECK (health.weighting[0] == Weighting::Wd);
+    CHECK (health.weighting[1] == Weighting::Wd);
+    CHECK (health.weighting[2] == Weighting::Wk);
+    CHECK (health.k[0] == Approx (1.4));
+    CHECK (health.k[2] == Approx (1.0));
+    CHECK (health.highPassHz == Approx (0.1));
+    CHECK (health.main == MainValue::MaxAxisKRms);
+
+    const auto machinery = def (Profile::MachineryIso20816);
+    CHECK (machinery.quantity == Quantity::Velocity);
+    CHECK (machinery.weighting[1] == Weighting::BandLimit);
+    CHECK (machinery.bandLowHz == Approx (10.0));
+    CHECK (machinery.bandHighHz == Approx (1000.0));
+    CHECK (def (Profile::MachineryLowSpeed).bandLowHz == Approx (2.0));
+
+    CHECK (def (Profile::HandArm).weighting[2] == Weighting::Wh);
+    CHECK (def (Profile::HandArm).main == MainValue::SumRms);
+    CHECK (def (Profile::BuildingPerception).weighting[0] == Weighting::KB);
+    CHECK (def (Profile::BuildingPerception).tauSec == Approx (0.125));   // KB_F(t)
+    CHECK (def (Profile::BuildingStructural).bandHighHz == Approx (315.0));
+    CHECK (def (Profile::BuildingStructural).main == MainValue::MaxAxisPeakMax);
+    CHECK (profileDefinition (Profile::StructureBorne).unit == DisplayUnit::Db);
+
+    // Every profile matches its own settings; out-of-range values fall back to Custom
+    for (int p = 1; p < (int) Profile::NumProfiles; ++p)
+        CHECK (settingsMatchProfile (def ((Profile) p), (Profile) p));
+    CHECK (profileFromInt (99) == Profile::Custom);
+    CHECK_FALSE (settingsMatchProfile (VibrationSettings {}, Profile::Custom));
+}
+
+TEST_CASE ("Vibration profiles: edits make the profile custom", "[vibration][profiles]")
+{
+    auto s = profileDefinition (Profile::WholeBodyHealth).settings;
+    CHECK (profileLabel (s, Profile::WholeBodyHealth) == "Whole-body health (ISO 2631-1)");
+    CHECK (mainValueLabel (s, Profile::WholeBodyHealth) == "a_w");
+
+    s.k[0] = 1.0;
+    CHECK_FALSE (settingsMatchProfile (s, Profile::WholeBodyHealth));
+    CHECK (profileLabel (s, Profile::WholeBodyHealth) == "Custom (based on Whole-body health (ISO 2631-1))");
+    CHECK (mainValueLabel (s, Profile::WholeBodyHealth) == "a_w");   // main value unchanged
+
+    s = profileDefinition (Profile::WholeBodyHealth).settings;
+    s.main = MainValue::SumRms;
+    CHECK (mainValueLabel (s, Profile::WholeBodyHealth) == "\xce\xa3 RMS");
+
+    // Band limits only matter for profiles that use the band weighting
+    s = profileDefinition (Profile::WholeBodyHealth).settings;
+    s.bandLowHz = 3.0;
+    CHECK (settingsMatchProfile (s, Profile::WholeBodyHealth));
+    s = profileDefinition (Profile::MachineryIso20816).settings;
+    s.bandLowHz = 3.0;
+    CHECK_FALSE (settingsMatchProfile (s, Profile::MachineryIso20816));
+    CHECK (profileLabel (VibrationSettings {}, Profile::Custom) == "Custom");
+}
+
+TEST_CASE ("Vibration main values", "[vibration][profiles]")
+{
+    VibrationSnapshot s;
+    s.axisMask = 0b111;
+    s.axis[AxisX].rms = 0.3f; s.axis[AxisY].rms = 0.2f; s.axis[AxisZ].rms = 0.35f;
+    s.axis[AxisSum].rms = 0.6f;
+    s.axis[AxisX].peakMax = 0.9f; s.axis[AxisZ].peakMax = 1.2f;
+    const double k[3] { 1.4, 1.4, 1.0 };
+
+    CHECK (computeMainValue (MainValue::MaxAxisRms, s, k) == Approx (0.35));
+    CHECK (computeMainValue (MainValue::MaxAxisKRms, s, k) == Approx (0.42));   // 1.4 · 0.3
+    CHECK (computeMainValue (MainValue::SumRms, s, k) == Approx (0.6));
+    CHECK (computeMainValue (MainValue::MaxAxisPeakMax, s, k) == Approx (1.2));
+    CHECK (computeMainValue (MainValue::None, s, k) == 0.0f);
+
+    // A single axis: Σ is that axis; absent axes are ignored
+    s.axisMask = 0b100;
+    CHECK (computeMainValue (MainValue::SumRms, s, k) == Approx (0.35));
+    CHECK (computeMainValue (MainValue::MaxAxisKRms, s, k) == Approx (0.35));
+}

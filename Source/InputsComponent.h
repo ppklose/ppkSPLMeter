@@ -714,6 +714,29 @@ public:
         // --- Accelerometer group ---
         setupLabel (accelTitle_, "ACCELEROMETER", 11.0f, true);
         setupLabel (accelDesc_, "Applies to all axes of the sensor. Changes restart the vibration readings.", 11.5f);
+        // Profile (spec §6): applying one sets everything below; edits make it custom
+        setupLabel (profileLabel_, "Profile");
+        for (int p = 0; p < (int) vib::Profile::NumProfiles; ++p)
+            profileCombo_.addItem (juce::String::fromUTF8 (vib::profileDefinition ((vib::Profile) p).name), p + 1);
+        profileCombo_.setTooltip ("Sets quantity, weighting, filters, k-factors, time constant, main value and unit");
+        profileCombo_.onChange = [this]
+        {
+            if (profileCombo_.getSelectedId() > 0)
+                processor_.applyVibrationProfile ((vib::Profile) (profileCombo_.getSelectedId() - 1));
+        };
+        addAndMakeVisible (profileCombo_);
+
+        setupLabel (mainLabel_, "Main value");
+        mainCombo_.addItem (U ("\xe2\x80\x94"), 1);
+        mainCombo_.addItem ("Max axis RMS", 2);
+        mainCombo_.addItem (U ("Max k\xc2\xb7" "axis RMS"), 3);
+        mainCombo_.addItem (U ("\xce\xa3 RMS (vector sum)"), 4);
+        mainCombo_.addItem ("Max axis peak since reset", 5);
+        mainCombo_.onChange = [this] { auto s = processor_.getVibrationSettings();
+                                       s.main = (vib::MainValue) (mainCombo_.getSelectedId() - 1);
+                                       processor_.setVibrationSettings (s); };
+        addAndMakeVisible (mainCombo_);
+
         setupLabel (quantityLabel_, "Quantity");
         quantityCombo_.addItem ("Acceleration", 1);
         quantityCombo_.addItem ("Velocity", 2);
@@ -799,14 +822,16 @@ public:
             l->setColour (juce::Label::textColourId, pal_.subtext.withAlpha (0.85f));
         for (auto& l : headerLabels_)
             l.setColour (juce::Label::textColourId, pal_.subtext);
-        for (auto* l : { &quantityLabel_, &highPassLabel_, &tauLabel_, &bandLabel_, &serialLabel_, &rangeLabel_,
+        for (auto* l : { &profileLabel_, &mainLabel_,
+                         &quantityLabel_, &highPassLabel_, &tauLabel_, &bandLabel_, &serialLabel_, &rangeLabel_,
                          &weightingLabels_[0], &weightingLabels_[1], &weightingLabels_[2],
                          &kLabels_[0], &kLabels_[1], &kLabels_[2] })
             l->setColour (juce::Label::textColourId, pal_.text);
         for (auto* f : { &highPass_, &bandLow_, &bandHigh_, &lowerLimit_, &upperLimit_,
                          &kFields_[0], &kFields_[1], &kFields_[2] })
             f->style (pal_);
-        for (auto* c : { &quantityCombo_, &tauCombo_, &weightingCombos_[0], &weightingCombos_[1], &weightingCombos_[2] })
+        for (auto* c : { &profileCombo_, &mainCombo_, &quantityCombo_, &tauCombo_,
+                         &weightingCombos_[0], &weightingCombos_[1], &weightingCombos_[2] })
             pal_.style (*c);
         serialEditor_.setColour (juce::TextEditor::backgroundColourId, pal_.field);
         serialEditor_.setColour (juce::TextEditor::textColourId, pal_.text);
@@ -838,7 +863,7 @@ public:
         accelCard_ = {};
         if (accelVisible_)
         {
-            accelCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 4 * 28 + 3 * 6);
+            accelCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 5 * 28 + 4 * 6);
             page.removeFromBottom (16);
             auto c = accelCard_.reduced (pad);
             accelTitle_.setBounds (c.removeFromTop (16));
@@ -854,6 +879,14 @@ public:
                 comp.setBounds (r.reduced (0, 2));
             };
             auto row = c.removeFromTop (28);
+            {
+                auto r = row.withWidth (2 * colW - 12);
+                profileLabel_.setBounds (r.removeFromLeft (96));
+                profileCombo_.setBounds (r.reduced (0, 2));
+            }
+            cell (row, 2, mainLabel_, mainCombo_);
+            c.removeFromTop (6);
+            row = c.removeFromTop (28);
             cell (row, 0, quantityLabel_, quantityCombo_);
             cell (row, 1, highPassLabel_, highPass_);
             cell (row, 2, tauLabel_, tauCombo_);
@@ -963,6 +996,16 @@ private:
     void loadAccelSettings()
     {
         const auto s = processor_.getVibrationSettings();
+        if (! profileCombo_.isPopupActive())
+        {
+            const auto base = processor_.getVibrationProfile();
+            if (base == vib::Profile::Custom || vib::settingsMatchProfile (s, base))
+                profileCombo_.setSelectedId ((int) base + 1, juce::dontSendNotification);
+            else if (profileCombo_.getText() != processor_.getVibrationProfileLabel())
+                profileCombo_.setText (processor_.getVibrationProfileLabel(), juce::dontSendNotification);
+        }
+        if (! mainCombo_.isPopupActive())
+            mainCombo_.setSelectedId ((int) s.main + 1, juce::dontSendNotification);
         quantityCombo_.setSelectedId ((int) s.quantity + 1, juce::dontSendNotification);
         if (! highPass_.isBeingEdited()) highPass_.setValue (s.highPassHz);
         int tauIdx = 0;
@@ -1084,7 +1127,8 @@ private:
 
     std::vector<juce::Component*> accelComponents()
     {
-        std::vector<juce::Component*> v { &accelTitle_, &accelDesc_, &quantityLabel_, &quantityCombo_,
+        std::vector<juce::Component*> v { &accelTitle_, &accelDesc_, &profileLabel_, &profileCombo_,
+                                          &mainLabel_, &mainCombo_, &quantityLabel_, &quantityCombo_,
                                           &highPassLabel_, &highPass_, &tauLabel_, &tauCombo_,
                                           &bandLabel_, &bandLow_, &bandHigh_, &serialLabel_, &serialEditor_,
                                           &rangeLabel_, &lowerLimit_, &upperLimit_ };
@@ -1111,6 +1155,8 @@ private:
     std::vector<int> listed_;
 
     juce::Label accelTitle_, accelDesc_;
+    juce::Label profileLabel_, mainLabel_;
+    juce::ComboBox profileCombo_, mainCombo_;
     juce::Label quantityLabel_, highPassLabel_, tauLabel_, bandLabel_, serialLabel_, rangeLabel_;
     juce::ComboBox quantityCombo_, tauCombo_;
     NumberField highPass_ { 0.1, 20.0, 2, "Hz" };

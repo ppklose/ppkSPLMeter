@@ -569,6 +569,8 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
     st.unit = audioProcessor.getVibrationDisplayUnit();
     const auto settings = audioProcessor.getVibrationSettings();
     st.tauSec = settings.tauSec;
+    st.profileLabel = audioProcessor.getVibrationProfileLabel();
+    st.mainLabel    = audioProcessor.getVibrationMainLabel();
     const auto missingText = missing.isEmpty() ? juce::String()
                            : missing.joinIntoString (", ") + (missing.size() == 1 ? " is" : " are")
                              + " not available on this input";
@@ -599,6 +601,7 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
             }
             for (int a = 0; a < 3; ++a)
                 st.snap.weighting[a] = (int) settings.weighting[a];
+            st.snap.mainKind = (int) settings.main;
         }
         st.note = "file playback with recorded roles and calibration";
     }
@@ -641,6 +644,7 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
             }
             for (int a = 0; a < 3; ++a)
                 st.snap.weighting[a] = (int) settings.weighting[a];
+            st.snap.mainKind = (int) settings.main;
         }
         if (audioProcessor.isFileModeActive())
             st.note = "the played file has no accelerometer tracks";
@@ -723,7 +727,8 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
                                                   const std::vector<LogEntry>& rows,
                                                   const std::vector<LogComponent::MarkerEvent>& markers,
-                                                  vib::DisplayUnit vibUnit)
+                                                  vib::DisplayUnit vibUnit,
+                                                  const juce::String& vibProfile)
 {
     stream.writeText ("Timestamp,Peak dB SPL,Peak dBA SPL,Peak dBC SPL,"
                       "RMS dB SPL,RMS dBA SPL,RMS dBC SPL,"
@@ -784,7 +789,7 @@ void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
             + juce::String (e.loudnessSone,     3) + ","
             + juce::String (e.psychoAnnoyance,  3) + ","
             + markerText
-            + VibrationCsv::columns (e.vib, vibUnit) + "\n";
+            + VibrationCsv::columns (e.vib, vibUnit, vibProfile) + "\n";
         stream.writeText (line, false, false, nullptr);
     }
 }
@@ -798,10 +803,11 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
         splmeterLastFolder().getChildFile ("SPLMeter.csv"),
         "*.csv");
     auto markers = markerEvents_;   // snapshot for async lambda
-    const auto vibUnit = audioProcessor.getVibrationDisplayUnit();
+    const auto vibUnit    = audioProcessor.getVibrationDisplayUnit();
+    const auto vibProfile = audioProcessor.getVibrationProfileKey();
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [rows, markers, vibUnit] (const juce::FileChooser& fc)
+        [rows, markers, vibUnit, vibProfile] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
@@ -809,7 +815,7 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
             juce::FileOutputStream stream (file);
             if (!stream.openedOk()) return;
             stream.setPosition (0); stream.truncate();
-            writeCsvRows (stream, rows, markers, vibUnit);
+            writeCsvRows (stream, rows, markers, vibUnit, vibProfile);
         });
 }
 
@@ -858,12 +864,13 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
     auto rows     = audioProcessor.copyLog();
     auto markers  = markerEvents_;
     auto snapshot = createComponentSnapshot (getLocalBounds());
-    const auto vibUnit = audioProcessor.getVibrationDisplayUnit();
+    const auto vibUnit    = audioProcessor.getVibrationDisplayUnit();
+    const auto vibProfile = audioProcessor.getVibrationProfileKey();
     fileChooser = std::make_unique<juce::FileChooser> (
         "Choose destination folder", splmeterLastFolder());
     fileChooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-        [this, rows, markers, snapshot, vibUnit] (const juce::FileChooser& fc)
+        [this, rows, markers, snapshot, vibUnit, vibProfile] (const juce::FileChooser& fc)
         {
             auto folder = fc.getResult();
             if (folder == juce::File{} || !folder.isDirectory()) return;
@@ -876,7 +883,7 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
             if (!rows.empty())
             {
                 juce::FileOutputStream csv (base.withFileExtension ("csv"));
-                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows, markers, vibUnit); }
+                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows, markers, vibUnit, vibProfile); }
             }
 
             // WAV

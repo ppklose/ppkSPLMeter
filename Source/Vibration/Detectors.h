@@ -29,6 +29,8 @@ struct VibrationSnapshot
     int        weighting[3] {};     // vib::Weighting per X/Y/Z
     double     seconds   = 0.0;     // metered time since the last reset
     AxisValues axis[kNumAxisSlots];
+    int        mainKind  = 0;       // vib::MainValue of the profile
+    float      main      = 0.0f;    // the profile's main value (SI units)
 };
 static_assert (std::is_trivially_copyable_v<VibrationSnapshot>);
 

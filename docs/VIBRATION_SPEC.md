@@ -178,6 +178,8 @@ A profile sets the defaults for weighting, quantity, filters, detectors, k-facto
 | Building – structural (DIN 4150-3) | v | band 1–315 Hz | 0.5 Hz | — | PPV per axis + f_dom | Guideline lines |
 | Custom | any | any | any | any | — | — |
 
+Implementation (step 9, `Source/Vibration/Profiles.h`): the profile is stored as the *base* profile (`UIState/Accel` `profile`); applying it writes its settings, RMS τ (0.125 s for structure-borne and both building profiles, 1 s otherwise), main value and display unit (dB for structure-borne, linear otherwise). "Custom (based on …)" is derived by comparing the current settings with the base profile (the display unit does not count). The main value (`MainValue`: max axis RMS, max k·axis RMS, Σ RMS, max axis peak since reset) is computed into every snapshot and log entry, shown in the panel header and written to the CSV `vib_main`; `vib_profile` holds the profile key, e.g. `custom(hand-arm)`. It can also be chosen freely in the Inputs and Sensors window. Until step 10 the profiles whose main value needs accumulating detectors use the closest running value: health and hand-arm use running RMS instead of a_w,rms / A(8), building perception uses KB_F(t) instead of KB_Fmax / KB_FTr, structural PPV is already the maximum |v| since reset (f_dom follows).
+
 ## 7. UI
 
 ### 7.1 Settings → "Inputs and Sensors" window

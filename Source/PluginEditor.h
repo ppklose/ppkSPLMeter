@@ -278,7 +278,8 @@ private:
     void doSaveSettingsJson();
     void doLoadSettingsJson();
     static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&,
-                              const std::vector<LogComponent::MarkerEvent>&, vib::DisplayUnit);
+                              const std::vector<LogComponent::MarkerEvent>&, vib::DisplayUnit,
+                              const juce::String& vibProfile);
 
     SPLMeterAudioProcessor& audioProcessor;
     // Must stay above the child components so they are built from the restored state

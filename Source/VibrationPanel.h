@@ -20,6 +20,8 @@ public:
         vib::VibrationSnapshot snap;
         vib::DisplayUnit  unit = vib::DisplayUnit::Linear;
         double            tauSec = 1.0;
+        juce::String      profileLabel;     // "Whole-body health (ISO 2631-1)", "Custom (based on …)"
+        juce::String      mainLabel;        // symbol of snap.main, e.g. "a_w"
     };
 
     std::function<void (vib::DisplayUnit)> onUnitChange;
@@ -96,6 +98,28 @@ public:
         auto header = content.removeFromTop (kHeaderH);
         if (unitCombo_.isVisible())
             header.removeFromRight (160);
+
+        // The profile's main value, right-aligned in the header
+        if (state_.kind == State::Kind::Running && state_.snap.mainKind != 0)
+        {
+            const auto q = quantity();
+            auto mainArea = header.removeFromRight (300);
+            const auto unitText = juce::String::fromUTF8 (vib::units::label (state_.unit, q));
+            g.setColour (textSec);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
+            g.drawText (unitText, mainArea.removeFromRight (100), juce::Justification::centredLeft, true);
+            const juce::Font valueFont (juce::FontOptions().withHeight (19.0f).withStyle ("Bold"));
+            const auto valueText = (state_.snap.valid ? juce::String (vib::units::format (state_.snap.main, state_.unit, q))
+                                                      : juce::String ("--")) + " ";
+            const int valueW = (int) std::ceil (juce::GlyphArrangement::getStringWidth (valueFont, valueText));
+            g.setColour (textPri);
+            g.setFont (valueFont);
+            g.drawText (valueText, mainArea.removeFromRight (valueW), juce::Justification::centredRight, false);
+            mainArea.removeFromRight (8);
+            g.setColour (textSec);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f).withStyle ("Bold")));
+            g.drawText (state_.mainLabel, mainArea, juce::Justification::centredRight, true);
+        }
 
         g.setColour (textSec);
         g.setFont (juce::Font (juce::FontOptions().withHeight (12.0f).withStyle ("Bold")));
@@ -209,7 +233,10 @@ private:
             return state_.note;
         const auto& s = state_.snap;
         const char* qNames[3] = { "Acceleration", "Velocity", "Displacement" };
-        juce::String text = qNames[juce::jlimit (0, 2, s.quantity)];
+        juce::String text;
+        if (state_.profileLabel.isNotEmpty())
+            text << state_.profileLabel << juce::String::fromUTF8 ("  \xc2\xb7  ");
+        text << qNames[juce::jlimit (0, 2, s.quantity)];
 
         juce::StringArray w;
         for (int a = 0; a < 3; ++a)

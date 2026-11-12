@@ -584,6 +584,53 @@ TEST_CASE ("Vibration WAV recording: role changes switch the recorded tracks", "
     CHECK (rig.proc->getRecordedInputs() == std::vector<int> { 0, 1, 3, 4, 5 });
 }
 
+TEST_CASE ("Vibration profiles in processor: apply, custom, main value, persistence", "[vibration][processor][profiles]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    Rig rig (4);
+    configureTriax (*rig.proc, 1);
+    rig.proc->applyVibrationProfile (vib::Profile::MachineryIso20816);
+    CHECK (rig.proc->getVibrationSettings().quantity == vib::Quantity::Velocity);
+    CHECK (rig.proc->getVibrationDisplayUnit() == vib::DisplayUnit::Linear);
+    CHECK (rig.proc->getVibrationProfileLabel() == "Machinery (ISO 20816)");
+    CHECK (rig.proc->getVibrationProfileKey() == "machinery-iso20816");
+    CHECK (rig.proc->getVibrationMainLabel() == "v_rms");
+
+    // Main value = largest axis v_rms: 80 Hz sines of 2 / 4 / 6 m/s² peak → v = a / (2π·80)
+    rig.prepare();
+    rig.run (4.0, [] (int ch, int n) { return ch == 0 ? 0.0f : sine (80.0, 2.0 * ch, n); });
+    const auto snap = rig.snap();
+    REQUIRE (snap.valid);
+    CHECK (snap.mainKind == (int) vib::MainValue::MaxAxisRms);
+    const double vz = 6.0 * kRms / (2.0 * juce::MathConstants<double>::pi * 80.0);
+    CHECK (snap.main == Approx (vz).epsilon (0.02));
+    CHECK (rig.proc->copyLog().back().vib.main == Approx (vz).epsilon (0.02));
+
+    // An edit makes it custom; the CSV names the base profile
+    auto s = rig.proc->getVibrationSettings();
+    s.highPassHz = 5.0;
+    rig.proc->setVibrationSettings (s);
+    CHECK (rig.proc->getVibrationProfileLabel() == "Custom (based on Machinery (ISO 20816))");
+    CHECK (rig.proc->getVibrationProfileKey() == "custom(machinery-iso20816)");
+    CHECK (VibrationCsv::columns (rig.proc->copyLog().back().vib, vib::DisplayUnit::Linear,
+                                  rig.proc->getVibrationProfileKey()).endsWith (",custom(machinery-iso20816)"));
+
+    // Persisted with the plugin state
+    juce::MemoryBlock blob;
+    rig.proc->getStateInformation (blob);
+    auto restored = std::make_unique<SPLMeterAudioProcessor>();
+    restored->setStateInformation (blob.getData(), (int) blob.getSize());
+    CHECK (restored->getVibrationProfile() == vib::Profile::MachineryIso20816);
+    CHECK (restored->getVibrationSettings().main == vib::MainValue::MaxAxisRms);
+    CHECK (restored->getVibrationProfileLabel() == "Custom (based on Machinery (ISO 20816))");
+
+    // Choosing "Custom" keeps the settings
+    restored->applyVibrationProfile (vib::Profile::Custom);
+    CHECK (restored->getVibrationSettings().highPassHz == Approx (5.0));
+    CHECK (restored->getVibrationProfileLabel() == "Custom");
+}
+
 TEST_CASE ("Vibration in processor: CPU budget", "[vibration][processor][performance]")
 {
     juce::ScopedJuceInitialiser_GUI juceInit;

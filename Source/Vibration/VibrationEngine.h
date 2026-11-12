@@ -5,6 +5,40 @@
 namespace vib
 {
 //==============================================================================
+// The single value a measurement profile is about (vibration spec §6), computed
+// from the snapshot. Values are persisted — only append new entries.
+enum class MainValue : int
+{
+    None = 0,
+    MaxAxisRms,       // largest axis running RMS (machinery v_rms, KB_F)
+    MaxAxisKRms,      // largest k-weighted axis RMS (ISO 2631-1 health: 1.4·a_wx, 1.4·a_wy, a_wz)
+    SumRms,           // vector sum Σ (a_v, a_hv); the axis for a single axis
+    MaxAxisPeakMax    // largest |x| since reset over the axes (PPV)
+};
+
+inline float computeMainValue (MainValue m, const VibrationSnapshot& s, const double (&k)[3]) noexcept
+{
+    float best = 0.0f;
+    int axes = 0;
+    for (int a = 0; a < 3; ++a)
+    {
+        if (! (s.axisMask & (1 << a))) continue;
+        ++axes;
+        switch (m)
+        {
+            case MainValue::MaxAxisRms:     best = std::max (best, s.axis[a].rms); break;
+            case MainValue::MaxAxisKRms:    best = std::max (best, (float) k[a] * s.axis[a].rms); break;
+            case MainValue::SumRms:         best = std::max (best, s.axis[a].rms); break;
+            case MainValue::MaxAxisPeakMax: best = std::max (best, s.axis[a].peakMax); break;
+            case MainValue::None:           break;
+        }
+    }
+    if (m == MainValue::SumRms && axes > 1 && ! s.uniaxial)
+        return s.axis[AxisSum].rms;
+    return best;
+}
+
+//==============================================================================
 // Settings shared by all axes of the accelerometer sensor (spec §3.2).
 // Persisted in UIState/Accel; per-input calibration lives in UIState/Inputs.
 struct VibrationSettings
@@ -16,6 +50,7 @@ struct VibrationSettings
     double    bandHighHz  = 1000.0;
     double    tauSec      = 1.0;       // running RMS time constant
     double    k[3]        { 1.0, 1.0, 1.0 };   // vector-sum multiplying factors
+    MainValue main        = MainValue::None;
 };
 
 // Which input feeds which axis (-1 = absent) and its calibration
@@ -134,6 +169,8 @@ private:
         out.axis[AxisSum]     = detector_[AxisSum].values();
         out.axis[AxisSum].rms = (float) std::sqrt (sumMs);
         out.axis[AxisSum].p2p = 0.0f;   // not defined for a magnitude
+        out.mainKind = static_cast<int> (settings_.main);
+        out.main     = computeMainValue (settings_.main, out, settings_.k);
     }
 
     VibrationSettings settings_;

@@ -13,7 +13,8 @@ namespace VibrationCsv
         return ",vibX_rms,vibY_rms,vibZ_rms,vibSum_rms,vibX_pk,vibY_pk,vibZ_pk,vibSum_pk,vib_main,vib_unit,vib_profile";
     }
 
-    inline juce::String columns (const VibrationLog& v, vib::DisplayUnit unit)
+    // profileKey: vib_profile column, e.g. "hand-arm" or "custom(hand-arm)"
+    inline juce::String columns (const VibrationLog& v, vib::DisplayUnit unit, const juce::String& profileKey = {})
     {
         if (! v.valid)
             return ",,,,,,,,,,,";
@@ -36,14 +37,21 @@ namespace VibrationCsv
             for (int slot = 0; slot < vib::kNumAxisSlots; ++slot)
                 s << ',' << (present (slot) ? num (values[slot]) : juce::String());
 
-        // Main value: Σ when there is a vector sum, otherwise the single axis
-        int mainSlot = vib::AxisSum;
-        if (! hasSum)
-            for (int a = 2; a >= 0; --a)
-                if (present (a)) mainSlot = a;
-        s << ',' << num (v.rms[mainSlot]);
+        // Main value: the profile's; without one Σ, or the single axis
+        if (v.mainKind != (int) vib::MainValue::None)
+        {
+            s << ',' << num (v.main);
+        }
+        else
+        {
+            int mainSlot = vib::AxisSum;
+            if (! hasSum)
+                for (int a = 2; a >= 0; --a)
+                    if (present (a)) mainSlot = a;
+            s << ',' << num (v.rms[mainSlot]);
+        }
         s << ',' << juce::String::fromUTF8 (vib::units::label (unit, q));
-        s << ',';   // profile: phase 1b
+        s << ',' << profileKey;
         return s;
     }
 }

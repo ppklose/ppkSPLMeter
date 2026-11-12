@@ -12,6 +12,7 @@
 #include "Vibration/VibrationEngine.h"
 #include "Vibration/CalibratorMeasurement.h"
 #include "Vibration/Units.h"
+#include "Vibration/Profiles.h"
 #include "RtHandover.h"
 #include "WavRecording.h"
 #include <array>
@@ -29,6 +30,8 @@ struct VibrationLog
     bool  uniaxial = false;
     float rms[4]  {};
     float peak[4] {};         // max |x| in the last snapshot interval
+    int   mainKind = 0;       // vib::MainValue of the profile
+    float main     = 0.0f;    // the profile's main value
 };
 
 struct LogEntry
@@ -357,6 +360,14 @@ public:
     };
     AccelSensorInfo getAccelSensorInfo() const;
     void setAccelSensorInfo (const AccelSensorInfo& info);
+
+    // Measurement profile (spec §6, UIState/Accel "profile"): applying one sets the
+    // accelerometer settings and display unit; later edits make it "Custom (based on …)"
+    vib::Profile getVibrationProfile() const;
+    void applyVibrationProfile (vib::Profile profile);
+    juce::String getVibrationProfileLabel() const;    // e.g. "Custom (based on Hand-arm (ISO 5349-1))"
+    juce::String getVibrationProfileKey() const;      // CSV/JSON: "hand-arm" or "custom(hand-arm)"
+    juce::String getVibrationMainLabel() const;       // e.g. "a_w"
 
     // Display unit of the vibration readout (UIState/Accel "displayUnit")
     vib::DisplayUnit getVibrationDisplayUnit() const;

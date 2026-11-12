@@ -802,6 +802,8 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
         e.vib.quantity = vibWork_.quantity;
         e.vib.axisMask = vibWork_.axisMask;
         e.vib.uniaxial = vibWork_.uniaxial;
+        e.vib.mainKind = vibWork_.mainKind;
+        e.vib.main     = vibWork_.main;
         for (int a = 0; a < vib::kNumAxisSlots; ++a)
         {
             e.vib.rms[a]  = vibWork_.axis[a].rms;
@@ -1026,6 +1028,8 @@ vib::VibrationSettings SPLMeterAudioProcessor::getVibrationSettings() const
     s.bandLowHz  = juce::jlimit (0.1, 1000.0, (double) node.getProperty ("bandLowHz",  s.bandLowHz));
     s.bandHighHz = juce::jlimit (1.0, 20000.0, (double) node.getProperty ("bandHighHz", s.bandHighHz));
     s.tauSec     = juce::jlimit (0.01, 10.0, (double) node.getProperty ("tauSec", s.tauSec));
+    s.main       = static_cast<vib::MainValue> (juce::jlimit (0, (int) vib::MainValue::MaxAxisPeakMax,
+                                                              (int) node.getProperty ("mainValue", 0)));
     return s;
 }
 
@@ -1042,6 +1046,7 @@ void SPLMeterAudioProcessor::setVibrationSettings (const vib::VibrationSettings&
     node.setProperty ("bandLowHz",  s.bandLowHz,  nullptr);
     node.setProperty ("bandHighHz", s.bandHighHz, nullptr);
     node.setProperty ("tauSec",     s.tauSec,     nullptr);
+    node.setProperty ("mainValue",  (int) s.main, nullptr);
     rebuildVibrationEngine();
 }
 
@@ -1158,6 +1163,41 @@ void SPLMeterAudioProcessor::setAccelSensorInfo (const AccelSensorInfo& info)
     node.setProperty ("upperLimitHz", info.upperLimitHz, nullptr);
 }
 
+vib::Profile SPLMeterAudioProcessor::getVibrationProfile() const
+{
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    return vib::profileFromInt (node.isValid() ? (int) node.getProperty ("profile", 0) : 0);
+}
+
+void SPLMeterAudioProcessor::applyVibrationProfile (vib::Profile profile)
+{
+    getUiState().getOrCreateChildWithName (kAccelNode, nullptr).setProperty ("profile", (int) profile, nullptr);
+    if (profile == vib::Profile::Custom)
+        return;   // keeps the current settings
+    const auto& def = vib::profileDefinition (profile);
+    setVibrationDisplayUnit (def.unit);
+    setVibrationSettings (def.settings);
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationProfileLabel() const
+{
+    return juce::String::fromUTF8 (vib::profileLabel (getVibrationSettings(), getVibrationProfile()).c_str());
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationProfileKey() const
+{
+    const auto p = getVibrationProfile();
+    const juce::String key (vib::profileDefinition (p).key);
+    if (p == vib::Profile::Custom || vib::settingsMatchProfile (getVibrationSettings(), p))
+        return key;
+    return "custom(" + key + ")";
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationMainLabel() const
+{
+    return juce::String::fromUTF8 (vib::mainValueLabel (getVibrationSettings(), getVibrationProfile()).c_str());
+}
+
 vib::DisplayUnit SPLMeterAudioProcessor::getVibrationDisplayUnit() const
 {
     const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
@@ -1175,7 +1215,8 @@ namespace
     // Keys of UIState/Accel exchanged with JSON settings files
     const char* const kAccelJsonKeys[] = { "highPassHz", "quantity", "weightingX", "weightingY", "weightingZ",
                                            "kx", "ky", "kz", "bandLowHz", "bandHighHz", "tauSec",
-                                           "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit" };
+                                           "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit",
+                                           "mainValue", "profile" };
 }
 
 juce::var SPLMeterAudioProcessor::getInputsJson() const
