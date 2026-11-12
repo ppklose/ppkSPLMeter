@@ -488,6 +488,16 @@ void MeterComponent::paint (juce::Graphics& g)
         drawCell (0, 3, "Annoyance",      juce::String (psychoAnnoyance_, 2));
     }
 
+    // No input has the Mic role (vibration spec §7.1): cover readout and bar
+    if (noMicInput_)
+    {
+        const auto cover = juce::Rectangle<float> (barAreaX, peakReadoutY, barAreaW, peakY + barH - peakReadoutY);
+        g.setColour (bgMain.withAlpha (0.94f));
+        g.fillRoundedRectangle (cover, 6.0f);
+        g.setColour (textSecond);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f).withStyle ("Bold")));
+        g.drawText ("No microphone input", cover, juce::Justification::centred, false);
+    }
 }
 
 //==============================================================================

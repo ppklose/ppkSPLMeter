@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "UserPrefs.h"
 #include "MeterComponent.h"
+#include "VibrationPanel.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
 #include "SpectrogramComponent.h"
@@ -285,6 +286,12 @@ private:
 
     MeterComponent       meter;
     LogComponent         log;
+    VibrationPanel       vibPanel;
+
+    // Vibration panel (spec §7.2): state from roles + snapshot; returns true when
+    // the panel's height changed and the layout must follow
+    bool updateVibrationPanel();
+    int  basicHeight() const { return 100 + 215 + 24 + vibPanel.preferredHeight(); }   // title + meter + panel + build strip
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
     juce::TextButton settingsButton      { "Settings..." };

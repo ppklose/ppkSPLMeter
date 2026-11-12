@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include "Vibration/AccelChannel.h"
 #include "Vibration/CalibratorMeasurement.h"
+#include "Vibration/Units.h"
 
 #include <cmath>
 #include <string>
@@ -371,4 +372,29 @@ TEST_CASE ("Vibration calibrator measurement: level, frequency and acceptance", 
         CHECK (measureCalibrator (48000.0, 159.2, [&] (double t) { return std::sin (twoPi * 159.2 * t); })
                    .status == Status::Clipped);
     }
+}
+
+//==============================================================================
+TEST_CASE ("Vibration display units: conversion, ISO 1683 levels and labels", "[vibration][units]")
+{
+    using namespace units;
+    // Linear: m/s², mm/s, µm
+    CHECK (convert (2.5, DisplayUnit::Linear, Quantity::Acceleration) == Approx (2.5));
+    CHECK (convert (0.004, DisplayUnit::Linear, Quantity::Velocity) == Approx (4.0));
+    CHECK (convert (3.0e-6, DisplayUnit::Linear, Quantity::Displacement) == Approx (3.0));
+    // g only for acceleration
+    CHECK (convert (calibration::kGravity, DisplayUnit::G, Quantity::Acceleration) == Approx (1.0));
+    CHECK (effective (DisplayUnit::G, Quantity::Velocity) == DisplayUnit::Linear);
+    CHECK (std::string (label (DisplayUnit::G, Quantity::Velocity)) == "mm/s");
+    // dB re 1 µm/s², 1 nm/s, 1 pm
+    CHECK (convert (10.0, DisplayUnit::Db, Quantity::Acceleration) == Approx (140.0));
+    CHECK (convert (1.0e-3, DisplayUnit::Db, Quantity::Velocity) == Approx (120.0));
+    CHECK (convert (1.0e-6, DisplayUnit::Db, Quantity::Displacement) == Approx (120.0));
+    CHECK (std::string (label (DisplayUnit::Db, Quantity::Displacement)) == "dB re 1 pm");
+    CHECK (std::string (label (DisplayUnit::Linear, Quantity::Acceleration)) == "m/s\xc2\xb2");
+    // Three significant digits
+    CHECK (format (0.12345, DisplayUnit::Linear, Quantity::Acceleration) == "0.123");
+    CHECK (format (12.345, DisplayUnit::Linear, Quantity::Acceleration) == "12.3");
+    CHECK (format (0.0012345, DisplayUnit::Linear, Quantity::Velocity) == "1.23");
+    CHECK (format (10.0, DisplayUnit::Db, Quantity::Acceleration) == "140.0");
 }

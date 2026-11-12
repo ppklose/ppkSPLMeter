@@ -1101,6 +1101,18 @@ void SPLMeterAudioProcessor::setAccelSensorInfo (const AccelSensorInfo& info)
     node.setProperty ("upperLimitHz", info.upperLimitHz, nullptr);
 }
 
+vib::DisplayUnit SPLMeterAudioProcessor::getVibrationDisplayUnit() const
+{
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    return (vib::DisplayUnit) juce::jlimit (0, (int) vib::DisplayUnit::Db,
+                                            node.isValid() ? (int) node.getProperty ("displayUnit", 0) : 0);
+}
+
+void SPLMeterAudioProcessor::setVibrationDisplayUnit (vib::DisplayUnit unit)
+{
+    getUiState().getOrCreateChildWithName (kAccelNode, nullptr).setProperty ("displayUnit", (int) unit, nullptr);
+}
+
 juce::String SPLMeterAudioProcessor::getAccelCalInfo (int ch) const
 {
     const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");

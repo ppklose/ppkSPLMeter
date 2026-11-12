@@ -188,7 +188,7 @@ The Settings window has a fixed size and no free space, so the inputs table live
 - Role combobox: Mic / Accel X / Accel Y / Accel Z / Accel (uniaxial) / Off. A status line shows the detected sensor ("Triaxial accelerometer: X = IN02, …") or, in red, why the configuration is invalid; invalid rows are tinted red.
 - An "Accelerometer" group appears below when any channel has an accelerometer role: quantity, high-pass, RMS τ, weighting per axis (one for uniaxial), band limits (for "Band limit"), k-factors (not for uniaxial), sensor serial, usable range (lower/upper limit). Profile (step 9) and display unit (step 6) are added with those steps.
 - Calibration dialog (per input): **Handheld calibrator** (10 m/s² or 1 g at 159.2 Hz, or custom level/frequency; Measure → 0.5 s settling + 3 s measurement, `vib::CalibratorMeasurement`; result with frequency and stability, Apply) or **Datasheet** (sensitivity in mV/(m/s²) or mV/g, interface full scale in Vrms or dBu at 0 dBFS; live result, Apply). The cal value can also be typed into the table. Each apply stores `calDate<ch>` and `calMethod<ch>` (calibrator / datasheet / manual) in `UIState/Inputs`; the report uses them.
-- Psychoacoustic metrics, dBA/dBC and the Sound Detective continue to use the mic mix only. If no channel is `Mic`, the SPL meter shows "No microphone input" instead of meaningless values.
+- Psychoacoustic metrics, dBA/dBC and the Sound Detective continue to use the mic mix only. If no channel is `Mic`, the SPL meter shows "No microphone input" over its readout and bar (step 6).
 
 ### 7.2 Vibration panel (below the SPL meter)
 
@@ -200,10 +200,11 @@ The Settings window has a fixed size and no free space, so the inputs table live
 │ Σ ███████░░░░░░░  0.35 m/s²   VDV 1.8  A(8) 0.29 ●  │
 ```
 
-- Shown only when an accelerometer is configured; the editor grows by the panel's height (respecting the persisted `extendedHeight` logic).
-- Bars use a log scale (dB) internally; the readout is in `displayUnit`.
-- Bars are tinted when frequency content below `lowerLimitHz` dominates (unreliable reading).
-- Status dot: green / amber / red against the profile's assessment (action value, zone, guideline line).
+- Shown whenever an input has an accelerometer role (`Source/VibrationPanel.h`). Basic mode: the window grows by the panel's height. Advanced mode: the panel takes its height from the timeline, so the persisted `extendedHeight` is not affected.
+- Per row: RMS bar on a log scale (100 dB span: 1 mm/s² … 100 m/s², 1 µm/s … 100 mm/s, 10 nm … 1 mm), the interval peak as a tick, the maximum since reset as a marker, then RMS, max and peak-to-peak (p-p only when the panel is wide) in `displayUnit`. Uniaxial sensors show one row labelled a / v / d.
+- Header: quantity · weightings · RMS τ, plus notes ("live input only, paused during file playback", inputs the device lacks), and the unit selector: linear (m/s², mm/s, µm), g (acceleration only), dB re ISO 1683 reference (`vib::units`, persisted as `displayUnit` in `UIState/Accel`).
+- Invalid roles show a red one-line message instead of the readout.
+- Later steps: tint when content below `lowerLimitHz` dominates (needs the spectrum, with step 7/9), status dot against the profile's assessment (step 11), VDV and A(8) on the Σ row (step 10).
 - Light/dark mode and the iOS title-bar scaling follow existing conventions.
 
 ### 7.3 Timeline (LogComponent)

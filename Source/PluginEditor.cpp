@@ -58,6 +58,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
 {
     addAndMakeVisible (meter);
     addAndMakeVisible (log);
+    vibPanel.onUnitChange = [this] (vib::DisplayUnit u) { audioProcessor.setVibrationDisplayUnit (u); };
+    addAndMakeVisible (vibPanel);
 
     resetButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
     resetButton.setColour (juce::TextButton::textColourOffId,  juce::Colour (0xffff453a));
@@ -268,7 +270,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
-            const int basicH = 100 + 215 + 24;  // title + meter + build strip
+            const int basicH = basicHeight();
             setResizeLimits (480, basicH, 3840, 2160);
             setSize (getWidth(), basicH);
         }
@@ -425,7 +427,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     dawSyncToggle.setVisible (!basicMode_);
     meter.setPsychoVisible (!basicMode_);
     meter.setDinVisible (!basicMode_);
-    const int basicH = 100 + 215 + 24;
+    updateVibrationPanel();
+    const int basicH = basicHeight();
     if (basicMode_)
     {
         setResizeLimits (480, basicH, 3840, 2160);
@@ -510,9 +513,11 @@ void SPLMeterAudioProcessorEditor::resized()
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 8, 60, 80);
     outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 84);
 
-    const int meterHeight = 270;
+    // Basic mode shows only the top 215 px of the meter (no psycho/DIN rows)
+    const int meterHeight = basicMode_ ? 215 : 270;
     auto meterArea = area.removeFromTop (meterHeight);
     meter.setBounds (meterArea);
+    vibPanel.setBounds (area.removeFromTop (vibPanel.preferredHeight()));
 
     // FAST/SLOW buttons right-aligned in the numeric readout row of the meter
     // MeterComponent: margin=20, peakReadoutY=20, readoutH=40
@@ -532,6 +537,92 @@ void SPLMeterAudioProcessorEditor::resized()
 }
 
 //==============================================================================
+bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
+{
+    using Kind = VibrationPanel::State::Kind;
+    const int heightBefore = vibPanel.preferredHeight();
+
+    const auto roles     = audioProcessor.getChannelRoles();
+    const int  numInputs = juce::jmin (audioProcessor.getTotalNumInputChannels(), SensorConfig::kMaxInputs);
+
+    // Accelerometer roles on inputs this device or bus does not have
+    juce::StringArray missing;
+    bool anyAccel = false, anyMic = false;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const auto r = roles[(size_t) ch];
+        if (ch < numInputs)
+            anyMic = anyMic || r == SensorRole::Mic;
+        if (! SensorConfig::isAccel (r))
+            continue;
+        anyAccel = true;
+        if (ch >= numInputs)
+        {
+            const char* axis[] = { "", "X", "Y", "Z", "uniaxial" };
+            missing.add (audioProcessor.getChannelName (ch) + " (" + axis[(int) r] + ")");
+        }
+    }
+    meter.setNoMicInput (numInputs > 0 && ! anyMic);
+
+    VibrationPanel::State st;
+    st.unit = audioProcessor.getVibrationDisplayUnit();
+    const auto settings = audioProcessor.getVibrationSettings();
+    st.tauSec = settings.tauSec;
+    const auto missingText = missing.isEmpty() ? juce::String()
+                           : missing.joinIntoString (", ") + (missing.size() == 1 ? " is" : " are")
+                             + " not available on this input";
+
+    const auto validity = audioProcessor.getSensorValidity();
+    if (! anyAccel)
+    {
+        st.kind = Kind::Hidden;
+    }
+    else if (! SensorConfig::isValid (validity))
+    {
+        st.kind = Kind::Message;
+        st.messageIsError = true;
+        st.message = "Accelerometer roles are invalid (an axis is assigned twice, or uniaxial is mixed with X/Y/Z)."
+                     " Fix them in Settings > Inputs & Sensors.";
+    }
+    else if (validity == SensorConfig::Validity::NoAccelerometer)
+    {
+        st.kind = Kind::Message;
+        st.message = missingText + ".";
+    }
+    else
+    {
+        st.kind = Kind::Running;
+        st.snap = audioProcessor.getVibrationSnapshot();
+        if (! st.snap.valid)
+        {
+            // Before the first readout: lay out the rows from the configuration
+            st.snap = {};
+            st.snap.quantity = (int) settings.quantity;
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                switch (roles[(size_t) ch])
+                {
+                    case SensorRole::AccelX:        st.snap.axisMask |= 1; break;
+                    case SensorRole::AccelY:        st.snap.axisMask |= 2; break;
+                    case SensorRole::AccelZ:        st.snap.axisMask |= 4; break;
+                    case SensorRole::AccelUniaxial: st.snap.axisMask |= 1; st.snap.uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+            }
+            for (int a = 0; a < 3; ++a)
+                st.snap.weighting[a] = (int) settings.weighting[a];
+        }
+        if (audioProcessor.isFileModeActive())
+            st.note = "live input only, paused during file playback";
+        else if (missingText.isNotEmpty())
+            st.note = missingText;
+    }
+    vibPanel.setState (st);
+    vibPanel.setVisible (st.kind != Kind::Hidden);
+    return vibPanel.preferredHeight() != heightBefore;
+}
+
 void SPLMeterAudioProcessorEditor::updateModeButtons()
 {
     realTimeButton.setToggleState (!fileMode, juce::dontSendNotification);
@@ -586,6 +677,7 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 
     meter.setLightMode (light);
     log.setLightMode   (light);
+    vibPanel.setLightMode (light);
 
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     if (visqolWindow != nullptr)
@@ -1082,6 +1174,16 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getImpulsiveness(),
                      audioProcessor.getTonality());
     meter.setPeak (audioProcessor.getPeakSPL());
+
+    if (updateVibrationPanel())
+    {
+        if (basicMode_)
+        {
+            setResizeLimits (480, basicHeight(), 3840, 2160);
+            setSize (getWidth(), basicHeight());
+        }
+        resized();
+    }
 
     // Compute LAeq / LCeq from log entries (energy average over logDuration)
     // and DIN 15905-5 LAeq,30min (sliding 30-min window over the available log)

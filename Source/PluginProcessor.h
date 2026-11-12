@@ -11,6 +11,7 @@
 #include "SensorConfig.h"
 #include "Vibration/VibrationEngine.h"
 #include "Vibration/CalibratorMeasurement.h"
+#include "Vibration/Units.h"
 #include <array>
 #include <atomic>
 #include <deque>
@@ -328,6 +329,10 @@ public:
     };
     AccelSensorInfo getAccelSensorInfo() const;
     void setAccelSensorInfo (const AccelSensorInfo& info);
+
+    // Display unit of the vibration readout (UIState/Accel "displayUnit")
+    vib::DisplayUnit getVibrationDisplayUnit() const;
+    void setVibrationDisplayUnit (vib::DisplayUnit unit);
 
     // Calibration date/method per input (UIState/Inputs "calDate<ch>", "calMethod<ch>")
     juce::String getAccelCalInfo (int ch) const;     // e.g. "2026-11-12 · calibrator", empty if never

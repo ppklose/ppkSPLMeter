@@ -292,6 +292,8 @@ TEST_CASE ("Vibration in processor: sensor info and calibration date persist", "
     CHECK (proc->getAccelCalInfo (1).isEmpty());
     proc->setAccelSensorInfo ({ "SN 4711", 0.3, 8000.0 });
     proc->setAccelCalInfo (1, "calibrator");
+    CHECK (proc->getVibrationDisplayUnit() == vib::DisplayUnit::Linear);
+    proc->setVibrationDisplayUnit (vib::DisplayUnit::Db);
 
     juce::MemoryBlock blob;
     proc->getStateInformation (blob);
@@ -302,6 +304,7 @@ TEST_CASE ("Vibration in processor: sensor info and calibration date persist", "
     CHECK (info.serial == "SN 4711");
     CHECK (info.lowerLimitHz == Approx (0.3));
     CHECK (info.upperLimitHz == Approx (8000.0));
+    CHECK (restored->getVibrationDisplayUnit() == vib::DisplayUnit::Db);
     CHECK (restored->getAccelCalInfo (1)
            == juce::Time::getCurrentTime().formatted ("%Y-%m-%d") + " · calibrator");
 }

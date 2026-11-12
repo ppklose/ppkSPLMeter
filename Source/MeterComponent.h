@@ -85,6 +85,12 @@ public:
         if (lightMode_ != light) { lightMode_ = light; repaint(); }
     }
 
+    // All inputs are accelerometers or off: the SPL readout has no signal
+    void setNoMicInput (bool v) noexcept
+    {
+        if (noMicInput_ != v) { noMicInput_ = v; repaint(); }
+    }
+
 private:
     float peakSPL_    = 0.0f;
     float peakDBASPL_ = 0.0f;
@@ -109,6 +115,7 @@ private:
     juce::String taCategoryShort_ { "WA" };
 
     bool  lightMode_        = false;
+    bool  noMicInput_       = false;
     bool  psychoVisible_    = true;
     bool  dinVisible_       = true;
     Band  selectedBand_     = Band::SPL;
