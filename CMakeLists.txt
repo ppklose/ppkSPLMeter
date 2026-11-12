@@ -334,8 +334,28 @@ if(SPLMETER_BUILD_TESTS)
         JUCE_UNIT_TESTS=1
     )
 
+    # Regression tests against the real processor. Separate executable because it
+    # links the plugin's shared-code library, which already contains the compiled
+    # JUCE modules (linking juce:: modules again would duplicate symbols).
+    add_executable(SPLMeterProcessorTests
+        Tests/ProcessorRegressionTests.cpp
+    )
+    target_link_libraries(SPLMeterProcessorTests PRIVATE
+        SPLMeter
+        Catch2::Catch2WithMain
+    )
+    target_include_directories(SPLMeterProcessorTests PRIVATE
+        Source
+        $<TARGET_PROPERTY:SPLMeter,INCLUDE_DIRECTORIES>
+    )
+    target_compile_definitions(SPLMeterProcessorTests PRIVATE
+        $<TARGET_PROPERTY:SPLMeter,COMPILE_DEFINITIONS>
+        SPLMETER_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/golden"
+    )
+
     include(CTest)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(SPLMeterTests)
+    catch_discover_tests(SPLMeterProcessorTests)
 endif()
