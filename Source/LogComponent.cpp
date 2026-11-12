@@ -806,7 +806,7 @@ void LogComponent::paint (juce::Graphics& g)
 
         for (int c = 0; c < numFftChannels(); ++c)
         {
-            g.setColour (fftDual_ ? (c == 0 ? colFftIn1 : colFftIn2) : crossCol);
+            g.setColour (fftDual() ? (c == 0 ? colFftIn1 : colFftIn2) : crossCol);
             const float y = dbToY (fftCh_[c].bandsSmoothed[bestBand]);
             g.fillEllipse (crossX - 4.0f, y - 4.0f, 8.0f, 8.0f);
         }
@@ -817,7 +817,8 @@ void LogComponent::paint (juce::Graphics& g)
             : juce::String (static_cast<int> (bandFreq + 0.5f)) + " Hz";
         juce::String label = freqStr;
         for (int c = 0; c < numFftChannels(); ++c)
-            label << "  " << (fftDual_ ? processor.getChannelName (c) + " " : juce::String())
+            label << "  " << (fftSourceChannel (c) >= 0 ? processor.getChannelName (fftSourceChannel (c)) + " "
+                                                         : juce::String())
                   << juce::String (fftCh_[c].bandsSmoothed[bestBand], 1) << " dB";
 
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f).withStyle ("Bold")));
@@ -850,13 +851,13 @@ void LogComponent::computeFftBands()
     const int fftOrder = kFftOrders[sizeIdx];
     const int fftSize  = 1 << fftOrder;
 
-    // Switching between mono mix and Dual FFT changes what each channel state
-    // is fed with, so its history must start over too
-    const bool dual = processor.apvts.getRawParameterValue ("fftDual")->load() > 0.5f;
+    // Switching the FFT source (mix / input / dual) changes what each channel
+    // state is fed with, so its history must start over too
+    const int source = processor.getFftSource();
 
-    if (fftOrder != currentFftOrder_ || dual != fftDual_)
+    if (fftOrder != currentFftOrder_ || source != fftSource_)
     {
-        if (dual != fftDual_)
+        if (source != fftSource_)
         {
             for (auto& ch : fftCh_)
             {
@@ -867,7 +868,7 @@ void LogComponent::computeFftBands()
         }
 
         currentFftOrder_ = fftOrder;
-        fftDual_         = dual;
+        fftSource_       = source;
         fft_ = std::make_unique<juce::dsp::FFT> (fftOrder);
         windowCoeffs_.assign (fftSize, 0.0f);
         for (auto& ch : fftCh_)
@@ -921,7 +922,7 @@ void LogComponent::computeFftBands()
     }
 
     for (int c = 0; c < numFftChannels(); ++c)
-        processFftChannel (fftCh_[c], fftDual_ ? c : -1);
+        processFftChannel (fftCh_[c], fftSourceChannel (c));
 }
 
 // Runs one analysis frame for a single signal. All channels share the FFT size,
@@ -1134,10 +1135,26 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         }
     };
 
-    if (! fftDual_)
+    // Legend entry (top-right of the plot), one row per call
+    float legendY = plot.getY() + 6.0f;
+    auto drawLegend = [&] (const juce::String& text, juce::Colour colour)
+    {
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        const float tw = g.getCurrentFont().getStringWidthFloat (text);
+        const float lx = plot.getRight() - tw - 26.0f;
+        g.setColour (colour);
+        g.fillRoundedRectangle (lx, legendY + 3.0f, 10.0f, 10.0f, 2.0f);
+        g.drawText (text, juce::Rectangle<float> (lx + 14.0f, legendY, tw + 4.0f, 16.0f),
+                    juce::Justification::centredLeft, false);
+        legendY += 18.0f;
+    };
+
+    if (! fftDual())
     {
         drawChannel (fftCh_[0], juce::Colour (0xff34c759), juce::Colour (0xaa34c759),
                      juce::Colour (0xffffcc00));  // amber peak line
+        if (fftSourceChannel (0) >= 0)   // single input: name it, the mix needs no legend
+            drawLegend ("FFT " + processor.getChannelName (fftSourceChannel (0)), juce::Colour (0xff34c759));
     }
     else
     {
@@ -1145,20 +1162,8 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         drawChannel (fftCh_[0], colFftIn1, colFftIn1.withAlpha (0.25f), colFftIn1.brighter (0.6f));
         drawChannel (fftCh_[1], colFftIn2, colFftIn2.withAlpha (0.25f), colFftIn2.brighter (0.6f));
 
-        // Legend (top-right of the plot)
-        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
-        float ly = plot.getY() + 6.0f;
-        for (int c = 0; c < 2; ++c)
-        {
-            const auto text = "FFT " + processor.getChannelName (c);
-            const float tw  = g.getCurrentFont().getStringWidthFloat (text);
-            const float lx  = plot.getRight() - tw - 26.0f;
-            g.setColour (c == 0 ? colFftIn1 : colFftIn2);
-            g.fillRoundedRectangle (lx, ly + 3.0f, 10.0f, 10.0f, 2.0f);
-            g.drawText (text, juce::Rectangle<float> (lx + 14.0f, ly, tw + 4.0f, 16.0f),
-                        juce::Justification::centredLeft, false);
-            ly += 18.0f;
-        }
+        drawLegend ("FFT " + processor.getChannelName (0), colFftIn1);
+        drawLegend ("FFT " + processor.getChannelName (1), colFftIn2);
     }
 
     // ---- Graph Overlay: dashed blue frequency-response curve ----

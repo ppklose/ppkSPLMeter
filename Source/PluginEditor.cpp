@@ -821,6 +821,7 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             p->setProperty ("fftOverlap",            getInt  ("fftOverlap"));
             p->setProperty ("fftRTAMode",            getBool ("fftRTAMode"));
             p->setProperty ("fftDual",               getBool ("fftDual"));
+            p->setProperty ("fftSource",             getInt  ("fftSource"));
             p->setProperty ("bandpassEnabled",       getBool ("bandpassEnabled"));
             p->setProperty ("line94Enabled",         getBool ("line94Enabled"));
             p->setProperty ("correctionEnabled",     getBool ("correctionEnabled"));
@@ -915,7 +916,13 @@ void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
                 applyB ("fftPeakHold");        applyI ("fftDisplayMode");
                 applyI ("fftBandRes");         applyI ("fftWindowType");
                 applyI ("fftOverlap");         applyB ("fftRTAMode");
-                applyB ("fftDual");
+                // fftSource supersedes fftDual; files from ≤ 3.5.2 only have fftDual
+                if (p->hasProperty ("fftSource"))
+                    audioProcessor.setFftSource ((int) p->getProperty ("fftSource"));
+                else if (p->hasProperty ("fftDual"))
+                    audioProcessor.setFftSource (static_cast<bool> (p->getProperty ("fftDual"))
+                                                     ? SPLMeterAudioProcessor::FftSourceDual
+                                                     : SPLMeterAudioProcessor::FftSourceMix);
                 applyB ("bandpassEnabled");    applyB ("line94Enabled");
                 applyB ("correctionEnabled");  applyB ("graphOverlayEnabled");
                 applyB ("graphOverlay2Enabled");

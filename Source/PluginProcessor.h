@@ -145,8 +145,19 @@ public:
     // FFT circular buffer (audio thread → GUI, lock-free)
     // Sized to the largest selectable L_FFT window (524288 = 512k samples).
     static constexpr int kFftCircBufSize = 524288;
-    // channel -1 = mono mix of all inputs; 0 / 1 = input 1 / 2 alone (Dual FFT)
+    // channel -1 = mono mix of all inputs; 0 … kMaxFftChannels-1 = that input alone
+    // (post mute / bandpass / correction). Inputs without a buffer read as silence.
+    static constexpr int kMaxFftChannels = 8;
     void copyFftWindow (float* dest, int size, int channel = -1) const noexcept;
+
+    // FFT source (parameter "fftSource"): what the timeline FFT analyses.
+    // Values are persisted — only append new entries.
+    enum FftSource { FftSourceMix = 0, FftSourceDual = 1, FftSourceInput1 = 2 };
+    static constexpr int kNumFftSources = FftSourceInput1 + kMaxFftChannels;
+    int  getFftSource() const noexcept;
+    // Sets "fftSource" and keeps the legacy "fftDual" flag in step, so sessions
+    // stay readable by v3.5.2 (message thread).
+    void setFftSource (int source);
     int  pullSpectroSamples (float* dest, int maxSamples) noexcept;
     double getSampleRate() const noexcept { return currentSampleRate; }
 
@@ -349,7 +360,11 @@ private:
     std::atomic<int> midiLearnParamIndex     { -1 };
 
     std::array<float, kFftCircBufSize> fftCircBuf_ {};
-    std::array<std::array<float, kFftCircBufSize>, 2> fftCircBufDual_ {};  // inputs 1 + 2, same write pos
+    // Per-input FFT ring buffers (same write position as fftCircBuf_). Allocated in
+    // prepareToPlay for the inputs present and never freed or moved afterwards, so
+    // the GUI can read through the published pointer at any time.
+    std::array<std::unique_ptr<float[]>, kMaxFftChannels> fftChStorage_;
+    std::array<std::atomic<float*>, kMaxFftChannels>     fftChBuf_ {};
     std::atomic<int>                   fftWritePos_ { 0 };
     std::atomic<int>                   spectroReadPos_ { 0 };
 

@@ -659,19 +659,20 @@ public:
         };
         addAndMakeVisible (fftRTAButton);
 
-        // Dual FFT: separate spectra for input 1 (green) and input 2 (red)
-        fftDualButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
-        fftDualButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff34c759));
-        fftDualButton.setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
-        fftDualButton.setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
-        fftDualButton.setClickingTogglesState (true);
-        fftDualButton.setTooltip ("Separate FFT for input 1 (green) and input 2 (red), same analysis settings");
-        fftDualButton.onClick = [this, &p]
+        // FFT source: input mix, a single input, or Dual (input 1 green / input 2 red)
+        fftSourceCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff3a3a3c));
+        fftSourceCombo.setColour (juce::ComboBox::textColourId,       juce::Colours::white);
+        fftSourceCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff48484a));
+        fftSourceCombo.setColour (juce::ComboBox::arrowColourId,      juce::Colours::white);
+        fftSourceCombo.setTooltip ("FFT source: mix of all microphone inputs, a single input, "
+                                   "or Dual = input 1 (green) and input 2 (red) with identical analysis settings");
+        fftSourceCombo.onChange = [this, &p]
         {
-            auto* param = p.apvts.getParameter ("fftDual");
-            param->setValueNotifyingHost (fftDualButton.getToggleState() ? 1.0f : 0.0f);
+            if (const int id = fftSourceCombo.getSelectedId(); id > 0)
+                p.setFftSource (id - 1);
         };
-        addAndMakeVisible (fftDualButton);
+        refreshFftSourceItems();
+        addAndMakeVisible (fftSourceCombo);
 
         // FFT frequency range sliders
         setupKnob (fftLowerFreqSlider, fftLowerFreqLabel, "f Lower");
@@ -981,7 +982,7 @@ public:
                 auto btnRow = r.removeFromTop (28);
                 const int bw = btnRow.getWidth() / 3;
                 fftEnableButton.setBounds (btnRow.removeFromLeft (bw).reduced (2, 0));
-                fftDualButton.setBounds   (btnRow.removeFromLeft (bw).reduced (2, 0));
+                fftSourceCombo.setBounds  (btnRow.removeFromLeft (bw).reduced (2, 0));
                 bandpassButton.setBounds  (btnRow.reduced (2, 0));
 
                 r.removeFromTop (5);
@@ -1146,7 +1147,6 @@ private:
         styleBtn (dispPeakButton,    juce::Colour (0xff34c759));
         styleBtn (fftPeakHoldButton, juce::Colour (0xffffcc00));
         styleBtn (fftRTAButton,      juce::Colour (0xffff6b35));
-        styleBtn (fftDualButton,     juce::Colour (0xff34c759));
         styleBtn (bandpassButton,    juce::Colour (0xffff9f0a));
         styleBtn (line94Button,           juce::Colour (0xffff453a));
         styleBtn (correctionEnableButton,   juce::Colour (0xff34c759));
@@ -1232,8 +1232,8 @@ private:
         fftPeakHoldButton.setToggleState (peakOn, juce::dontSendNotification);
         bool rtaOn = processor.apvts.getRawParameterValue ("fftRTAMode")->load() > 0.5f;
         fftRTAButton.setToggleState (rtaOn, juce::dontSendNotification);
-        bool dualOn = processor.apvts.getRawParameterValue ("fftDual")->load() > 0.5f;
-        fftDualButton.setToggleState (dualOn, juce::dontSendNotification);
+        refreshFftSourceItems();
+        fftSourceCombo.setSelectedId (processor.getFftSource() + 1, juce::dontSendNotification);
 
 
         bool bpOn = processor.apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f;
@@ -1311,7 +1311,32 @@ private:
     // FFT Peak Hold + RTA
     juce::TextButton fftPeakHoldButton { "Peak Hold"   };
     juce::TextButton fftRTAButton      { "RTA +3dB/Oct" };
-    juce::TextButton fftDualButton     { "Dual FFT" };
+    juce::ComboBox   fftSourceCombo;
+    juce::String     fftSourceItemsKey_;   // input count + names the items were built for
+
+    // (Re)builds the FFT source items when the input count or channel names change
+    void refreshFftSourceItems()
+    {
+        const int numInputs = juce::jmin (processor.getTotalNumInputChannels(),
+                                          SPLMeterAudioProcessor::kMaxFftChannels);
+        juce::String key (numInputs);
+        for (int ch = 0; ch < SPLMeterAudioProcessor::kMaxFftChannels; ++ch)
+            key << '|' << processor.getChannelName (ch);
+        if (key == fftSourceItemsKey_)
+            return;
+        fftSourceItemsKey_ = key;
+
+        fftSourceCombo.clear (juce::dontSendNotification);
+        fftSourceCombo.addItem ("FFT: Mix",        SPLMeterAudioProcessor::FftSourceMix  + 1);
+        fftSourceCombo.addItem ("FFT: Dual (1+2)", SPLMeterAudioProcessor::FftSourceDual + 1);
+        for (int ch = 0; ch < SPLMeterAudioProcessor::kMaxFftChannels; ++ch)
+        {
+            const int id = SPLMeterAudioProcessor::FftSourceInput1 + ch + 1;
+            fftSourceCombo.addItem ("FFT: " + processor.getChannelName (ch), id);
+            fftSourceCombo.setItemEnabled (id, ch < numInputs);
+        }
+        fftSourceCombo.setSelectedId (processor.getFftSource() + 1, juce::dontSendNotification);
+    }
 
     // Window function
     juce::TextButton winHannButton    { "Hann"     };

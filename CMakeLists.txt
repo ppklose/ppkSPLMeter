@@ -340,6 +340,7 @@ if(SPLMETER_BUILD_TESTS)
     add_executable(SPLMeterProcessorTests
         Tests/ProcessorRegressionTests.cpp
         Tests/SensorRoleTests.cpp
+        Tests/FftSourceTests.cpp
     )
     target_link_libraries(SPLMeterProcessorTests PRIVATE
         SPLMeter

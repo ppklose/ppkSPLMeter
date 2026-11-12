@@ -95,7 +95,15 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftRTAMode", "FFT RTA +3dB/oct", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "fftDual", "Dual FFT (Input 1 + 2)", false));
+        "fftDual", "Dual FFT (Input 1 + 2)", false));   // legacy (≤ 3.5.2), mirrors fftSource == Dual
+
+    {
+        juce::StringArray sources { "Mix", "Dual (1+2)" };
+        for (int ch = 1; ch <= SPLMeterAudioProcessor::kMaxFftChannels; ++ch)
+            sources.add ("Input " + juce::String (ch));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            "fftSource", "FFT Source", sources, 0));
+    }
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "bandpassEnabled", "20-20k Bandpass", false));
@@ -238,6 +246,17 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
     fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
+
+    // Per-input FFT buffers: grow only (never freed while the GUI may read them).
+    // Inputs 1 + 2 always exist so Dual FFT works on mono devices too.
+    for (int ch = 0; ch < juce::jlimit (2, kMaxFftChannels, getTotalNumInputChannels()); ++ch)
+    {
+        if (fftChStorage_[(size_t) ch] == nullptr)
+        {
+            fftChStorage_[(size_t) ch] = std::make_unique<float[]> ((size_t) kFftCircBufSize);   // zeroed
+            fftChBuf_[(size_t) ch].store (fftChStorage_[(size_t) ch].get(), std::memory_order_release);
+        }
+    }
 
     nonMicScratch_.setSize (juce::jmax (1, juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)),
                             samplesPerBlock, false, true, false);
@@ -449,11 +468,15 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (activeChannels == 0) activeChannels = 1;   // silence guard
     const float channelScale = 1.0f / static_cast<float> (activeChannels);
 
-    // Inputs 1 + 2 individually, for the Dual FFT (same processing stage as the mono mix)
-    const juce::AudioBuffer<float>& dualSrc = fileMode ? fileReadBuffer : buffer;
-    const float* dualCh[2] = {
-        dualSrc.getNumChannels() > 0 ? dualSrc.getReadPointer (0) : nullptr,
-        dualSrc.getNumChannels() > 1 ? dualSrc.getReadPointer (1) : nullptr };
+    // Each input individually, for per-input / Dual FFT (same processing stage as the mono mix)
+    const juce::AudioBuffer<float>& chSrc = fileMode ? fileReadBuffer : buffer;
+    const float* chIn[kMaxFftChannels];
+    float*       chOut[kMaxFftChannels];
+    for (int ch = 0; ch < kMaxFftChannels; ++ch)
+    {
+        chIn[ch]  = ch < chSrc.getNumChannels() ? chSrc.getReadPointer (ch) : nullptr;
+        chOut[ch] = fftChBuf_[(size_t) ch].load (std::memory_order_acquire);
+    }
 
     for (int s = 0; s < numSamples; ++s)
     {
@@ -482,8 +505,9 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             int pos = fftWritePos_.load (std::memory_order_relaxed);
             fftCircBuf_[pos] = raw;
-            fftCircBufDual_[0][pos] = dualCh[0] != nullptr ? dualCh[0][s] : 0.0f;
-            fftCircBufDual_[1][pos] = dualCh[1] != nullptr ? dualCh[1][s] : 0.0f;
+            for (int ch = 0; ch < kMaxFftChannels; ++ch)
+                if (chOut[ch] != nullptr)
+                    chOut[ch][pos] = chIn[ch] != nullptr ? chIn[ch][s] : 0.0f;
             fftWritePos_.store ((pos + 1) % kFftCircBufSize, std::memory_order_release);
         }
 
@@ -694,7 +718,17 @@ void SPLMeterAudioProcessor::pruneLog (float logDurationSeconds)
 
 void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size, int channel) const noexcept
 {
-    const auto& src = (channel == 0 || channel == 1) ? fftCircBufDual_[(size_t) channel] : fftCircBuf_;
+    const float* src = fftCircBuf_.data();
+    if (channel >= 0)
+    {
+        src = channel < kMaxFftChannels ? fftChBuf_[(size_t) channel].load (std::memory_order_acquire)
+                                        : nullptr;
+        if (src == nullptr)
+        {
+            std::fill (dest, dest + size, 0.0f);
+            return;
+        }
+    }
     int writePos = fftWritePos_.load (std::memory_order_acquire);
     for (int i = 0; i < size; ++i)
     {
@@ -751,6 +785,16 @@ void SPLMeterAudioProcessor::restoreStateXml (const juce::XmlElement& xml)
     apvts.replaceState (juce::ValueTree::fromXml (xml));
     loadChannelRolesFromState();
 
+    // ≤ 3.5.2 sessions have no fftSource: derive it from the legacy Dual FFT flag
+    {
+        bool hasSource = false;
+        for (auto* child : xml.getChildWithTagNameIterator ("PARAM"))
+            hasSource = hasSource || child->getStringAttribute ("id") == "fftSource";
+        if (! hasSource)
+            setFftSource (apvts.getRawParameterValue ("fftDual")->load() > 0.5f ? FftSourceDual
+                                                                                : FftSourceMix);
+    }
+
     // Apply the non-parameter settings held in UIState
     auto ui = getUiState();
     dawSync_.store ((bool) ui.getProperty ("dawSync", false));
@@ -803,6 +847,22 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         restoreStateXml (*xml);
+}
+
+//==============================================================================
+int SPLMeterAudioProcessor::getFftSource() const noexcept
+{
+    return juce::jlimit (0, kNumFftSources - 1,
+                         (int) apvts.getRawParameterValue ("fftSource")->load());
+}
+
+void SPLMeterAudioProcessor::setFftSource (int source)
+{
+    source = juce::jlimit (0, kNumFftSources - 1, source);
+    if (auto* p = apvts.getParameter ("fftSource"))
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) source));
+    if (auto* d = apvts.getParameter ("fftDual"))
+        d->setValueNotifyingHost (source == FftSourceDual ? 1.0f : 0.0f);
 }
 
 //==============================================================================
