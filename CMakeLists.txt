@@ -319,6 +319,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/LeqTests.cpp
         Tests/VibrationDspTests.cpp
         Tests/VibrationAssessmentTests.cpp
+        Tests/RewTransportTests.cpp
     )
 
     target_include_directories(SPLMeterTests PRIVATE Source)
