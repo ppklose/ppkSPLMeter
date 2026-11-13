@@ -1,6 +1,6 @@
 # SPLMeter — REW Measurement Sequencer Specification
 
-Status: **Planned** (v0.2, decisions made — §9) · 2026-11-13 · target release: **v3.6.0** · branch `feature/vibration`
+Status: **Implemented** (v0.3) · 2026-11-13 · release: **v3.6.0** · branch `feature/vibration` · user guide: [REW_SEQUENCER_GUIDE.md](REW_SEQUENCER_GUIDE.md)
 
 ## 1. Goals
 

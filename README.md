@@ -72,6 +72,14 @@ Full guide: [docs/VIBRATION_GUIDE.md](docs/VIBRATION_GUIDE.md)
 - **Vibration panel** below the SPL meter, **timeline traces** (Vib X · Y · Z · Σ), vibration **CSV columns**, **multichannel WAV** with roles and calibration, and an **HTML vibration report**
 - Indicative measurements: SPLMeter is not a type-tested ISO 8041-1 / DIN 45669-1 instrument
 
+### REW Measurement Sequencer
+Full guide: [docs/REW_SEQUENCER_GUIDE.md](docs/REW_SEQUENCER_GUIDE.md)
+- **Tools → REW Measurement Sequencer…** runs a list of [Room EQ Wizard](https://www.roomeqwizard.com/) sweep measurements one after the other through REW's REST API (REW Pro, API enabled, same computer)
+- **Per step**: name and notes, output, second output (ASIO) / invert, input range, level, sweep range and length, repetitions, timing reference, clipping / SPL-limit protection, REW group, *wait for me* prompt, delay; unset settings keep REW's value
+- **Add positions…** for multi-position measurements, loops, gap between steps, stop / skip / retry on errors, dry run, pause and abort; REW's settings are restored after the run
+- **SPLMeter measures each sweep too**: LAeq, LCeq, LZeq, LAFmax, LCSmax, LCpeak and, with an accelerometer, vibration RMS and peak per axis — saved with the run as **CSV and JSON**, plus one **timeline marker** per sweep
+- Sequences are saved as `*.rewseq.json`; the run continues when the window or editor is closed
+
 ### Input Modes
 - **Real Time** — live microphone / audio interface input, up to **32 channels**; each input can be a microphone or an accelerometer axis
 - **File** — load and analyse an audio file (WAV, AIFF, FLAC, MP3, OGG)
@@ -93,6 +101,7 @@ Accessible via the **Tools…** button (popup menu):
 - **ViSQOL** *(macOS / Windows when pre-built lib is present)* — perceptual audio quality analysis (MOS-LQO + per-band NSIM)
 - **Correction Filter** — load a frequency-response correction curve (.txt / .csv: Hz + dB pairs); applied as a linear-phase FIR filter before metering (configured in Settings)
 - **Graph Overlay** — load a reference curve and display it as a dashed blue line in the FFT view (configured in Settings)
+- **REW Measurement Sequencer** *(not on iOS)* — runs a list of REW sweep measurements with per-step settings and measures each sweep with SPLMeter (see above)
 
 ### Title Bar Utilities
 - **Live clock** — auto-updating date/time display (updates every second)
@@ -320,6 +329,7 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 |---|---|---|---|
 | **JUCE** | 8.0.7 | ISC / GPL-3.0 | https://github.com/juce-framework/JUCE |
 | **Steinberg VST3 SDK** (incl. ASIO SDK) | latest | Steinberg VST3 License | https://github.com/steinbergmedia/vst3sdk |
+| **Room EQ Wizard REST API** (used by the REW Measurement Sequencer; REW is not bundled) | API 0.9.9 (REW 5.40) | REW EULA | https://www.roomeqwizard.com/help/help_en-GB/html/api.html |
 
 ### Standards & Psychoacoustic Models
 
@@ -349,6 +359,7 @@ Sources and verification status of all vibration parameters: [docs/VIBRATION_SPE
 - **Timeline** vibration traces, **CSV** vibration columns, **JSON settings** with roles, calibration and limits
 - **Multichannel WAV recording** with roles and calibration in the file; file playback uses them
 - **HTML vibration report** (Ex-/Import → Save Vibration Report…)
+- **REW Measurement Sequencer** (Tools → REW Measurement Sequencer…): runs a list of Room EQ Wizard sweeps through REW's REST API with per-step output, second output / invert, inputs, level, sweep, repetitions, timing reference, protection, group and *wait for me* prompts; dry run, pause, abort, loops, error policy; REW's settings restored afterwards. SPLMeter measures every sweep (LAeq … LCpeak, vibration per axis) and saves the run as CSV and JSON, with a timeline marker per sweep — see [docs/REW_SEQUENCER_GUIDE.md](docs/REW_SEQUENCER_GUIDE.md)
 - **FFT source** selector (mix, Dual 1+2, or a single input) replaces the Dual FFT toggle; v3.5.2 settings load unchanged
 - The standalone app now accepts devices that open more than 8 inputs (up to 32); before, they fell back to a single input
 - Default behaviour without accelerometer roles is unchanged (bit-identical SPL results, verified by regression tests)
