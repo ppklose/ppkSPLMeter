@@ -220,7 +220,7 @@ The Settings window has a fixed size and no free space, so the inputs table live
 - `LogEntry` has a `VibrationLog` block: per slot (X, Y, Z, Σ) running RMS and interval peak in SI units, plus quantity, axis mask and uniaxial flag; `valid` only for live accelerometer readings (not in file mode). The profile's main value follows with step 9.
 - New toggles in the 4th column of the "Left axis" row: **Vib X · Y · Z · Σ** (persisted as `logShowVib*`; Z and Σ on by default; uniaxial shows a single "Vib" toggle). They appear only with a valid accelerometer configuration.
 - Vibration traces use the **right y-axis** with an automatic range in `displayUnit` (linear: 0 … 1/2/5·10ⁿ above the maximum; dB: 10 dB steps, ≥ 20 dB span). If a psychoacoustic metric is shown at the same time, the vibration trace takes the right-axis labels and the metric keeps its own unlabelled scale. Traces have gaps where an entry has no live reading.
-- Colours: X orange, Y cyan, Z violet, Σ white/black (colourblind-safe against the mic's green/red Dual FFT colours).
+- Colours: X brown, Y mint, Z slate, Σ white/black — distinct from all SPL, psychoacoustic and Dual FFT trace colours (the original orange/cyan/violet collided with peak dBA, peak SPL and RMS dBA).
 
 ### 7.4 FFT and spectrogram
 

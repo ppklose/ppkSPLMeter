@@ -24,9 +24,9 @@ const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime gree
 const juce::Colour LogComponent::colBassComfort    { 0xff7d5fff };  // indigo
 const juce::Colour LogComponent::colFftIn1         { 0xff34c759 };  // green
 const juce::Colour LogComponent::colFftIn2         { 0xffff453a };  // red
-const juce::Colour LogComponent::colVib[3] { juce::Colour (0xffff9f0a),     // X orange
-                                             juce::Colour (0xff5ac8fa),     // Y cyan
-                                             juce::Colour (0xffbf5af2) };   // Z violet
+const juce::Colour LogComponent::colVib[3] { juce::Colour (0xffac8e68),     // X brown
+                                             juce::Colour (0xff63e6be),     // Y mint
+                                             juce::Colour (0xff8fa8c8) };   // Z slate
 
 namespace
 {

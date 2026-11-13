@@ -66,7 +66,7 @@ private:
     juce::ToggleButton vibVisButtons_[4];
     bool               vibAvailable_ = false;
     bool               vibUniaxial_  = false;
-    static const juce::Colour colVib[3];   // X orange, Y cyan, Z violet (Σ: text colour)
+    static const juce::Colour colVib[3];   // X brown, Y mint, Z slate (Σ: text colour)
 
     // FFT
     static constexpr int   kMaxFftOrder = 19;    // 2^19 = 524288, matches PluginProcessor::kFftCircBufSize

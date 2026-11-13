@@ -250,7 +250,7 @@ private:
 
     vib::Quantity quantity() const noexcept { return (vib::Quantity) state_.snap.quantity; }
 
-    // Axis colours as in the timeline (spec §7.3): X orange, Y cyan, Z violet, Σ neutral
+    // Axis colours as in the timeline (spec §7.3): X brown, Y mint, Z slate, Σ neutral (keep in sync with LogComponent::colVib)
     std::vector<Row> rows() const
     {
         std::vector<Row> r;
@@ -258,10 +258,10 @@ private:
         if (s.uniaxial)
         {
             const char* sym[3] = { "a", "v", "d" };
-            r.push_back ({ vib::AxisX, sym[juce::jlimit (0, 2, s.quantity)], juce::Colour (0xffff9f0a) });
+            r.push_back ({ vib::AxisX, sym[juce::jlimit (0, 2, s.quantity)], juce::Colour (0xffac8e68) });
             return r;
         }
-        const juce::Colour cols[3] = { juce::Colour (0xffff9f0a), juce::Colour (0xff5ac8fa), juce::Colour (0xffbf5af2) };
+        const juce::Colour cols[3] = { juce::Colour (0xffac8e68), juce::Colour (0xff63e6be), juce::Colour (0xff8fa8c8) };
         const char* names[3] = { "X", "Y", "Z" };
         int axes = 0;
         for (int a = 0; a < 3; ++a)

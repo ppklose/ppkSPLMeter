@@ -86,6 +86,27 @@ inline juce::String weightingName (vib::Weighting w)
     return {};
 }
 
+// Short form for the combo box text; the full name goes into the tooltip.
+inline juce::String weightingShortName (vib::Weighting w)
+{
+    switch (w)
+    {
+        case vib::Weighting::None:      return "Unweighted";
+        case vib::Weighting::BandLimit: return "Band limit";
+        case vib::Weighting::Wb:        return "Wb  rail";
+        case vib::Weighting::Wc:        return "Wc  seat back";
+        case vib::Weighting::Wd:        return "Wd  body x/y";
+        case vib::Weighting::We:        return "We  rotational";
+        case vib::Weighting::Wf:        return "Wf  sickness";
+        case vib::Weighting::Wh:        return "Wh  hand-arm";
+        case vib::Weighting::Wj:        return "Wj  head";
+        case vib::Weighting::Wk:        return "Wk  body z";
+        case vib::Weighting::Wm:        return "Wm  buildings";
+        case vib::Weighting::KB:        return "KB  DIN 4150-2";
+    }
+    return {};
+}
+
 inline juce::String formatAccel (double ms2)
 {
     if (ms2 <= 0.0)   return U ("0 m/s²");
@@ -769,9 +790,10 @@ public:
         {
             setupLabel (weightingLabels_[a], axisNames[a]);
             for (int w = 0; w <= (int) vib::Weighting::KB; ++w)
-                weightingCombos_[a].addItem (weightingName ((vib::Weighting) w), w + 1);
+                weightingCombos_[a].addItem (weightingShortName ((vib::Weighting) w), w + 1);
             weightingCombos_[a].onChange = [this, a] { auto s = processor_.getVibrationSettings();
                                                        s.weighting[a] = (vib::Weighting) (weightingCombos_[a].getSelectedId() - 1);
+                                                       weightingCombos_[a].setTooltip (weightingName (s.weighting[a]));
                                                        processor_.setVibrationSettings (s); };
             addAndMakeVisible (weightingCombos_[a]);
 
@@ -1027,7 +1049,10 @@ private:
         for (int a = 0; a < 3; ++a)
         {
             if (! weightingCombos_[a].isPopupActive())
+            {
                 weightingCombos_[a].setSelectedId ((int) s.weighting[a] + 1, juce::dontSendNotification);
+                weightingCombos_[a].setTooltip (weightingName (s.weighting[a]));
+            }
             if (! kFields_[a].isBeingEdited()) kFields_[a].setValue (s.k[a]);
             anyBand = anyBand || s.weighting[a] == vib::Weighting::BandLimit;
         }
