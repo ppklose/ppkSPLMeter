@@ -160,35 +160,34 @@ Poll every 500 ms:
 
 ## 6. SPLMeter integration
 
-### 6.1 Per-step measurement (decided, Q6)
+### 6.1 Per-step measurement (decided, Q6; implemented)
 
 REW measures the sweep; SPLMeter measures the same interval with its own microphone and accelerometer. REW cannot measure vibration, so these values are part of the result, not an extra.
 
-- **Step integrator** in the processor (audio thread, lock-free): the sequencer sets `stepBegin` at the trigger and `stepEnd` when the measurement arrives. In between it accumulates
-  - mic: mean square A, C and Z → **L_Aeq, L_Ceq, L_Zeq**, plus **L_AFmax**, **L_CSmax**, **L_Cpeak**;
-  - vibration (if an accelerometer is active): per axis X/Y/Z and Σ the **RMS** over the step (energy mean, weighted as configured) and the **peak**, plus the profile's **main value**, unit and profile name.
+- **Step integrator** in the processor (audio thread, lock-free handshake `stepState_`): the sequencer begins it just before the trigger and ends it when the measurement has arrived (the end waits up to 0.5 s for the audio thread; without audio the step has no levels).
+  - Mic: mean square A, C, Z → **L_Aeq, L_Ceq, L_Zeq**; **L_AFmax** / **L_CSmax** from FAST-A and SLOW-C detectors that run continuously (independent of the meter's FAST/SLOW choice, so they are settled when a step starts); **L_Cpeak** from the C-weighted sample peak.
+  - Vibration (if an accelerometer is active): per axis X/Y/Z and Σ the **RMS** over the step (mean of the 125 ms running mean squares) and the **peak**, with quantity and axes. The profile's main value is *not* reported per step: A(8), VDV, KB_FTr and the like accumulate over the user's whole measurement and are not meaningful for one sweep.
 - It does not touch the user's running values: no reset of LAeq, log, peaks or vibration accumulators.
-- Paused metering (Pause / DAW sync) is respected. A step that was partly paused is flagged.
+- Paused metering (Pause / DAW sync) is respected: paused time is counted (`paused_s`) but not measured.
 - The step window runs from the trigger to the measurement's arrival. That includes REW's start delay and the silence before and after the sweep. The duration is stored, so values can be compared between steps.
 
 ### 6.2 Run results (saved)
 
-At the end of the run, and also after an abort or error with the steps done so far, SPLMeter writes to `resultsFolder`:
+At the end of every run that measured, and also after an abort or error with the steps done so far, SPLMeter writes to the results folder (default `Documents/SPLMeter/REW runs`). Dry runs write nothing.
 
-- `<sequence>_<date>_<time>.csv`: one row per step:
-  - step, loop, name, status, start time, duration, warnings/errors, REW title, REW UUID, output, input(s), level;
-  - L_Aeq, L_Ceq, L_Zeq, L_AFmax, L_CSmax, L_Cpeak;
-  - vib profile, unit, main value, X/Y/Z/Σ RMS, X/Y/Z/Σ peak.
+- `<sequence>_<YYYY-MM-DD_HH-MM-SS>.csv`:
+  - header lines (`#`): SPLMeter and REW versions, result, mic calibration offset, vibration profile, accelerometer calibration per axis, REW file;
+  - one row per step result: step, loop, name, status, start, duration, messages, REW UUIDs, output, second output, input(s), level;
+  - LAeq, LCeq, LZeq, LAFmax, LCSmax, LCpeak, metered and paused seconds;
+  - vibration unit (the display unit), X/Y/Z/Σ RMS, X/Y/Z/Σ peak. The vibration columns are empty without an accelerometer.
+- `<same name>.json`: the same data plus the full sequence (format `splmeter-rew-run`, version 1).
+- REW's `Save all` writes to the .mdat path chosen in the window (unchanged by the results folder).
 
-  The vibration columns are empty without an accelerometer. Calibration state goes in a header comment.
-- `<sequence>_<date>_<time>.json`: the same data plus the full sequence and the REW and SPLMeter versions. This lets a run be traced later.
-- If `saveMdatPath` is set: REW's `Save all` writes the measurements next to these files with the same base name.
-
-The run log in the window can also be saved by hand (**Save results…**).
+The run log in the window shows each step's LAeq, LAFmax, LCpeak and the vibration RMS. **Show results** opens the CSV in the file browser.
 
 ### 6.3 Timeline
 
-- **Log markers** (optional, on by default): `REW 3/18 L pos1` at the trigger. SPLMeter's timeline then shows which sweep belongs to which SPL and vibration trace.
+- **Log markers** (optional, on by default): `REW 3/18 L pos1` at the trigger. SPLMeter's timeline then shows which sweep belongs to which SPL and vibration trace. The processor queues the markers (the run may go on without an editor); the editor collects them on its timer.
 
 ## 7. Testing
 

@@ -101,6 +101,9 @@ struct Hooks
 {
     std::function<void (const StepResult&)> stepStarted;    // just before the trigger
     std::function<void (const StepResult&)> stepFinished;
+    // After the end of the run (REW restored), with the final state; the text
+    // returned is added to the run's message (e.g. where the results went)
+    std::function<juce::String (const Progress&)> runFinished;
 };
 
 // Sweep length text → samples ("512k" = 524288, "1M" = 1048576)
@@ -172,8 +175,18 @@ private:
     {
         const auto endState = runSequence();
         finish();
+        const auto finalState = abort_ && endState != RunState::Failed ? RunState::Aborted : endState;
+        if (hooks_.runFinished)
+        {
+            auto p = progress();
+            p.state = finalState;
+            p.prompt.clear();
+            const auto note = hooks_.runFinished (p);
+            if (note.isNotEmpty())
+                setMessage (p.message.isNotEmpty() ? p.message + "\n" + note : note);
+        }
         std::lock_guard<std::mutex> l (m_);
-        progress_.state = abort_ && endState != RunState::Failed ? RunState::Aborted : endState;
+        progress_.state = finalState;
         progress_.prompt.clear();
     }
 

@@ -196,6 +196,9 @@ SPLMeterAudioProcessor::~SPLMeterAudioProcessor()
 void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    rewFastAlpha_ = 1.0 - std::exp (-1.0 / (0.125 * sampleRate));
+    rewSlowAlpha_ = 1.0 - std::exp (-1.0 / (1.0 * sampleRate));
+    rewFastA_ = rewSlowC_ = 0.0;
     aWeightL.prepare (sampleRate);
     cWeightL.prepare (sampleRate);
     roughnessEst.prepare (sampleRate);
@@ -350,6 +353,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         dawIsPlaying_.store (dawPlaying);
     }
     const bool skipMetering = paused_.load() || (isDawSyncEnabled && !dawPlaying);
+    handleRewStep (calOffset);
+    const bool rewStep = stepState_.load (std::memory_order_relaxed) == kStepRunning;
 
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
@@ -414,7 +419,11 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             axisIn[a] = (ch >= 0 && ch < numChannels) ? buffer.getReadPointer (ch) : nullptr;
         }
         if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
+        {
             vibSnapshot_.write (vibWork_);
+            if (rewStep && ! skipMetering)
+                stepAccum_.addVib (vibWork_);
+        }
     }
 
     // --- Live input level per channel (Inputs table) ---
@@ -605,6 +614,19 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         float aSample = aWeightL.processSample (raw);
         float cSample = cWeightL.processSample (raw);
+
+        // REW per-step L_AFmax / L_CSmax: own FAST-A and SLOW-C detectors, independent
+        // of the meter's FAST/SLOW choice and settled before a step starts
+        if (! skipMetering)
+        {
+            rewFastA_ += rewFastAlpha_ * ((double) aSample * aSample - rewFastA_);
+            rewSlowC_ += rewSlowAlpha_ * ((double) cSample * cSample - rewSlowC_);
+        }
+        if (rewStep)
+        {
+            if (skipMetering) ++stepAccum_.pausedSamples;
+            else              stepAccum_.add (raw, aSample, cSample, rewFastA_, rewSlowC_);
+        }
 
         // Feed FFT circular buffer
         {
@@ -1310,11 +1332,164 @@ void SPLMeterAudioProcessor::setRewSequence (const rew::Sequence& sequence)
 bool SPLMeterAudioProcessor::startRewRun (bool dryRun, std::unique_ptr<rew::Transport> transport,
                                           rew::RunOptions options)
 {
+    if (rewSequencer_.isRunning())
+        return false;
     const auto seq = getRewSequence();
     if (transport == nullptr)
         transport = std::make_unique<rew::HttpTransport> (seq.port);
     options.dryRun = dryRun;
-    return rewSequencer_.start (seq, std::move (transport), options);
+
+    // Header of the results, read here on the message thread (spec §6.2)
+    rew::RunInfo info;
+    info.splmeterVersion = JucePlugin_VersionString;
+    info.calOffsetDb = apvts.getRawParameterValue ("calOffset")->load();
+    info.vibUnit = getVibrationDisplayUnit();
+    for (int ch = 0; ch < juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs); ++ch)
+    {
+        const auto role = getChannelRole (ch);
+        if (! SensorConfig::isAccel (role))
+            continue;
+        static const char* names[] = { "Mic", "X", "Y", "Z", "uniaxial", "Off" };
+        auto line = juce::String (names[(int) role]) + ": " + getChannelName (ch) + ", "
+                    + juce::String (getAccelCalDb (ch), 2) + " dB";
+        if (const auto calInfo = getAccelCalInfo (ch); calInfo.isNotEmpty())
+            line << " (" << calInfo << ")";
+        info.vibCalibration.add (line);
+    }
+    if (! info.vibCalibration.isEmpty())
+        info.vibProfile = getVibrationProfileKey();
+
+    {
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewLevels_.clear();
+        rewResultsFile_ = juce::File();
+    }
+
+    rew::Hooks hooks;
+    const int total = rew::totalSweeps (seq);
+    auto sweep = std::make_shared<int> (0);
+    hooks.stepStarted = [this, sweep, total, markers = seq.addLogMarkers] (const rew::StepResult& r)
+    {
+        beginRewStepMeasurement();
+        if (r.attempts == 1)
+            ++*sweep;
+        if (markers)
+        {
+            const auto now = juce::Time::currentTimeMillis() - getPauseOffsetMs();
+            auto text = "REW " + juce::String (*sweep) + "/" + juce::String (total) + " " + r.title;
+            if (r.attempts > 1) text << " (retry)";
+            std::lock_guard<std::mutex> l (rewMutex_);
+            if (pendingMarkers_.size() < 1000)
+                pendingMarkers_.push_back ({ now, text });
+        }
+    };
+    hooks.stepFinished = [this] (const rew::StepResult&)
+    {
+        const auto levels = endRewStepMeasurement();   // invalid for steps without a sweep
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewLevels_.push_back (levels);
+    };
+    hooks.runFinished = [this, seq, info] (const rew::Progress& p) -> juce::String
+    {
+        if (p.dryRun || p.results.empty())
+            return {};
+        auto runInfo = info;
+        runInfo.finished = juce::Time::getCurrentTime();
+        juce::String error;
+        const auto file = rew::writeResults (seq, p, getRewStepLevels(), runInfo, error);
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewResultsFile_ = file;
+        return file != juce::File() ? "Results: " + file.getFullPathName() : "Results not saved: " + error;
+    };
+    return rewSequencer_.start (seq, std::move (transport), options, std::move (hooks));
+}
+
+void SPLMeterAudioProcessor::beginRewStepMeasurement() noexcept
+{
+    stepState_.store (kStepBegin, std::memory_order_release);
+}
+
+rew::StepLevels SPLMeterAudioProcessor::endRewStepMeasurement()
+{
+    int expected = kStepRunning;
+    if (! stepState_.compare_exchange_strong (expected, kStepEnd, std::memory_order_acq_rel))
+    {
+        stepState_.store (kStepIdle, std::memory_order_release);   // never started (no audio) or idle
+        return {};
+    }
+    auto take = [this]
+    {
+        const auto r = stepResult_;
+        stepState_.store (kStepIdle, std::memory_order_release);
+        return r;
+    };
+    for (int i = 0; i < 100; ++i)
+    {
+        if (stepState_.load (std::memory_order_acquire) == kStepDone)
+            return take();
+        juce::Thread::sleep (5);
+    }
+    expected = kStepEnd;   // audio stopped: give up, unless it finished just now
+    if (stepState_.compare_exchange_strong (expected, kStepIdle, std::memory_order_acq_rel))
+        return {};
+    return stepState_.load (std::memory_order_acquire) == kStepDone ? take() : rew::StepLevels {};
+}
+
+void SPLMeterAudioProcessor::handleRewStep (float calOffset) noexcept
+{
+    int st = stepState_.load (std::memory_order_acquire);
+    if (st == kStepBegin)
+    {
+        stepAccum_ = {};
+        stepState_.compare_exchange_strong (st, kStepRunning, std::memory_order_acq_rel);
+    }
+    else if (st == kStepEnd)
+    {
+        const auto& a = stepAccum_;
+        auto db = [calOffset] (double ms) { return 10.0 * std::log10 (std::max (ms, 1.0e-20)) + calOffset; };
+        rew::StepLevels r;
+        r.valid = a.n > 0;
+        r.seconds = (double) a.n / currentSampleRate;
+        r.pausedSeconds = (double) a.pausedSamples / currentSampleRate;
+        if (a.n > 0)
+        {
+            r.laeq = db (a.sumA / (double) a.n);
+            r.lceq = db (a.sumC / (double) a.n);
+            r.lzeq = db (a.sumZ / (double) a.n);
+            r.lafmax = db (a.maxFastA);
+            r.lcsmax = db (a.maxSlowC);
+            r.lcpeak = db ((double) a.peakC * a.peakC);
+        }
+        r.vibValid = a.vibCount > 0;
+        r.quantity = a.vibQuantity;
+        r.axisMask = a.vibAxisMask;
+        r.uniaxial = a.vibUniaxial;
+        for (int slot = 0; slot < vib::kNumAxisSlots && r.vibValid; ++slot)
+        {
+            r.vibRms[slot] = std::sqrt (a.vibSumSq[slot] / (double) a.vibCount);
+            r.vibPeak[slot] = a.vibPeak[slot];
+        }
+        stepResult_ = r;
+        stepState_.compare_exchange_strong (st, kStepDone, std::memory_order_acq_rel);
+    }
+}
+
+std::vector<rew::StepLevels> SPLMeterAudioProcessor::getRewStepLevels() const
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return rewLevels_;
+}
+
+juce::File SPLMeterAudioProcessor::getRewResultsFile() const
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return rewResultsFile_;
+}
+
+std::vector<SPLMeterAudioProcessor::TimelineMarker> SPLMeterAudioProcessor::takePendingMarkers()
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return std::exchange (pendingMarkers_, {});
 }
 
 juce::var SPLMeterAudioProcessor::getInputsJson() const

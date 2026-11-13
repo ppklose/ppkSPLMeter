@@ -14,7 +14,7 @@
 #include "Vibration/Units.h"
 #include "Vibration/Profiles.h"
 #include "Vibration/Assessment.h"
-#include "Rew/RewSequencer.h"
+#include "Rew/RewRunResults.h"
 #include "RtHandover.h"
 #include "WavRecording.h"
 #include <array>
@@ -389,6 +389,19 @@ public:
                       rew::RunOptions options = {});
     rew::Sequencer& getRewSequencer() noexcept { return rewSequencer_; }
 
+    // Per-step measurement for the REW sequencer (spec §6.1), independent of the
+    // user's LAeq, log and vibration accumulators. Not on the audio thread; the
+    // end waits up to 0.5 s for the audio thread and returns invalid levels if
+    // no audio ran.
+    void beginRewStepMeasurement() noexcept;
+    rew::StepLevels endRewStepMeasurement();
+    std::vector<rew::StepLevels> getRewStepLevels() const;   // current/last run, in result order
+    juce::File getRewResultsFile() const;                    // CSV of the last run ({} = none)
+
+    // Timeline markers added outside the editor (one per REW sweep); the editor collects them
+    struct TimelineMarker { juce::int64 timestampMs; juce::String text; };
+    std::vector<TimelineMarker> takePendingMarkers();
+
     // Display unit of the vibration readout (UIState/Accel "displayUnit")
     vib::DisplayUnit getVibrationDisplayUnit() const;
     void setVibrationDisplayUnit (vib::DisplayUnit unit);
@@ -599,6 +612,60 @@ private:
     std::atomic<bool>         impFidActive_    { false };
     std::atomic<int>          impFidPos_       { 0 };
     int                       impFidSignalLen_ { 0 };
+
+    // REW per-step measurement (spec §6.1): the audio thread owns stepAccum_ and
+    // writes stepResult_ before publishing kStepDone
+    struct StepAccum
+    {
+        double sumA = 0.0, sumC = 0.0, sumZ = 0.0;
+        long long n = 0, pausedSamples = 0;
+        double maxFastA = 0.0, maxSlowC = 0.0;
+        float peakC = 0.0f;
+        double vibSumSq[4] {};
+        float vibPeak[4] {};
+        long long vibCount = 0;
+        int vibQuantity = 0, vibAxisMask = 0;
+        bool vibUniaxial = false;
+
+        // fastA / slowC: the continuously running detectors (settled before the step)
+        void add (float z, float a, float c, double fastA, double slowC) noexcept
+        {
+            sumZ += (double) z * z;
+            sumA += (double) a * a;
+            sumC += (double) c * c;
+            ++n;
+            maxFastA = std::max (maxFastA, fastA);
+            maxSlowC = std::max (maxSlowC, slowC);
+            peakC = std::max (peakC, std::abs (c));
+        }
+        // Once per vibration snapshot (125 ms): the mean of the running mean
+        // squares is the mean square over the step
+        void addVib (const vib::VibrationSnapshot& v) noexcept
+        {
+            if (! v.valid) return;
+            for (int slot = 0; slot < vib::kNumAxisSlots; ++slot)
+            {
+                vibSumSq[slot] += (double) v.axis[slot].rms * v.axis[slot].rms;
+                vibPeak[slot] = std::max (vibPeak[slot], v.axis[slot].peak);
+            }
+            ++vibCount;
+            vibQuantity = v.quantity;
+            vibAxisMask = v.axisMask;
+            vibUniaxial = v.uniaxial;
+        }
+    };
+    enum : int { kStepIdle = 0, kStepBegin, kStepRunning, kStepEnd, kStepDone };
+    std::atomic<int> stepState_ { kStepIdle };
+    StepAccum        stepAccum_;    // audio thread
+    double rewFastA_ = 0.0, rewSlowC_ = 0.0;            // FAST-A / SLOW-C mean squares, always running
+    double rewFastAlpha_ = 0.0, rewSlowAlpha_ = 0.0;
+    rew::StepLevels  stepResult_;   // audio thread → reader after kStepDone
+    void handleRewStep (float calOffset) noexcept;   // audio thread, start of block
+
+    mutable std::mutex rewMutex_;
+    std::vector<rew::StepLevels> rewLevels_;
+    juce::File rewResultsFile_;
+    std::vector<TimelineMarker> pendingMarkers_;
 
     // Declared last, so it is destroyed first: aborts a run and restores REW
     // before anything a run uses goes away

@@ -687,7 +687,9 @@ public:
         abortButton_.setTooltip ("Stop now: cancels the sweep in REW and restores REW's settings");
         continueButton_.onClick = [this] { processor_.getRewSequencer().continueAfterPrompt(); };
         skipButton_.onClick = [this] { processor_.getRewSequencer().skipPrompted(); };
-        for (auto* c : std::initializer_list<juce::Component*> { &runButton_, &dryRun_, &pauseButton_, &abortButton_,
+        showResults_.onClick = [this] { processor_.getRewResultsFile().revealToUser(); };
+        showResults_.setTooltip ("Show the results of the last run (CSV and JSON) in the file browser");
+        for (auto* c : std::initializer_list<juce::Component*> { &showResults_, &runButton_, &dryRun_, &pauseButton_, &abortButton_,
                                                                  &runStatus_, &progressBar_, &log_,
                                                                  &promptText_, &continueButton_, &skipButton_ })
             addAndMakeVisible (c);
@@ -752,7 +754,7 @@ public:
         runButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
         abortButton_.setColour (juce::TextButton::buttonColourId, pal_.bad.withAlpha (0.85f));
         abortButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-        for (auto* b : { &pauseButton_, &skipButton_ })
+        for (auto* b : { &pauseButton_, &skipButton_, &showResults_ })
         {
             b->setColour (juce::TextButton::buttonColourId, pal_.field);
             b->setColour (juce::TextButton::textColourOffId, pal_.text);
@@ -860,6 +862,7 @@ public:
             pauseButton_.setBounds (line.removeFromLeft (90).reduced (2, 1));
             abortButton_.setBounds (line.removeFromLeft (90).reduced (2, 1));
             line.removeFromLeft (12);
+            showResults_.setBounds (line.removeFromRight (120).reduced (2, 1));
             runStatus_.setBounds (line);
             x.removeFromTop (6);
             progressBar_.setBounds (x.removeFromTop (10));
@@ -1106,23 +1109,28 @@ private:
         if (prompting)
             promptText_.setText (p.prompt, juce::dontSendNotification);
 
-        // Run log: rebuilt when a result or the final message arrives
-        const int key = (int) p.results.size() * 4 + (running ? 0 : 1) + (p.message.isNotEmpty() ? 2 : 0);
+        // Run log: rebuilt when a result, its levels or the final message arrive
+        const auto levels = processor_.getRewStepLevels();
+        const int key = ((int) p.results.size() * 1000 + (int) levels.size()) * 4
+                        + (running ? 0 : 1) + (p.message.isNotEmpty() ? 2 : 0);
         if (key != shownResults_)
         {
             shownResults_ = key;
-            log_.setText (logText (p), false);
+            log_.setText (logText (p, levels), false);
             log_.moveCaretToEnd();
         }
+        showResults_.setEnabled (! running && processor_.getRewResultsFile().existsAsFile());
     }
 
-    juce::String logText (const rew::Progress& p) const
+    juce::String logText (const rew::Progress& p, const std::vector<rew::StepLevels>& levels) const
     {
         juce::StringArray lines;
         if (p.version.valid())
             lines.add ("REW " + p.version.rew + U (" · API ") + p.version.api + (p.dryRun ? U (" · dry run") : juce::String()));
-        for (const auto& r : p.results)
+        const auto unit = processor_.getVibrationDisplayUnit();
+        for (size_t i = 0; i < p.results.size(); ++i)
         {
+            const auto& r = p.results[i];
             juce::String line;
             line << (r.start != juce::Time() ? r.start.toString (false, true, true, true) : juce::String ("--:--:--"))
                  << "  #" << juce::String (r.step + 1).paddedRight (' ', 3)
@@ -1133,6 +1141,22 @@ private:
                      << " (" << juce::String (r.durationSec, 1) << " s)";
             if (r.attempts > 1)
                 line << U ("  · retried");
+            if (i < levels.size() && levels[i].valid)
+            {
+                const auto& l = levels[i];
+                line << "\n            SPLMeter: LAeq " << juce::String (l.laeq, 1) << " dB, LAFmax "
+                     << juce::String (l.lafmax, 1) << " dB, LCpeak " << juce::String (l.lcpeak, 1) << " dB";
+                if (l.vibValid)
+                {
+                    const int slot = l.vibSlotPresent (3) ? 3 : (l.vibSlotPresent (0) ? 0 : (l.vibSlotPresent (1) ? 1 : 2));
+                    const juce::String names[] = { "X", "Y", "Z", U ("Σ") };
+                    line << U ("; vibration ") << names[slot] << " RMS "
+                         << rew::results::numG (rew::results::vibDisplay (l, l.vibRms[slot], unit)) << " "
+                         << rew::results::vibUnitLabel (l, unit);
+                }
+                if (l.pausedSeconds > 0.0)
+                    line << " (partly paused)";
+            }
             for (const auto& m : r.messages)
                 line << "\n            " << m;
             lines.add (line);
@@ -1368,7 +1392,8 @@ private:
 
     juce::Rectangle<int> runCard_, promptCard_;
     juce::TextButton runButton_ { U ("▶  Run") }, pauseButton_ { "Pause" }, abortButton_ { U ("■  Abort") },
-                     continueButton_ { "Continue" }, skipButton_ { "Skip step" };
+                     continueButton_ { "Continue" }, skipButton_ { "Skip step" },
+                     showResults_ { U ("Show results") };
     juce::ToggleButton dryRun_ { "Dry run" };
     juce::Label runStatus_, promptText_;
     double progressValue_ = 0.0;

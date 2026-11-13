@@ -1525,6 +1525,15 @@ void SPLMeterAudioProcessorEditor::timerCallback()
         }
     }
 
+    // Markers from REW sequencer runs (the processor owns the run)
+    {
+        const auto pending = audioProcessor.takePendingMarkers();
+        for (const auto& m : pending)
+            markerEvents_.push_back (LogComponent::MarkerEvent { m.timestampMs, m.text });
+        if (! pending.empty())
+            log.setMarkerEvents (markerEvents_);
+    }
+
     // Pass pause events to log (trim those older than the visible window)
     {
         const float logDuration = audioProcessor.apvts.getRawParameterValue ("logDuration")->load();

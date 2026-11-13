@@ -322,6 +322,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/RewTransportTests.cpp
         Tests/RewSequenceTests.cpp
         Tests/RewSequencerTests.cpp
+        Tests/RewRunResultsTests.cpp
     )
 
     target_include_directories(SPLMeterTests PRIVATE Source)

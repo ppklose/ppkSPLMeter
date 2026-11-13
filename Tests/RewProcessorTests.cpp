@@ -110,3 +110,169 @@ TEST_CASE ("REW sequencer in processor: destroying the processor aborts and rest
     CHECK ((double) fake.value ("/measure/level").getProperty ("value", 0.0) == -14.0);
     CHECK ((bool) fake.value ("/application/blocking"));
 }
+
+#include "ProcessorTestHelpers.h"
+#include <catch2/catch_approx.hpp>
+#include <future>
+
+namespace
+{
+// Feeds the processor block by block (the test is the audio thread)
+struct AudioRig
+{
+    std::unique_ptr<SPLMeterAudioProcessor> proc = std::make_unique<SPLMeterAudioProcessor>();
+    int inputs, n = 0;
+    std::function<float (int ch, int n)> signal;
+
+    explicit AudioRig (int numInputs, std::function<float (int, int)> sig) : inputs (numInputs), signal (std::move (sig))
+    {
+        auto layout = proc->getBusesLayout();
+        layout.inputBuses.getReference (0) = juce::AudioChannelSet::discreteChannels (inputs);
+        REQUIRE (proc->setBusesLayout (layout));
+    }
+    void prepare() { proc->prepareToPlay (ProcTest::kSampleRate, ProcTest::kBlockSize); }
+    void block()
+    {
+        juce::AudioBuffer<float> buffer (juce::jmax (proc->getTotalNumInputChannels(), proc->getTotalNumOutputChannels()),
+                                         ProcTest::kBlockSize);
+        juce::MidiBuffer midi;
+        buffer.clear();
+        for (int ch = 0; ch < inputs; ++ch)
+            for (int s = 0; s < ProcTest::kBlockSize; ++s)
+                buffer.setSample (ch, s, signal (ch, n + s));
+        n += ProcTest::kBlockSize;
+        proc->processBlock (buffer, midi);
+    }
+    void seconds (double sec) { for (int b = 0; b < (int) (sec * ProcTest::kSampleRate / ProcTest::kBlockSize); ++b) block(); }
+
+    // end runs on another thread while audio keeps coming, as in the app
+    rew::StepLevels endWhileProcessing()
+    {
+        auto f = std::async (std::launch::async, [this] { return proc->endRewStepMeasurement(); });
+        while (f.wait_for (std::chrono::milliseconds (0)) != std::future_status::ready)
+            block();
+        return f.get();
+    }
+};
+}
+
+TEST_CASE ("REW sequencer in processor: per-step levels of a known sine", "[rew][processor]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    using Catch::Approx;
+    const double amp = 0.1;
+    AudioRig rig (1, [amp] (int, int n) { return ProcTest::sine (1000.0, amp, n); });
+    rig.prepare();
+    rig.seconds (5.0);                             // settle the filters and the SLOW detector (τ = 1 s)
+    const float cal = rig.proc->apvts.getRawParameterValue ("calOffset")->load();
+
+    rig.proc->beginRewStepMeasurement();
+    rig.seconds (2.0);
+    const auto l = rig.endWhileProcessing();
+    REQUIRE (l.valid);
+    const double rmsDb = 20.0 * std::log10 (amp / std::sqrt (2.0)) + cal;
+    CHECK (l.lzeq == Approx (rmsDb).margin (0.05));
+    CHECK (l.laeq == Approx (rmsDb).margin (0.2));     // A ≈ 0 dB at 1 kHz
+    CHECK (l.lceq == Approx (rmsDb).margin (0.2));
+    CHECK (l.lafmax == Approx (rmsDb).margin (0.3));   // steady sine
+    CHECK (l.lcsmax == Approx (rmsDb).margin (0.3));
+    CHECK (l.lcpeak == Approx (rmsDb + 3.01).margin (0.3));
+    CHECK (l.seconds == Approx (2.0).margin (0.1));
+    CHECK (l.pausedSeconds == 0.0);
+    CHECK_FALSE (l.vibValid);
+
+    SECTION ("paused time is counted, not measured")
+    {
+        rig.proc->beginRewStepMeasurement();
+        rig.seconds (0.5);
+        rig.proc->setPaused (true);
+        rig.seconds (0.5);
+        rig.proc->setPaused (false);
+        const auto p = rig.endWhileProcessing();
+        CHECK (p.pausedSeconds == Approx (0.5).margin (0.02));
+        CHECK (p.laeq == Approx (rmsDb).margin (0.2));
+    }
+
+    SECTION ("without audio the end gives up and returns no levels")
+    {
+        rig.proc->beginRewStepMeasurement();
+        CHECK_FALSE (rig.proc->endRewStepMeasurement().valid);   // the audio thread never took the begin
+    }
+}
+
+TEST_CASE ("REW sequencer in processor: per-step vibration of a triaxial accelerometer", "[rew][processor][vibration]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    using Catch::Approx;
+    // Mic on input 1, triax on 2–4; 1 FS = 1 m/s² (cal 120 dB); X 0.5, Y 0.25, Z 1.0 peak at 80 Hz
+    const double amps[] = { 0.0, 0.5, 0.25, 1.0 };
+    AudioRig rig (4, [&amps] (int ch, int n) { return ProcTest::sine (80.0, ch == 0 ? 0.05 : amps[ch], n); });
+    for (int i = 0; i < 3; ++i)
+    {
+        rig.proc->setChannelRole (1 + i, (SensorRole) (1 + i));
+        rig.proc->setAccelCalDb (1 + i, 120.0);
+    }
+    auto s = rig.proc->getVibrationSettings();
+    s.tauSec = 1.0;
+    rig.proc->setVibrationSettings (s);
+    rig.prepare();
+    rig.seconds (3.0);
+
+    rig.proc->beginRewStepMeasurement();
+    rig.seconds (4.0);
+    const auto l = rig.endWhileProcessing();
+    REQUIRE (l.vibValid);
+    CHECK (l.axisMask == 0b111);
+    CHECK (l.vibSlotPresent (3));
+    const double k = 1.0 / std::sqrt (2.0);
+    CHECK (l.vibRms[0] == Approx (0.5 * k).epsilon (0.03));
+    CHECK (l.vibRms[2] == Approx (1.0 * k).epsilon (0.03));
+    CHECK (l.vibRms[3] == Approx (std::sqrt (0.25 + 0.0625 + 1.0) * k).epsilon (0.03));
+    CHECK (l.vibPeak[2] == Approx (1.0).epsilon (0.03));
+}
+
+TEST_CASE ("REW sequencer in processor: a run writes results, levels and markers", "[rew][processor]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    FakeRewTransport fake;
+    AudioRig rig (1, [] (int, int n) { return ProcTest::sine (1000.0, 0.1, n); });
+    rig.prepare();
+    rig.seconds (0.3);
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("rew_run_test");
+    folder.deleteRecursively();
+    auto q = twoSteps();
+    q.name = "Run test";
+    q.resultsFolder = folder.getFullPathName();
+    rig.proc->setRewSequence (q);
+
+    fake.sweepPolls = 20;   // the sweep "takes" a few polls, while audio runs
+    REQUIRE (rig.proc->startRewRun (false, std::make_unique<ForwardingTransport> (fake), fastRun()));
+    auto& sq = rig.proc->getRewSequencer();
+    for (int i = 0; i < 20000 && (sq.isRunning() || sq.progress().state == rew::RunState::Preflight); ++i)
+    {
+        rig.block();
+        juce::Thread::sleep (1);
+    }
+    sq.waitUntilFinished (5000);
+    const auto p = sq.progress();
+    REQUIRE (p.state == rew::RunState::Done);
+
+    const auto levels = rig.proc->getRewStepLevels();
+    REQUIRE (levels.size() == 2);
+    CHECK (levels[0].valid);
+    CHECK (levels[1].valid);
+
+    const auto csv = rig.proc->getRewResultsFile();
+    REQUIRE (csv.existsAsFile());
+    CHECK (csv.getParentDirectory() == folder);
+    CHECK (csv.loadFileAsString().contains ("Run test"));
+    CHECK (p.message.contains (csv.getFullPathName()));
+
+    const auto markers = rig.proc->takePendingMarkers();
+    REQUIRE (markers.size() == 2);
+    CHECK (markers[0].text == "REW 1/2 L");
+    CHECK (markers[1].text == "REW 2/2 R");
+    CHECK (rig.proc->takePendingMarkers().empty());
+    folder.deleteRecursively();
+}

@@ -448,6 +448,25 @@ TEST_CASE ("REW sequencer: wait for user, abort, pause, dry run", "[rew]")
     }
 }
 
+TEST_CASE ("REW sequencer: runFinished sees the final state and adds its note", "[rew]")
+{
+    FakeRewTransport fake;
+    rew::Sequencer seq;
+    rew::Hooks hooks;
+    rew::RunState seen = rew::RunState::Idle;
+    size_t seenResults = 0;
+    hooks.runFinished = [&] (const rew::Progress& p)
+    {
+        seen = p.state;
+        seenResults = p.results.size();
+        return juce::String ("Results: /x.csv");
+    };
+    const auto p = runToEnd (seq, fake, threeSteps(), fastOptions(), hooks);
+    CHECK (seen == rew::RunState::Done);
+    CHECK (seenResults == 3);
+    CHECK (p.message.contains ("Results: /x.csv"));
+}
+
 TEST_CASE ("REW sequencer: sweep length and expected duration", "[rew]")
 {
     CHECK (rew::sweepSamples ("512k") == 524288.0);
