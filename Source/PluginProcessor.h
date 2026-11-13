@@ -14,6 +14,7 @@
 #include "Vibration/Units.h"
 #include "Vibration/Profiles.h"
 #include "Vibration/Assessment.h"
+#include "Rew/RewSequence.h"
 #include "RtHandover.h"
 #include "WavRecording.h"
 #include <array>
@@ -375,6 +376,11 @@ public:
     vib::AssessmentLimits getAssessmentLimits() const;
     void setAssessmentLimits (const vib::AssessmentLimits& limits);
     vib::Assessment getVibrationAssessment() const;   // of the latest snapshot for the current profile
+
+    // REW measurement sequencer (REW sequencer spec §3): the last edited
+    // sequence, persisted in UIState/RewSequencer. Message thread only.
+    rew::Sequence getRewSequence() const;
+    void setRewSequence (const rew::Sequence& sequence);
 
     // Display unit of the vibration readout (UIState/Accel "displayUnit")
     vib::DisplayUnit getVibrationDisplayUnit() const;

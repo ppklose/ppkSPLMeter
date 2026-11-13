@@ -1292,6 +1292,21 @@ vib::Assessment SPLMeterAudioProcessor::getVibrationAssessment() const
                         getAccelSensorInfo().exposureHours, getAssessmentLimits());
 }
 
+rew::Sequence SPLMeterAudioProcessor::getRewSequence() const
+{
+    rew::Sequence q;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName ("RewSequencer");
+    if (node.isValid())
+        rew::sequenceFromVar (juce::JSON::parse (node.getProperty ("json").toString()), q);
+    return q;
+}
+
+void SPLMeterAudioProcessor::setRewSequence (const rew::Sequence& sequence)
+{
+    getUiState().getOrCreateChildWithName ("RewSequencer", nullptr)
+                .setProperty ("json", rew::toJsonText (sequence), nullptr);
+}
+
 juce::var SPLMeterAudioProcessor::getInputsJson() const
 {
     juce::Array<juce::var> list;

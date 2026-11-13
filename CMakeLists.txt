@@ -320,6 +320,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/VibrationDspTests.cpp
         Tests/VibrationAssessmentTests.cpp
         Tests/RewTransportTests.cpp
+        Tests/RewSequenceTests.cpp
     )
 
     target_include_directories(SPLMeterTests PRIVATE Source)
@@ -346,6 +347,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/FftSourceTests.cpp
         Tests/VibrationProcessorTests.cpp
         Tests/VibrationReportTests.cpp
+        Tests/RewProcessorTests.cpp
     )
     target_link_libraries(SPLMeterProcessorTests PRIVATE
         SPLMeter
