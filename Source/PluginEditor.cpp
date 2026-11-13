@@ -1,4 +1,9 @@
 #include "PluginEditor.h"
+#include "VibrationCsv.h"
+#include "VibrationReport.h"
+#if JucePlugin_Build_Standalone
+ #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#endif
 #include <map>
 
 static juce::File splmeterLastFolder()                              { return UserPrefs::lastUsedFolder(); }
@@ -58,6 +63,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
 {
     addAndMakeVisible (meter);
     addAndMakeVisible (log);
+    vibPanel.onUnitChange = [this] (vib::DisplayUnit u) { audioProcessor.setVibrationDisplayUnit (u); };
+    addAndMakeVisible (vibPanel);
 
     resetButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff3a3a3c));
     resetButton.setColour (juce::TextButton::textColourOffId,  juce::Colour (0xffff453a));
@@ -73,7 +80,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
 
     saveMenuButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     saveMenuButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    saveMenuButton.setTooltip ("Save CSV log, WAV recording, or screenshot");
+    saveMenuButton.setTooltip ("Save CSV log, WAV recording, screenshot or vibration report; save or load settings");
     saveMenuButton.onClick = [this]
     {
         juce::PopupMenu menu;
@@ -82,6 +89,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (3, "Save Screenshot...");
         menu.addSeparator();
         menu.addItem (4, "Save All...");
+        menu.addSeparator();
+        menu.addItem (7, "Save Vibration Report...", canSaveVibrationReport());
         menu.addSeparator();
         menu.addItem (5, "Save Settings...");
         menu.addItem (6, "Load Settings...");
@@ -97,6 +106,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                     case 4: doSaveAll(); break;
                     case 5: doSaveSettingsJson(); break;
                     case 6: doLoadSettingsJson(); break;
+                    case 7: doSaveVibrationReport(); break;
                     default: break;
                 }
             });
@@ -268,7 +278,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         if (basicMode_)
         {
             extendedHeight_ = getHeight();
-            const int basicH = 100 + 215 + 24;  // title + meter + build strip
+            const int basicH = basicHeight();
             setResizeLimits (480, basicH, 3840, 2160);
             setSize (getWidth(), basicH);
         }
@@ -318,6 +328,10 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (3, "SoundDetective...");
         menu.addItem (5, "Long-term SPL");
         menu.addItem (6, "Impulse Fidelity");
+#if ! JUCE_IOS
+        menu.addSeparator();
+        menu.addItem (7, "REW Measurement Sequencer...");
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
         menu.addItem (2, "ViSQOL");
 #endif
@@ -363,6 +377,11 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                 else if (result == 6)
                     openWindow (impulseFidelityWindow,
                                 [this] { return std::make_unique<ImpulseFidelityWindow> (audioProcessor); });
+#if ! JUCE_IOS
+                else if (result == 7)
+                    openWindow (rewSequencerWindow,
+                                [this] { return std::make_unique<RewUi::RewSequencerWindow> (audioProcessor, lightMode_); });
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
                 else if (result == 2)
                 {
@@ -425,7 +444,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
     dawSyncToggle.setVisible (!basicMode_);
     meter.setPsychoVisible (!basicMode_);
     meter.setDinVisible (!basicMode_);
-    const int basicH = 100 + 215 + 24;
+    updateVibrationPanel();
+    const int basicH = basicHeight();
     if (basicMode_)
     {
         setResizeLimits (480, basicH, 3840, 2160);
@@ -468,7 +488,7 @@ void SPLMeterAudioProcessorEditor::paint (juce::Graphics& g)
     // Build info strip at the bottom
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     g.setColour (textFnt);
-    g.drawText ("v3.5.2   Build: " + juce::String (__DATE__) + "  " + __TIME__,
+    g.drawText ("v" JucePlugin_VersionString "   Build: " + juce::String (__DATE__) + "  " + __TIME__,
                 0, getHeight() - 22, getWidth(), 20,
                 juce::Justification::centred, false);
 }
@@ -510,9 +530,11 @@ void SPLMeterAudioProcessorEditor::resized()
     monitorGainSlider.setBounds (monitorButton.getRight() + 4, 8, 60, 80);
     outputVUMeter.setBounds (monitorGainSlider.getRight() + 4, 4, 22, 84);
 
-    const int meterHeight = 270;
+    // Basic mode shows only the top 215 px of the meter (no psycho/DIN rows)
+    const int meterHeight = basicMode_ ? 215 : 270;
     auto meterArea = area.removeFromTop (meterHeight);
     meter.setBounds (meterArea);
+    vibPanel.setBounds (area.removeFromTop (vibPanel.preferredHeight()));
 
     // FAST/SLOW buttons right-aligned in the numeric readout row of the meter
     // MeterComponent: margin=20, peakReadoutY=20, readoutH=40
@@ -532,6 +554,130 @@ void SPLMeterAudioProcessorEditor::resized()
 }
 
 //==============================================================================
+bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
+{
+    using Kind = VibrationPanel::State::Kind;
+    const int heightBefore = vibPanel.preferredHeight();
+
+    const auto roles     = audioProcessor.getChannelRoles();
+    const int  numInputs = juce::jmin (audioProcessor.getTotalNumInputChannels(), SensorConfig::kMaxInputs);
+
+    // Accelerometer roles on inputs this device or bus does not have
+    juce::StringArray missing;
+    bool anyAccel = false, anyMic = false;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const auto r = roles[(size_t) ch];
+        if (ch < numInputs)
+            anyMic = anyMic || r == SensorRole::Mic;
+        if (! SensorConfig::isAccel (r))
+            continue;
+        anyAccel = true;
+        if (ch >= numInputs)
+        {
+            const char* axis[] = { "", "X", "Y", "Z", "uniaxial" };
+            missing.add (audioProcessor.getChannelName (ch) + " (" + axis[(int) r] + ")");
+        }
+    }
+    meter.setNoMicInput (numInputs > 0 && ! anyMic);
+
+    VibrationPanel::State st;
+    st.unit = audioProcessor.getVibrationDisplayUnit();
+    const auto settings = audioProcessor.getVibrationSettings();
+    st.tauSec = settings.tauSec;
+    st.profileLabel = audioProcessor.getVibrationProfileLabel();
+    st.mainLabel    = audioProcessor.getVibrationMainLabel();
+    for (int a = 0; a < 3; ++a)
+        st.k[a] = settings.k[a];
+    st.exposureHours = audioProcessor.getAccelSensorInfo().exposureHours;
+    st.limits        = audioProcessor.getAssessmentLimits();
+    const auto missingText = missing.isEmpty() ? juce::String()
+                           : missing.joinIntoString (", ") + (missing.size() == 1 ? " is" : " are")
+                             + " not available on this input";
+
+    const auto validity = audioProcessor.getSensorValidity();
+    const bool fileVib = audioProcessor.isFileModeActive() && audioProcessor.fileHasAccelerometer();
+    if (fileVib)
+    {
+        // Playback of an accelerometer recording: its own roles and calibration
+        st.kind = Kind::Running;
+        st.snap = audioProcessor.getVibrationSnapshot();
+        if (! st.snap.valid)
+        {
+            st.snap = {};
+            st.snap.quantity = (int) settings.quantity;
+            const auto tracks = audioProcessor.getFileTracks();
+            for (const auto& t : tracks)
+            {
+                switch (t.role)
+                {
+                    case SensorRole::AccelX:        st.snap.axisMask |= 1; break;
+                    case SensorRole::AccelY:        st.snap.axisMask |= 2; break;
+                    case SensorRole::AccelZ:        st.snap.axisMask |= 4; break;
+                    case SensorRole::AccelUniaxial: st.snap.axisMask |= 1; st.snap.uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+            }
+            for (int a = 0; a < 3; ++a)
+                st.snap.weighting[a] = (int) settings.weighting[a];
+            st.snap.mainKind = (int) settings.main;
+        }
+        st.note = "file playback with recorded roles and calibration";
+    }
+    else if (! anyAccel)
+    {
+        st.kind = Kind::Hidden;
+    }
+    else if (! SensorConfig::isValid (validity))
+    {
+        st.kind = Kind::Message;
+        st.messageIsError = true;
+        st.message = "Accelerometer roles are invalid (an axis is assigned twice, or uniaxial is mixed with X/Y/Z)."
+                     " Fix them in Settings > Inputs and Sensors.";
+    }
+    else if (validity == SensorConfig::Validity::NoAccelerometer)
+    {
+        st.kind = Kind::Message;
+        st.message = missingText + ".";
+    }
+    else
+    {
+        st.kind = Kind::Running;
+        st.snap = audioProcessor.getVibrationSnapshot();
+        if (! st.snap.valid)
+        {
+            // Before the first readout: lay out the rows from the configuration
+            st.snap = {};
+            st.snap.quantity = (int) settings.quantity;
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                switch (roles[(size_t) ch])
+                {
+                    case SensorRole::AccelX:        st.snap.axisMask |= 1; break;
+                    case SensorRole::AccelY:        st.snap.axisMask |= 2; break;
+                    case SensorRole::AccelZ:        st.snap.axisMask |= 4; break;
+                    case SensorRole::AccelUniaxial: st.snap.axisMask |= 1; st.snap.uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+            }
+            for (int a = 0; a < 3; ++a)
+                st.snap.weighting[a] = (int) settings.weighting[a];
+            st.snap.mainKind = (int) settings.main;
+        }
+        if (audioProcessor.isFileModeActive())
+            st.note = "the played file has no accelerometer tracks";
+        else if (missingText.isNotEmpty())
+            st.note = missingText;
+    }
+    if (st.kind == Kind::Running)
+        st.assessment = vib::assess (audioProcessor.getVibrationProfile(), st.snap, st.k, st.exposureHours, st.limits);
+    vibPanel.setState (st);
+    vibPanel.setVisible (st.kind != Kind::Hidden);
+    return vibPanel.preferredHeight() != heightBefore;
+}
+
 void SPLMeterAudioProcessorEditor::updateModeButtons()
 {
     realTimeButton.setToggleState (!fileMode, juce::dontSendNotification);
@@ -586,6 +732,11 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 
     meter.setLightMode (light);
     log.setLightMode   (light);
+    vibPanel.setLightMode (light);
+#if ! JUCE_IOS
+    if (rewSequencerWindow != nullptr)
+        rewSequencerWindow->setLightMode (light);
+#endif
 
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     if (visqolWindow != nullptr)
@@ -601,13 +752,16 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
 //==============================================================================
 void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
                                                   const std::vector<LogEntry>& rows,
-                                                  const std::vector<LogComponent::MarkerEvent>& markers)
+                                                  const std::vector<LogComponent::MarkerEvent>& markers,
+                                                  vib::DisplayUnit vibUnit,
+                                                  const juce::String& vibProfile)
 {
     stream.writeText ("Timestamp,Peak dB SPL,Peak dBA SPL,Peak dBC SPL,"
                       "RMS dB SPL,RMS dBA SPL,RMS dBC SPL,"
                       "LAeq,LCeq,"
                       "Roughness (%),Fluctuation (%),Sharpness (acum),"
-                      "Specific Loudness (sone),Psychoacoustic Annoyance,Marker\n",
+                      "Specific Loudness (sone),Psychoacoustic Annoyance,Marker"
+                      + VibrationCsv::header() + "\n",
                       false, false, nullptr);
 
     // Build a lookup: for each marker, find the closest log entry timestamp
@@ -660,7 +814,8 @@ void SPLMeterAudioProcessorEditor::writeCsvRows (juce::OutputStream& stream,
             + juce::String (e.sharpness,        3) + ","
             + juce::String (e.loudnessSone,     3) + ","
             + juce::String (e.psychoAnnoyance,  3) + ","
-            + markerText + "\n";
+            + markerText
+            + VibrationCsv::columns (e.vib, vibUnit, vibProfile) + "\n";
         stream.writeText (line, false, false, nullptr);
     }
 }
@@ -674,9 +829,11 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
         splmeterLastFolder().getChildFile ("SPLMeter.csv"),
         "*.csv");
     auto markers = markerEvents_;   // snapshot for async lambda
+    const auto vibUnit    = audioProcessor.getVibrationDisplayUnit();
+    const auto vibProfile = audioProcessor.getVibrationProfileKey();
     fileChooser->launchAsync (
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [rows, markers] (const juce::FileChooser& fc)
+        [rows, markers, vibUnit, vibProfile] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File{}) return;
@@ -684,8 +841,147 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
             juce::FileOutputStream stream (file);
             if (!stream.openedOk()) return;
             stream.setPosition (0); stream.truncate();
-            writeCsvRows (stream, rows, markers);
+            writeCsvRows (stream, rows, markers, vibUnit, vibProfile);
         });
+}
+
+//==============================================================================
+// Vibration report (spec §9): metadata dialog → file chooser → HTML
+bool SPLMeterAudioProcessorEditor::canSaveVibrationReport() const
+{
+    const auto s = audioProcessor.getVibrationSnapshot();
+    return s.valid && s.seconds > 0.0;
+}
+
+namespace
+{
+    juce::String reportDeviceName (SPLMeterAudioProcessor& p)
+    {
+       #if JucePlugin_Build_Standalone
+        if (juce::JUCEApplicationBase::isStandaloneApp())
+            if (auto* holder = juce::StandalonePluginHolder::getInstance())
+                if (auto* dev = holder->deviceManager.getCurrentAudioDevice())
+                    return dev->getName() + " (" + dev->getTypeName() + ")";
+       #endif
+        juce::ignoreUnused (p);
+        return juce::String ("Plugin in ") + juce::PluginHostType().getHostDescription();
+    }
+
+    juce::String reportRoleName (SensorRole r)
+    {
+        switch (r)
+        {
+            case SensorRole::Mic:           return "Mic";
+            case SensorRole::AccelX:        return "Accel X";
+            case SensorRole::AccelY:        return "Accel Y";
+            case SensorRole::AccelZ:        return "Accel Z";
+            case SensorRole::AccelUniaxial: return "Accel (uniaxial)";
+            case SensorRole::Off:           return "Off";
+        }
+        return {};
+    }
+
+    const char* const kReportKeys[5] = { "project", "location", "operator", "mounting", "notes" };
+}
+
+void SPLMeterAudioProcessorEditor::doSaveVibrationReport()
+{
+    if (! canSaveVibrationReport())
+        return;
+
+    auto stored = audioProcessor.getUiState().getOrCreateChildWithName ("Report", nullptr);
+    auto* aw = new juce::AlertWindow ("Save Vibration Report",
+                                      "Details for the report header (remembered for the next report):",
+                                      juce::MessageBoxIconType::NoIcon);
+    const char* labels[5] = { "Project:", "Location / measurement point:", "Operator:", "Sensor mounting:", "Notes:" };
+    for (int i = 0; i < 5; ++i)
+        aw->addTextEditor (kReportKeys[i], stored.getProperty (kReportKeys[i], juce::String()).toString(), labels[i]);
+    aw->addButton ("Continue", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel",   0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result)
+    {
+        std::unique_ptr<juce::AlertWindow> owner (aw);
+        if (result != 1)
+            return;
+
+        auto node = audioProcessor.getUiState().getOrCreateChildWithName ("Report", nullptr);
+        for (auto* key : kReportKeys)
+            node.setProperty (key, aw->getTextEditorContents (key).trim(), nullptr);
+
+        // Collect everything now; the file chooser is asynchronous
+        VibrationReport::Input in;
+        in.meta = { aw->getTextEditorContents ("project").trim(), aw->getTextEditorContents ("location").trim(),
+                    aw->getTextEditorContents ("operator").trim(), aw->getTextEditorContents ("mounting").trim(),
+                    aw->getTextEditorContents ("notes").trim() };
+        in.version       = JucePlugin_VersionString;
+        in.created       = juce::Time::getCurrentTime();
+        in.device        = reportDeviceName (audioProcessor);
+        in.sampleRate    = audioProcessor.getSampleRate();
+        const auto info  = audioProcessor.getAccelSensorInfo();
+        in.serial        = info.serial;
+        in.lowerLimitHz  = info.lowerLimitHz;
+        in.upperLimitHz  = info.upperLimitHz;
+        in.exposureHours = info.exposureHours;
+        in.profile       = audioProcessor.getVibrationProfile();
+        in.profileLabel  = audioProcessor.getVibrationProfileLabel();
+        in.mainLabel     = audioProcessor.getVibrationMainLabel();
+        in.settings      = audioProcessor.getVibrationSettings();
+        in.unit          = audioProcessor.getVibrationDisplayUnit();
+        in.snap          = audioProcessor.getVibrationSnapshot();
+        in.limits        = audioProcessor.getAssessmentLimits();
+        in.log           = audioProcessor.copyLog();
+        in.timeWeighting = audioProcessor.apvts.getRawParameterValue ("splTimeWeight")->load() > 0.5f ? "S" : "F";
+
+        if (audioProcessor.isFileModeActive() && audioProcessor.fileHasAccelerometer())
+        {
+            for (const auto& t : audioProcessor.getFileTracks())
+            {
+                in.channels.push_back ({ t.name.isNotEmpty() ? t.name : "Track " + juce::String (t.input + 1),
+                                         reportRoleName (t.role), t.calDb, "from the recording",
+                                         SensorConfig::isAccel (t.role) });
+                in.hasMic = in.hasMic || t.role == SensorRole::Mic;
+            }
+            in.device = "File playback";
+        }
+        else
+        {
+            const int numInputs = juce::jmin (audioProcessor.getTotalNumInputChannels(), SensorConfig::kMaxInputs);
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                const auto role = audioProcessor.getChannelRole (ch);
+                const bool muted = audioProcessor.apvts.getRawParameterValue ("channelMute" + juce::String (ch))->load() > 0.5f;
+                if (muted && role == SensorRole::Mic)
+                    continue;
+                const bool accel = SensorConfig::isAccel (role);
+                in.channels.push_back ({ audioProcessor.getChannelName (ch), reportRoleName (role),
+                                         accel ? audioProcessor.getAccelCalDb (ch) : 0.0,
+                                         accel ? audioProcessor.getAccelCalInfo (ch) : juce::String(), accel });
+                in.hasMic = in.hasMic || (role == SensorRole::Mic && ! muted);
+            }
+        }
+        for (const auto& m : markerEvents_)
+            in.events.push_back ({ m.timestampMs, 0, m.text, false });
+        for (const auto& p : pauseEvents_)
+            in.events.push_back ({ p.startMs, p.durationMs, {}, true });
+
+        fileChooser = std::make_unique<juce::FileChooser> (
+            "Save vibration report", splmeterLastFolder().getChildFile (VibrationReport::suggestedFileName (in)), "*.html");
+        fileChooser->launchAsync (
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                | juce::FileBrowserComponent::warnAboutOverwriting,
+            [in] (const juce::FileChooser& fc)
+            {
+                auto file = fc.getResult();
+                if (file == juce::File{}) return;
+                if (! file.hasFileExtension ("html;htm"))
+                    file = file.withFileExtension ("html");
+                splmeterSaveLastFolder (file);
+                if (! file.replaceWithText (VibrationReport::generateHtml (in), false, false, "\n"))
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                            "Save Vibration Report", "Could not write " + file.getFullPathName());
+            });
+    }), false);
 }
 
 void SPLMeterAudioProcessorEditor::doSaveWav()
@@ -733,11 +1029,13 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
     auto rows     = audioProcessor.copyLog();
     auto markers  = markerEvents_;
     auto snapshot = createComponentSnapshot (getLocalBounds());
+    const auto vibUnit    = audioProcessor.getVibrationDisplayUnit();
+    const auto vibProfile = audioProcessor.getVibrationProfileKey();
     fileChooser = std::make_unique<juce::FileChooser> (
         "Choose destination folder", splmeterLastFolder());
     fileChooser->launchAsync (
         juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-        [this, rows, markers, snapshot] (const juce::FileChooser& fc)
+        [this, rows, markers, snapshot, vibUnit, vibProfile] (const juce::FileChooser& fc)
         {
             auto folder = fc.getResult();
             if (folder == juce::File{} || !folder.isDirectory()) return;
@@ -750,7 +1048,7 @@ void SPLMeterAudioProcessorEditor::doSaveAll()
             if (!rows.empty())
             {
                 juce::FileOutputStream csv (base.withFileExtension ("csv"));
-                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows, markers); }
+                if (csv.openedOk()) { csv.setPosition (0); csv.truncate(); writeCsvRows (csv, rows, markers, vibUnit, vibProfile); }
             }
 
             // WAV
@@ -821,6 +1119,7 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
             p->setProperty ("fftOverlap",            getInt  ("fftOverlap"));
             p->setProperty ("fftRTAMode",            getBool ("fftRTAMode"));
             p->setProperty ("fftDual",               getBool ("fftDual"));
+            p->setProperty ("fftSource",             getInt  ("fftSource"));
             p->setProperty ("bandpassEnabled",       getBool ("bandpassEnabled"));
             p->setProperty ("line94Enabled",         getBool ("line94Enabled"));
             p->setProperty ("correctionEnabled",     getBool ("correctionEnabled"));
@@ -851,6 +1150,10 @@ void SPLMeterAudioProcessorEditor::doSaveSettingsJson()
                     SPLMeterAudioProcessor::kMidiParamIds[i],
                     audioProcessor.getMidiCC (i));
             r->setProperty ("midiCC", midi);
+
+            // Sensor roles, accelerometer calibration and settings (vibration spec §8)
+            r->setProperty ("inputs", audioProcessor.getInputsJson());
+            r->setProperty ("accel",  audioProcessor.getAccelJson());
 
             splmeterSaveLastFolder (file);
             file.replaceWithText (juce::JSON::toString (root, true));
@@ -915,7 +1218,13 @@ void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
                 applyB ("fftPeakHold");        applyI ("fftDisplayMode");
                 applyI ("fftBandRes");         applyI ("fftWindowType");
                 applyI ("fftOverlap");         applyB ("fftRTAMode");
-                applyB ("fftDual");
+                // fftSource supersedes fftDual; files from ≤ 3.5.2 only have fftDual
+                if (p->hasProperty ("fftSource"))
+                    audioProcessor.setFftSource ((int) p->getProperty ("fftSource"));
+                else if (p->hasProperty ("fftDual"))
+                    audioProcessor.setFftSource (static_cast<bool> (p->getProperty ("fftDual"))
+                                                     ? SPLMeterAudioProcessor::FftSourceDual
+                                                     : SPLMeterAudioProcessor::FftSourceMix);
                 applyB ("bandpassEnabled");    applyB ("line94Enabled");
                 applyB ("correctionEnabled");  applyB ("graphOverlayEnabled");
                 applyB ("graphOverlay2Enabled");
@@ -942,6 +1251,9 @@ void SPLMeterAudioProcessorEditor::doLoadSettingsJson()
                     if (midi->hasProperty (id))
                         audioProcessor.setMidiCC (i, (int) midi->getProperty (id));
                 }
+
+            // Sensor roles + accelerometer (absent in files from ≤ 3.5.2: unchanged)
+            audioProcessor.setInputsAndAccelFromJson (parsed["inputs"], parsed["accel"]);
 
             // Refresh settings window channel names if open
             if (settingsWindow != nullptr)
@@ -1076,6 +1388,16 @@ void SPLMeterAudioProcessorEditor::timerCallback()
                      audioProcessor.getTonality());
     meter.setPeak (audioProcessor.getPeakSPL());
 
+    if (updateVibrationPanel())
+    {
+        if (basicMode_)
+        {
+            setResizeLimits (480, basicHeight(), 3840, 2160);
+            setSize (getWidth(), basicHeight());
+        }
+        resized();
+    }
+
     // Compute LAeq / LCeq from log entries (energy average over logDuration)
     // and DIN 15905-5 LAeq,30min (sliding 30-min window over the available log)
     {
@@ -1201,6 +1523,15 @@ void SPLMeterAudioProcessorEditor::timerCallback()
             if (soundDetectiveWindow != nullptr && soundDetectiveWindow->isVisible())
                 soundDetectiveWindow->addEvents (newEvents);
         }
+    }
+
+    // Markers from REW sequencer runs (the processor owns the run)
+    {
+        const auto pending = audioProcessor.takePendingMarkers();
+        for (const auto& m : pending)
+            markerEvents_.push_back (LogComponent::MarkerEvent { m.timestampMs, m.text });
+        if (! pending.empty())
+            log.setMarkerEvents (markerEvents_);
     }
 
     // Pass pause events to log (trim those older than the visible window)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SPLMeter VERSION 3.5.2)
+project(SPLMeter VERSION 3.6.0)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 juce_add_plugin(SPLMeter
-    VERSION                     3.5.2
+    VERSION                     3.6.0
     PLUGIN_MANUFACTURER_CODE    Manu
     PLUGIN_CODE                 Splm
     FORMATS                     ${SPLMETER_FORMATS}
@@ -317,6 +317,12 @@ if(SPLMETER_BUILD_TESTS)
         Tests/StateSerializationTests.cpp
         Tests/MarkerTests.cpp
         Tests/LeqTests.cpp
+        Tests/VibrationDspTests.cpp
+        Tests/VibrationAssessmentTests.cpp
+        Tests/RewTransportTests.cpp
+        Tests/RewSequenceTests.cpp
+        Tests/RewSequencerTests.cpp
+        Tests/RewRunResultsTests.cpp
     )
 
     target_include_directories(SPLMeterTests PRIVATE Source)
@@ -334,8 +340,33 @@ if(SPLMETER_BUILD_TESTS)
         JUCE_UNIT_TESTS=1
     )
 
+    # Regression tests against the real processor. Separate executable because it
+    # links the plugin's shared-code library, which already contains the compiled
+    # JUCE modules (linking juce:: modules again would duplicate symbols).
+    add_executable(SPLMeterProcessorTests
+        Tests/ProcessorRegressionTests.cpp
+        Tests/SensorRoleTests.cpp
+        Tests/FftSourceTests.cpp
+        Tests/VibrationProcessorTests.cpp
+        Tests/VibrationReportTests.cpp
+        Tests/RewProcessorTests.cpp
+    )
+    target_link_libraries(SPLMeterProcessorTests PRIVATE
+        SPLMeter
+        Catch2::Catch2WithMain
+    )
+    target_include_directories(SPLMeterProcessorTests PRIVATE
+        Source
+        $<TARGET_PROPERTY:SPLMeter,INCLUDE_DIRECTORIES>
+    )
+    target_compile_definitions(SPLMeterProcessorTests PRIVATE
+        $<TARGET_PROPERTY:SPLMeter,COMPILE_DEFINITIONS>
+        SPLMETER_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/golden"
+    )
+
     include(CTest)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(SPLMeterTests)
+    catch_discover_tests(SPLMeterProcessorTests)
 endif()

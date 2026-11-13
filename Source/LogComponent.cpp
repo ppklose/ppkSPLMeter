@@ -24,6 +24,22 @@ const juce::Colour LogComponent::colTonality       { 0xff30d158 };  // lime gree
 const juce::Colour LogComponent::colBassComfort    { 0xff7d5fff };  // indigo
 const juce::Colour LogComponent::colFftIn1         { 0xff34c759 };  // green
 const juce::Colour LogComponent::colFftIn2         { 0xffff453a };  // red
+const juce::Colour LogComponent::colVib[3] { juce::Colour (0xffac8e68),     // X brown
+                                             juce::Colour (0xff63e6be),     // Y mint
+                                             juce::Colour (0xff8fa8c8) };   // Z slate
+
+namespace
+{
+    // Smallest 1 / 2 / 5 × 10^n ≥ v
+    float niceCeil (float v)
+    {
+        if (v <= 0.0f) return 1.0f;
+        const float p = std::pow (10.0f, std::floor (std::log10 (v)));
+        for (float m : { 1.0f, 2.0f, 5.0f, 10.0f })
+            if (m * p >= v * 0.9999f) return m * p;
+        return 10.0f * p;
+    }
+}
 
 //==============================================================================
 LogComponent::LogComponent (SPLMeterAudioProcessor& p)
@@ -85,6 +101,20 @@ LogComponent::LogComponent (SPLMeterAudioProcessor& p)
     setupPsychoBtn (impulsivenessVisButton,  colImpulsiveness,  PsychoMetric::Impulsiveness);
     setupPsychoBtn (tonalityVisButton,       colTonality,       PsychoMetric::Tonality);
     setupPsychoBtn (bassComfortVisButton,    colBassComfort,    PsychoMetric::BassComfort);
+
+    // Vibration toggles: Σ and Z on by default
+    {
+        const char* names[4] = { "Vib X", "Vib Y", "Vib Z", "Vib \xce\xa3" };
+        const char* keys[4]  = { "logShowVibX", "logShowVibY", "logShowVibZ", "logShowVibSum" };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto& b = vibVisButtons_[i];
+            b.setButtonText (juce::String::fromUTF8 (names[i]));
+            setupVisBtn (b, i < 3 ? colVib[i] : juce::Colours::white, i >= 2);
+            b.setVisible (false);
+            UserPrefs::bind (processor, b, keys[i]);
+        }
+    }
 
     // Restore the user's last series selection and record future changes
     UserPrefs::bind (processor, splVisButton, "logShowSPL");
@@ -181,8 +211,10 @@ void LogComponent::setLightMode (bool light) noexcept
                      &roughnessVisButton, &fluctuationVisButton,
                      &sharpnessVisButton, &loudnessVisButton,
                      &annoyanceVisButton, &impulsivenessVisButton,
-                     &tonalityVisButton, &bassComfortVisButton })
+                     &tonalityVisButton, &bassComfortVisButton,
+                     &vibVisButtons_[0], &vibVisButtons_[1], &vibVisButtons_[2], &vibVisButtons_[3] })
         b->setColour (juce::ToggleButton::textColourId, textPrimary);
+    vibVisButtons_[3].setColour (juce::ToggleButton::tickColourId, textPrimary);
 
     repaint();
 }
@@ -206,6 +238,9 @@ void LogComponent::resized()
     splVisButton.setBounds (juce::Rectangle<float> (plotX,          btnY, colW, btnH).toNearestInt());
     dbaVisButton.setBounds (juce::Rectangle<float> (plotX + colW,   btnY, colW, btnH).toNearestInt());
     dbcVisButton.setBounds (juce::Rectangle<float> (plotX + colW*2, btnY, colW, btnH).toNearestInt());
+    for (int i = 0; i < 4; ++i)   // 4th column: vibration traces
+        vibVisButtons_[i].setBounds (juce::Rectangle<float> (plotX + colW * 3 + colW / 4.0f * i, btnY,
+                                                             colW / 4.0f, btnH).toNearestInt());
 
     // Row 2 — psychoacoustic (4 columns)
     const float row2Y = btnY + btnH + rowGap;
@@ -256,6 +291,21 @@ void LogComponent::timerCallback()
     if (fftEnabled_)
         computeFftBands();
     rows = processor.copyLog();
+
+    // Live accelerometer, or playback of a recording with one
+    const bool vibAvailable = processor.isVibrationAvailable();
+    const auto snap = processor.getVibrationSnapshot();
+    const bool uniaxial = snap.valid ? snap.uniaxial
+                                     : processor.getSensorValidity() == SensorConfig::Validity::Uniaxial;
+    if (vibAvailable != vibAvailable_ || uniaxial != vibUniaxial_)
+    {
+        vibAvailable_ = vibAvailable;
+        vibUniaxial_  = uniaxial;
+        // Uniaxial: one trace, shown by the X toggle
+        vibVisButtons_[0].setButtonText (uniaxial ? "Vib" : "Vib X");
+        for (int i = 0; i < 4; ++i)
+            vibVisButtons_[i].setVisible (vibAvailable && (i == 0 || ! uniaxial));
+    }
     repaint();
 }
 
@@ -336,6 +386,71 @@ void LogComponent::paint (juce::Graphics& g)
         return plot.getBottom() - t * plot.getHeight();
     };
 
+    // ---- Vibration traces take the right axis (spec §7.3); a psychoacoustic
+    //      metric shown at the same time keeps its own (unlabelled) scale ----
+    const juce::Colour textPrimary = lightMode_ ? juce::Colour (0xff1c1c1e) : juce::Colours::white;
+    const auto vibUnit = processor.getVibrationDisplayUnit();
+    bool vibOn[4];
+    bool anyVibOn = false;
+    for (int i = 0; i < 4; ++i)
+    {
+        vibOn[i] = vibVisButtons_[i].isVisible() && vibVisButtons_[i].getToggleState();
+        anyVibOn = anyVibOn || vibOn[i];
+    }
+    int  vibQuantity = -1;
+    for (auto it = rows.rbegin(); it != rows.rend() && anyVibOn; ++it)
+        if (it->vib.valid) { vibQuantity = it->vib.quantity; break; }
+    const bool vibDb = vib::units::effective (vibUnit, (vib::Quantity) juce::jmax (0, vibQuantity)) == vib::DisplayUnit::Db;
+    auto vibSlotShown = [&] (const VibrationLog& v, int slot)
+    {
+        if (! v.valid || v.quantity != vibQuantity || ! vibOn[slot]) return false;
+        if (slot == vib::AxisSum)
+        {
+            const int axes = (v.axisMask & 1) + ((v.axisMask >> 1) & 1) + ((v.axisMask >> 2) & 1);
+            return ! v.uniaxial && axes > 1;
+        }
+        return ((v.axisMask >> slot) & 1) != 0;
+    };
+    auto vibValue = [&] (float si) { return (float) vib::units::convert (si, vibUnit, (vib::Quantity) vibQuantity); };
+    float vibMin = 0.0f, vibMax = 0.0f;
+    bool  vibAxis = false;
+    if (vibQuantity >= 0)
+    {
+        float lo = 1.0e30f, hi = -1.0e30f;
+        for (const auto& e : rows)
+            for (int slot = 0; slot < 4; ++slot)
+                if (vibSlotShown (e.vib, slot))
+                {
+                    const float v = vibValue (e.vib.rms[slot]);
+                    lo = juce::jmin (lo, v);
+                    hi = juce::jmax (hi, v);
+                }
+        if (hi >= lo)
+        {
+            vibAxis = true;
+            if (vibDb)
+            {
+                vibMax = std::ceil (hi / 10.0f) * 10.0f;
+                vibMin = juce::jmin (std::floor (lo / 10.0f) * 10.0f, vibMax - 20.0f);
+            }
+            else
+            {
+                vibMin = 0.0f;
+                vibMax = niceCeil (hi * 1.05f);
+            }
+        }
+    }
+    auto vibToY = [&] (float v) -> float {
+        float t = (v - vibMin) / (vibMax - vibMin);
+        t = juce::jlimit (0.0f, 1.0f, t);
+        return plot.getBottom() - t * plot.getHeight();
+    };
+    const float  axisMin    = vibAxis ? vibMin : rightMin;
+    const float  axisMax    = vibAxis ? vibMax : rightMax;
+    const auto   axisColour = vibAxis ? textPrimary : psychoColour;
+    const auto   axisUnit   = vibAxis ? juce::String::fromUTF8 (vib::units::label (vibUnit, (vib::Quantity) vibQuantity))
+                                      : rightUnit;
+
     // ---- Left Y-axis grid + labels ----
     g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
     {
@@ -387,15 +502,18 @@ void LogComponent::paint (juce::Graphics& g)
         const int numTicks = 4;
         for (int i = 0; i <= numTicks; ++i)
         {
-            float val = rightMin + (rightMax - rightMin) * i / numTicks;
-            float y   = rightToY (val);
+            float val = axisMin + (axisMax - axisMin) * i / numTicks;
+            float y   = plot.getBottom() - plot.getHeight() * (float) i / numTicks;
             g.setColour (gridColour);
             g.drawHorizontalLine (static_cast<int>(y), plot.getX(), plot.getRight());
-            g.setColour (psychoColour.withAlpha (0.8f));
-            const float range = rightMax - rightMin;
-            juce::String label = (range < 10.0f)
-                                 ? juce::String (val, 1)
-                                 : juce::String (static_cast<int>(val + 0.5f));
+            g.setColour (axisColour.withAlpha (0.8f));
+            const float range = axisMax - axisMin;
+            juce::String label;
+            if (vibAxis && ! vibDb)
+                label = juce::String (val, range < 0.1f ? 4 : range < 1.0f ? 3 : range < 10.0f ? 2 : range < 100.0f ? 1 : 0);
+            else
+                label = (range < 10.0f) ? juce::String (val, 1)
+                                        : juce::String (static_cast<int>(val + 0.5f));
             g.drawText (label,
                         static_cast<int>(plot.getRight()) + 4, static_cast<int>(y) - 14,
                         static_cast<int>(marginR) - 8, 28,
@@ -406,14 +524,16 @@ void LogComponent::paint (juce::Graphics& g)
         {
             juce::Graphics::ScopedSaveState ss (g);
             g.setFont (juce::Font (juce::FontOptions().withHeight (18.0f).withStyle ("Bold")));
-            g.setColour (psychoColour);
+            g.setColour (axisColour);
             float rx = plot.getRight() + marginR - 18.0f;
+            // Long vibration units sit above the zoom button
+            const float cy = plot.getCentreY() - (vibAxis ? 70.0f : 0.0f);
             g.addTransform (juce::AffineTransform::rotation (
-                juce::MathConstants<float>::halfPi, rx, plot.getCentreY()));
-            g.drawText (rightUnit,
-                        static_cast<int>(rx - 40.0f),
-                        static_cast<int>(plot.getCentreY()) - 10,
-                        80, 20, juce::Justification::centred, false);
+                juce::MathConstants<float>::halfPi, rx, cy));
+            g.drawText (axisUnit,
+                        static_cast<int>(rx - 100.0f),
+                        static_cast<int>(cy) - 10,
+                        200, 20, juce::Justification::centred, false);
         }
     }
 
@@ -553,6 +673,27 @@ void LogComponent::paint (juce::Graphics& g)
         }
         g.setColour (psychoColour);
         g.strokePath (path, juce::PathStrokeType (2.5f));
+    }
+
+    // ---- Vibration traces (right axis); gaps where there are no live readings ----
+    if (vibAxis)
+    {
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            if (! vibOn[slot]) continue;
+            juce::Path path;
+            bool started = false;
+            for (const auto& e : rows)
+            {
+                if (! vibSlotShown (e.vib, slot)) { started = false; continue; }
+                const float x = timeToX (e.timestampMs);
+                const float y = vibToY (vibValue (e.vib.rms[slot]));
+                if (! started) { path.startNewSubPath (x, y); started = true; }
+                else           { path.lineTo (x, y); }
+            }
+            g.setColour (slot < 3 ? colVib[slot] : textPrimary);
+            g.strokePath (path, juce::PathStrokeType (slot == vib::AxisSum ? 3.0f : 2.0f));
+        }
     }
 
     // ---- Sound event markers ----
@@ -806,7 +947,7 @@ void LogComponent::paint (juce::Graphics& g)
 
         for (int c = 0; c < numFftChannels(); ++c)
         {
-            g.setColour (fftDual_ ? (c == 0 ? colFftIn1 : colFftIn2) : crossCol);
+            g.setColour (fftDual() ? (c == 0 ? colFftIn1 : colFftIn2) : crossCol);
             const float y = dbToY (fftCh_[c].bandsSmoothed[bestBand]);
             g.fillEllipse (crossX - 4.0f, y - 4.0f, 8.0f, 8.0f);
         }
@@ -817,7 +958,8 @@ void LogComponent::paint (juce::Graphics& g)
             : juce::String (static_cast<int> (bandFreq + 0.5f)) + " Hz";
         juce::String label = freqStr;
         for (int c = 0; c < numFftChannels(); ++c)
-            label << "  " << (fftDual_ ? processor.getChannelName (c) + " " : juce::String())
+            label << "  " << (fftSourceChannel (c) >= 0 ? processor.getChannelName (fftSourceChannel (c)) + " "
+                                                         : juce::String())
                   << juce::String (fftCh_[c].bandsSmoothed[bestBand], 1) << " dB";
 
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f).withStyle ("Bold")));
@@ -850,13 +992,13 @@ void LogComponent::computeFftBands()
     const int fftOrder = kFftOrders[sizeIdx];
     const int fftSize  = 1 << fftOrder;
 
-    // Switching between mono mix and Dual FFT changes what each channel state
-    // is fed with, so its history must start over too
-    const bool dual = processor.apvts.getRawParameterValue ("fftDual")->load() > 0.5f;
+    // Switching the FFT source (mix / input / dual) changes what each channel
+    // state is fed with, so its history must start over too
+    const int source = processor.getFftSource();
 
-    if (fftOrder != currentFftOrder_ || dual != fftDual_)
+    if (fftOrder != currentFftOrder_ || source != fftSource_)
     {
-        if (dual != fftDual_)
+        if (source != fftSource_)
         {
             for (auto& ch : fftCh_)
             {
@@ -867,7 +1009,7 @@ void LogComponent::computeFftBands()
         }
 
         currentFftOrder_ = fftOrder;
-        fftDual_         = dual;
+        fftSource_       = source;
         fft_ = std::make_unique<juce::dsp::FFT> (fftOrder);
         windowCoeffs_.assign (fftSize, 0.0f);
         for (auto& ch : fftCh_)
@@ -921,7 +1063,7 @@ void LogComponent::computeFftBands()
     }
 
     for (int c = 0; c < numFftChannels(); ++c)
-        processFftChannel (fftCh_[c], fftDual_ ? c : -1);
+        processFftChannel (fftCh_[c], fftSourceChannel (c));
 }
 
 // Runs one analysis frame for a single signal. All channels share the FFT size,
@@ -1134,10 +1276,26 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         }
     };
 
-    if (! fftDual_)
+    // Legend entry (top-right of the plot), one row per call
+    float legendY = plot.getY() + 6.0f;
+    auto drawLegend = [&] (const juce::String& text, juce::Colour colour)
+    {
+        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
+        const float tw = g.getCurrentFont().getStringWidthFloat (text);
+        const float lx = plot.getRight() - tw - 26.0f;
+        g.setColour (colour);
+        g.fillRoundedRectangle (lx, legendY + 3.0f, 10.0f, 10.0f, 2.0f);
+        g.drawText (text, juce::Rectangle<float> (lx + 14.0f, legendY, tw + 4.0f, 16.0f),
+                    juce::Justification::centredLeft, false);
+        legendY += 18.0f;
+    };
+
+    if (! fftDual())
     {
         drawChannel (fftCh_[0], juce::Colour (0xff34c759), juce::Colour (0xaa34c759),
                      juce::Colour (0xffffcc00));  // amber peak line
+        if (fftSourceChannel (0) >= 0)   // single input: name it, the mix needs no legend
+            drawLegend ("FFT " + processor.getChannelName (fftSourceChannel (0)), juce::Colour (0xff34c759));
     }
     else
     {
@@ -1145,20 +1303,8 @@ void LogComponent::drawFftOverlay (juce::Graphics& g, const juce::Rectangle<floa
         drawChannel (fftCh_[0], colFftIn1, colFftIn1.withAlpha (0.25f), colFftIn1.brighter (0.6f));
         drawChannel (fftCh_[1], colFftIn2, colFftIn2.withAlpha (0.25f), colFftIn2.brighter (0.6f));
 
-        // Legend (top-right of the plot)
-        g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f).withStyle ("Bold")));
-        float ly = plot.getY() + 6.0f;
-        for (int c = 0; c < 2; ++c)
-        {
-            const auto text = "FFT " + processor.getChannelName (c);
-            const float tw  = g.getCurrentFont().getStringWidthFloat (text);
-            const float lx  = plot.getRight() - tw - 26.0f;
-            g.setColour (c == 0 ? colFftIn1 : colFftIn2);
-            g.fillRoundedRectangle (lx, ly + 3.0f, 10.0f, 10.0f, 2.0f);
-            g.drawText (text, juce::Rectangle<float> (lx + 14.0f, ly, tw + 4.0f, 16.0f),
-                        juce::Justification::centredLeft, false);
-            ly += 18.0f;
-        }
+        drawLegend ("FFT " + processor.getChannelName (0), colFftIn1);
+        drawLegend ("FFT " + processor.getChannelName (1), colFftIn2);
     }
 
     // ---- Graph Overlay: dashed blue frequency-response curve ----

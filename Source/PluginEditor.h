@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "UserPrefs.h"
 #include "MeterComponent.h"
+#include "VibrationPanel.h"
 #include "LogComponent.h"
 #include "SettingsComponent.h"
 #include "SpectrogramComponent.h"
@@ -10,6 +11,9 @@
 #include "LFFTComponent.h"
 #include "LongTermSPLComponent.h"
 #include "ImpulseFidelityComponent.h"
+#if ! JUCE_IOS
+ #include "RewSequencerComponent.h"
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
  #include "VisqolComponent.h"
 #endif
@@ -275,9 +279,12 @@ private:
     void doSaveJpg();
     void doSaveAll();
     void doSaveSettingsJson();
+    void doSaveVibrationReport();
+    bool canSaveVibrationReport() const;
     void doLoadSettingsJson();
     static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&,
-                              const std::vector<LogComponent::MarkerEvent>&);
+                              const std::vector<LogComponent::MarkerEvent>&, vib::DisplayUnit,
+                              const juce::String& vibProfile);
 
     SPLMeterAudioProcessor& audioProcessor;
     // Must stay above the child components so they are built from the restored state
@@ -285,6 +292,12 @@ private:
 
     MeterComponent       meter;
     LogComponent         log;
+    VibrationPanel       vibPanel;
+
+    // Vibration panel (spec §7.2): state from roles + snapshot; returns true when
+    // the panel's height changed and the layout must follow
+    bool updateVibrationPanel();
+    int  basicHeight() const { return 100 + 215 + 24 + vibPanel.preferredHeight(); }   // title + meter + panel + build strip
 
     juce::TooltipWindow tooltipWindow { this, 400 };  // 400 ms delay
     juce::TextButton settingsButton      { "Settings..." };
@@ -337,6 +350,9 @@ private:
     std::unique_ptr<LFFTWindow>           lfftWindow;
     std::unique_ptr<LongTermSPLWindow>    longTermSPLWindow;
     std::unique_ptr<ImpulseFidelityWindow> impulseFidelityWindow;
+#if ! JUCE_IOS
+    std::unique_ptr<RewUi::RewSequencerWindow> rewSequencerWindow;
+#endif
     std::vector<SoundEvent>               allSoundEvents_;
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;

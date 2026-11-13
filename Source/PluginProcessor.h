@@ -8,10 +8,34 @@
 #include "ImpulsivenessEstimator.h"
 #include "TonalityEstimator.h"
 #include "SoundDetective.h"
+#include "SensorConfig.h"
+#include "Vibration/VibrationEngine.h"
+#include "Vibration/CalibratorMeasurement.h"
+#include "Vibration/Units.h"
+#include "Vibration/Profiles.h"
+#include "Vibration/Assessment.h"
+#include "Rew/RewRunResults.h"
+#include "RtHandover.h"
+#include "WavRecording.h"
+#include <array>
 #include <atomic>
 #include <deque>
 
 //==============================================================================
+// Accelerometer values of one log entry (vibration spec §7.3), SI units of the
+// quantity (m/s², m/s, m). Slots X, Y, Z, Σ as vib::Axis.
+struct VibrationLog
+{
+    bool  valid    = false;   // live accelerometer readings in this entry
+    int   quantity = 0;       // vib::Quantity
+    int   axisMask = 0;       // present X/Y/Z
+    bool  uniaxial = false;
+    float rms[4]  {};
+    float peak[4] {};         // max |x| in the last snapshot interval
+    int   mainKind = 0;       // vib::MainValue of the profile
+    float main     = 0.0f;    // the profile's main value
+};
+
 struct LogEntry
 {
     juce::int64  timestampMs;
@@ -29,6 +53,7 @@ struct LogEntry
     float psychoAnnoyance  = 0.0f;
     float impulsiveness    = 0.0f;
     float tonality         = 0.0f;
+    VibrationLog vib;
 };
 
 //==============================================================================
@@ -49,8 +74,12 @@ public:
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
     {
+        // The standalone app takes every input the device opens (up to the 32
+        // mute/role slots); plugins keep 1–8 (vibration spec §10). Rejecting a
+        // device with more inputs would make JUCE fall back to a single input.
+        const int maxIns = wrapperType == wrapperType_Standalone ? SensorConfig::kMaxInputs : 8;
         int n = layouts.getMainInputChannels();
-        return n >= 1 && n <= 8;
+        return n >= 1 && n <= maxIns;
     }
 
     //==========================================================================
@@ -143,8 +172,19 @@ public:
     // FFT circular buffer (audio thread → GUI, lock-free)
     // Sized to the largest selectable L_FFT window (524288 = 512k samples).
     static constexpr int kFftCircBufSize = 524288;
-    // channel -1 = mono mix of all inputs; 0 / 1 = input 1 / 2 alone (Dual FFT)
+    // channel -1 = mono mix of all inputs; 0 … kMaxFftChannels-1 = that input alone
+    // (post mute / bandpass / correction). Inputs without a buffer read as silence.
+    static constexpr int kMaxFftChannels = 8;
     void copyFftWindow (float* dest, int size, int channel = -1) const noexcept;
+
+    // FFT source (parameter "fftSource"): what the timeline FFT analyses.
+    // Values are persisted — only append new entries.
+    enum FftSource { FftSourceMix = 0, FftSourceDual = 1, FftSourceInput1 = 2 };
+    static constexpr int kNumFftSources = FftSourceInput1 + kMaxFftChannels;
+    int  getFftSource() const noexcept;
+    // Sets "fftSource" and keeps the legacy "fftDual" flag in step, so sessions
+    // stay readable by v3.5.2 (message thread).
+    void setFftSource (int source);
     int  pullSpectroSamples (float* dest, int maxSamples) noexcept;
     double getSampleRate() const noexcept { return currentSampleRate; }
 
@@ -176,7 +216,11 @@ public:
 
     // DIN 15905-5: session-long C-weighted peak (does not decay with peakHoldTime)
     float getSessionPeakDBCSPL () const noexcept { return sessionPeakDBCSPL_.load (std::memory_order_relaxed); }
-    void  resetSessionPeak     ()       noexcept { sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed); }
+    void  resetSessionPeak     ()       noexcept
+    {
+        sessionPeakDBCSPL_.store (-999.0f, std::memory_order_relaxed);
+        resetVibrationStats();   // session statistics reset together (spec §5.3)
+    }
 
     // NIOSH REL: cumulative 8-hour noise-dose percentage (100% = 85 dB(A) for 8 h,
     // 3 dB exchange rate, 80 dB(A) threshold).
@@ -223,8 +267,17 @@ public:
     const std::vector<std::pair<float,float>>& getGraphOverlay2Points() const { return graphOverlay2Points_; }
 
     //==========================================================================
-    // WAV recorder
+    // WAV recorder: inputs 1 + 2, or every non-Off input (≤ 8) with an
+    // accelerometer, with track roles + calibration in the iXML chunk (spec §7.5)
     bool saveWavToFile (const juce::File& destFile);
+    std::vector<int> getRecordedInputs() const;
+
+    // File playback of an SPLMeter recording: the recorded track roles and
+    // calibration drive the mix and the vibration analysis
+    std::vector<WavRecording::Track> getFileTracks() const { return fileTracks_; }
+    bool fileHasAccelerometer() const noexcept { return fileHasAccel_.load(); }
+    // Vibration readings exist: live accelerometer, or playback of a recording with one
+    bool isVibrationAvailable() const;
 
     //==========================================================================
     // Impulse Fidelity
@@ -269,6 +322,120 @@ public:
     }
 
     //==========================================================================
+    // Sensor roles per input (vibration spec §3.1). Default: all Mic.
+    // Persisted in UIState/Inputs; mirrored into atomics for the audio thread.
+    SensorRole getChannelRole (int ch) const noexcept
+    {
+        jassert (ch >= 0 && ch < SensorConfig::kMaxInputs);
+        return SensorConfig::fromInt (channelRoles_[(size_t) ch].load (std::memory_order_relaxed));
+    }
+    void setChannelRole (int ch, SensorRole role);
+    SensorConfig::Roles getChannelRoles() const noexcept;
+    SensorConfig::Validity getSensorValidity() const noexcept
+    {
+        return SensorConfig::validate (getChannelRoles(), getTotalNumInputChannels());
+    }
+
+    //==========================================================================
+    // Accelerometer (vibration spec §3–§5). Settings persist in UIState/Accel,
+    // per-input calibration in UIState/Inputs ("cal<ch>"). Message thread only.
+    vib::VibrationSettings getVibrationSettings() const;
+    void   setVibrationSettings (const vib::VibrationSettings& settings);
+    double getAccelCalDb (int ch) const;
+    void   setAccelCalDb (int ch, double calDb);
+
+    // Latest readout (published every 125 ms); valid == false without accelerometer
+    vib::VibrationSnapshot getVibrationSnapshot() const noexcept
+    {
+        vib::VibrationSnapshot s;
+        if (! vibSnapshot_.read (s)) s.valid = false;
+        return s;
+    }
+    void resetVibrationStats() noexcept { vibResetRequest_.store (true, std::memory_order_release); }
+
+    // Sensor information for the report (UIState/Accel; no engine rebuild)
+    struct AccelSensorInfo
+    {
+        juce::String serial;
+        double lowerLimitHz = 0.5;      // usable range from the datasheet (spec §3.2)
+        double upperLimitHz = 10000.0;
+        double exposureHours = 8.0;     // daily exposure time T for A(8)
+    };
+    AccelSensorInfo getAccelSensorInfo() const;
+    void setAccelSensorInfo (const AccelSensorInfo& info);
+
+    // Measurement profile (spec §6, UIState/Accel "profile"): applying one sets the
+    // accelerometer settings and display unit; later edits make it "Custom (based on …)"
+    vib::Profile getVibrationProfile() const;
+    void applyVibrationProfile (vib::Profile profile);
+    juce::String getVibrationProfileLabel() const;    // e.g. "Custom (based on Hand-arm (ISO 5349-1))"
+    juce::String getVibrationProfileKey() const;      // CSV/JSON: "hand-arm" or "custom(hand-arm)"
+    juce::String getVibrationMainLabel() const;       // e.g. "a_w"
+
+    // Assessment reference values (spec §9.3, UIState/AccelLimits); defaults from the standards
+    vib::AssessmentLimits getAssessmentLimits() const;
+    void setAssessmentLimits (const vib::AssessmentLimits& limits);
+    vib::Assessment getVibrationAssessment() const;   // of the latest snapshot for the current profile
+
+    // REW measurement sequencer (REW sequencer spec §3): the last edited
+    // sequence, persisted in UIState/RewSequencer. Message thread only.
+    rew::Sequence getRewSequence() const;
+    void setRewSequence (const rew::Sequence& sequence);
+
+    // Runs the stored sequence. The processor owns the run (spec Q4), so it goes on
+    // when the window or editor closes. transport: nullptr = HTTP to REW on the
+    // sequence's port (tests pass a simulated REW). False if a run is active.
+    bool startRewRun (bool dryRun, std::unique_ptr<rew::Transport> transport = nullptr,
+                      rew::RunOptions options = {});
+    rew::Sequencer& getRewSequencer() noexcept { return rewSequencer_; }
+
+    // Per-step measurement for the REW sequencer (spec §6.1), independent of the
+    // user's LAeq, log and vibration accumulators. Not on the audio thread; the
+    // end waits up to 0.5 s for the audio thread and returns invalid levels if
+    // no audio ran.
+    void beginRewStepMeasurement() noexcept;
+    rew::StepLevels endRewStepMeasurement();
+    std::vector<rew::StepLevels> getRewStepLevels() const;   // current/last run, in result order
+    juce::File getRewResultsFile() const;                    // CSV of the last run ({} = none)
+
+    // Timeline markers added outside the editor (one per REW sweep); the editor collects them
+    struct TimelineMarker { juce::int64 timestampMs; juce::String text; };
+    std::vector<TimelineMarker> takePendingMarkers();
+
+    // Display unit of the vibration readout (UIState/Accel "displayUnit")
+    vib::DisplayUnit getVibrationDisplayUnit() const;
+    void setVibrationDisplayUnit (vib::DisplayUnit unit);
+
+    // JSON settings export/import (spec §8): "inputs" (role + calibration per input)
+    // and "accel" (sensor settings). Import ignores absent blocks (older files).
+    juce::var getInputsJson() const;
+    juce::var getAccelJson() const;
+    void setInputsAndAccelFromJson (const juce::var& inputs, const juce::var& accel);
+
+    // Calibration date/method per input (UIState/Inputs "calDate<ch>", "calMethod<ch>")
+    juce::String getAccelCalInfo (int ch) const;     // e.g. "2026-11-12 · calibrator", empty if never
+    void setAccelCalInfo (int ch, const juce::String& method);   // stamps today's date
+
+    // Live input level per channel (raw, after mute), for the Inputs table.
+    // RMS is smoothed with τ = 125 ms; the peak is the maximum since the last read.
+    float getInputRms (int ch) const noexcept
+    {
+        return ch >= 0 && ch < SensorConfig::kMaxInputs ? inputRms_[(size_t) ch].load (std::memory_order_relaxed) : 0.0f;
+    }
+    float takeInputPeak (int ch) noexcept
+    {
+        return ch >= 0 && ch < SensorConfig::kMaxInputs ? inputPeak_[(size_t) ch].exchange (0.0f, std::memory_order_relaxed) : 0.0f;
+    }
+
+    // Handheld-calibrator measurement on one input (spec §4). Message thread:
+    // start → poll getAccelCalibrationProgress() → takeAccelCalibrationResult().
+    bool   startAccelCalibration (int ch, double referenceHz);
+    void   cancelAccelCalibration() noexcept;
+    double getAccelCalibrationProgress() const noexcept { return calProgress_.load (std::memory_order_relaxed); }
+    // Returns true (and fills result) once the measurement has finished
+    bool   takeAccelCalibrationResult (vib::CalibratorMeasurement::Result& result) noexcept;
+
+    //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -277,6 +444,42 @@ private:
     //==========================================================================
     AWeightingFilter  aWeightL;
     CWeightingFilter  cWeightL;
+
+    // Sensor roles (audio-thread mirror of UIState/Inputs)
+    std::array<std::atomic<int>, SensorConfig::kMaxInputs> channelRoles_ {};
+    void loadChannelRolesFromState();
+
+    // Accelerometer engine hand-over (real-time safe): the message thread builds a
+    // complete engine and puts it in vibPending_; the audio thread swaps it in at the
+    // start of a block and parks the previous one in vibRetired_, which the message
+    // thread deletes on its next rebuild (or in the destructor). The audio thread only
+    // swaps when vibRetired_ is empty, so it never allocates or frees.
+    std::unique_ptr<vib::VibrationEngine> buildVibrationEngine() const;
+    void rebuildVibrationEngine();
+    std::atomic<vib::VibrationEngine*>    vibPending_ { nullptr };
+    std::atomic<vib::VibrationEngine*>    vibRetired_ { nullptr };
+    vib::VibrationEngine*                 vibActive_  = nullptr;   // audio thread
+    std::atomic<bool>                     vibResetRequest_ { false };
+    vib::SeqLock<vib::VibrationSnapshot>  vibSnapshot_;
+    vib::VibrationSnapshot                vibWork_;                 // audio thread
+    bool                                  vibLogLive_ = false;      // audio thread: vibWork_ is current
+
+    // Input level meters (audio thread writes)
+    std::array<std::atomic<float>, SensorConfig::kMaxInputs> inputRms_ {}, inputPeak_ {};
+    std::array<double, SensorConfig::kMaxInputs>             inputMs_ {};   // audio thread
+
+    // Calibrator measurement hand-over: the message thread configures calMeas_
+    // only while calState_ is Idle, the audio thread uses it only while Running,
+    // and the message thread reads the result once it is Done.
+    enum CalState : int { CalIdle = 0, CalRunning, CalCancel, CalDone };
+    std::atomic<int>            calState_ { CalIdle };
+    std::atomic<double>         calProgress_ { 0.0 };
+    int                         calChannel_ = -1;
+    vib::CalibratorMeasurement  calMeas_;
+
+    // Accelerometer channels are restored from here after the correction
+    // convolution, which processes all channels at once (allocated in prepareToPlay)
+    juce::AudioBuffer<float> nonMicScratch_;
 
     // 20Hz-20kHz bandpass: 8th-order Butterworth = 4 cascaded biquad stages
     static constexpr int kBpStages = 4;
@@ -324,7 +527,11 @@ private:
     std::atomic<int> midiLearnParamIndex     { -1 };
 
     std::array<float, kFftCircBufSize> fftCircBuf_ {};
-    std::array<std::array<float, kFftCircBufSize>, 2> fftCircBufDual_ {};  // inputs 1 + 2, same write pos
+    // Per-input FFT ring buffers (same write position as fftCircBuf_). Allocated in
+    // prepareToPlay for the inputs present and never freed or moved afterwards, so
+    // the GUI can read through the published pointer at any time.
+    std::array<std::unique_ptr<float[]>, kMaxFftChannels> fftChStorage_;
+    std::array<std::atomic<float*>, kMaxFftChannels>     fftChBuf_ {};
     std::atomic<int>                   fftWritePos_ { 0 };
     std::atomic<int>                   spectroReadPos_ { 0 };
 
@@ -386,9 +593,18 @@ private:
     juce::String channelNames_[32];
 
     // WAV circular buffer: stereo (Ch0 + Ch1), sized to logDuration at prepareToPlay
-    std::vector<float>  wavCircBuf_[2];
-    std::atomic<int>    wavWritePos_ { 0 };
-    int                 wavBufSize_  { 0 };
+    RtHandover<WavRecording::Recorder> wavRec_;
+    std::vector<int>                   wavLayout_;   // message thread: inputs of the published recorder
+    void rebuildWavRecorder (bool audioStopped);
+
+    // File playback (roles per file channel; Mic for files without SPLMeter metadata)
+    std::array<std::atomic<int>, WavRecording::kMaxTracks> fileRoles_ {};
+    std::atomic<int>                   fileNumChannels_ { 2 };
+    std::atomic<bool>                  fileHasAccel_ { false };
+    std::vector<WavRecording::Track>   fileTracks_;   // message thread
+    RtHandover<vib::VibrationEngine>   vibFile_;      // engine for file playback
+    std::unique_ptr<vib::VibrationEngine> buildFileVibrationEngine() const;
+    int                                vibSource_ = 0;   // audio thread: 0 live, 1 file
 
     // Impulse Fidelity test signal generator + capture
     juce::AudioBuffer<float>  impFidTestSignal_;
@@ -396,6 +612,64 @@ private:
     std::atomic<bool>         impFidActive_    { false };
     std::atomic<int>          impFidPos_       { 0 };
     int                       impFidSignalLen_ { 0 };
+
+    // REW per-step measurement (spec §6.1): the audio thread owns stepAccum_ and
+    // writes stepResult_ before publishing kStepDone
+    struct StepAccum
+    {
+        double sumA = 0.0, sumC = 0.0, sumZ = 0.0;
+        long long n = 0, pausedSamples = 0;
+        double maxFastA = 0.0, maxSlowC = 0.0;
+        float peakC = 0.0f;
+        double vibSumSq[4] {};
+        float vibPeak[4] {};
+        long long vibCount = 0;
+        int vibQuantity = 0, vibAxisMask = 0;
+        bool vibUniaxial = false;
+
+        // fastA / slowC: the continuously running detectors (settled before the step)
+        void add (float z, float a, float c, double fastA, double slowC) noexcept
+        {
+            sumZ += (double) z * z;
+            sumA += (double) a * a;
+            sumC += (double) c * c;
+            ++n;
+            maxFastA = std::max (maxFastA, fastA);
+            maxSlowC = std::max (maxSlowC, slowC);
+            peakC = std::max (peakC, std::abs (c));
+        }
+        // Once per vibration snapshot (125 ms): the mean of the running mean
+        // squares is the mean square over the step
+        void addVib (const vib::VibrationSnapshot& v) noexcept
+        {
+            if (! v.valid) return;
+            for (int slot = 0; slot < vib::kNumAxisSlots; ++slot)
+            {
+                vibSumSq[slot] += (double) v.axis[slot].rms * v.axis[slot].rms;
+                vibPeak[slot] = std::max (vibPeak[slot], v.axis[slot].peak);
+            }
+            ++vibCount;
+            vibQuantity = v.quantity;
+            vibAxisMask = v.axisMask;
+            vibUniaxial = v.uniaxial;
+        }
+    };
+    enum : int { kStepIdle = 0, kStepBegin, kStepRunning, kStepEnd, kStepDone };
+    std::atomic<int> stepState_ { kStepIdle };
+    StepAccum        stepAccum_;    // audio thread
+    double rewFastA_ = 0.0, rewSlowC_ = 0.0;            // FAST-A / SLOW-C mean squares, always running
+    double rewFastAlpha_ = 0.0, rewSlowAlpha_ = 0.0;
+    rew::StepLevels  stepResult_;   // audio thread → reader after kStepDone
+    void handleRewStep (float calOffset) noexcept;   // audio thread, start of block
+
+    mutable std::mutex rewMutex_;
+    std::vector<rew::StepLevels> rewLevels_;
+    juce::File rewResultsFile_;
+    std::vector<TimelineMarker> pendingMarkers_;
+
+    // Declared last, so it is destroyed first: aborts a run and restores REW
+    // before anything a run uses goes away
+    rew::Sequencer rewSequencer_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessor)
 };

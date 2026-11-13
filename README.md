@@ -1,6 +1,6 @@
 # SPLMeter
 
-A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows/Linux standalone app and as VST3 / AU plugin.
+A professional Sound Pressure Level (SPL) meter built with JUCE, available as a macOS/Windows/Linux standalone app and as VST3 / AU plugin. Since v3.6 it also measures **vibration** with an IEPE accelerometer, alongside the microphone.
 
 ![SPLMeter v3.5 screenshot](screenShot.png)
 
@@ -61,17 +61,38 @@ Continuous real-time estimation of:
 | Specific Loudness | Perceived loudness approximation (sone) |
 | Psychoacoustic Annoyance | Combined annoyance index (Zwicker & Fastl 1999): N × (1 + √(w_S² + w_FR²)) |
 
+### Vibration Measurement (Accelerometer)
+Full guide: [docs/VIBRATION_GUIDE.md](docs/VIBRATION_GUIDE.md)
+- **One IEPE accelerometer** (triaxial or uniaxial) **plus the microphone** at the same time — each input gets a role (Mic, Accel X/Y/Z, Accel uniaxial, Off) in **Settings → Inputs and Sensors…**; only Mic inputs feed the SPL meter
+- **Calibration per axis** with a handheld calibrator (10 m/s² / 1 g at 159.2 Hz, or custom) or from the datasheet sensitivity and the interface's full scale
+- **Signal chain** in double precision: high-pass, integration to velocity or displacement, ISO 8041 frequency weightings (Wb, Wc, Wd, We, Wf, Wh, Wj, Wk, Wm), DIN 4150-2 KB weighting, or a band limit
+- **Detectors**: running RMS, peak, peak-to-peak, a_w,rms, MTVV, VDV, crest factor, PPV with dominant frequency, KB_Fmax / KB_FTr, vector sum with k-factors, A(8), 1/3-octave spectrum (1 Hz – 1250 Hz)
+- **Measurement profiles**: structure-borne, machinery (ISO 20816), whole-body health and comfort (ISO 2631-1), hand-arm (ISO 5349-1), building perception (DIN 4150-2), building structural (DIN 4150-3)
+- **Assessment** against editable reference values: EU 2002/44/EC and German LärmVibrationsArbSchV action/limit values, ISO 10816-3 / 20816-3 zones A–D, DIN 4150-2 A_u / A_o / A_r, DIN 4150-3 guideline values; shown as a status dot in the panel
+- **Vibration panel** below the SPL meter, **timeline traces** (Vib X · Y · Z · Σ), vibration **CSV columns**, **multichannel WAV** with roles and calibration, and an **HTML vibration report**
+- Indicative measurements: SPLMeter is not a type-tested ISO 8041-1 / DIN 45669-1 instrument
+
+### REW Measurement Sequencer
+Full guide: [docs/REW_SEQUENCER_GUIDE.md](docs/REW_SEQUENCER_GUIDE.md)
+- **Tools → REW Measurement Sequencer…** runs a list of [Room EQ Wizard](https://www.roomeqwizard.com/) sweep measurements one after the other through REW's REST API (REW Pro, API enabled, same computer)
+- **Per step**: name and notes, output, second output (ASIO) / invert, input range, level, sweep range and length, repetitions, timing reference, clipping / SPL-limit protection, REW group, *wait for me* prompt, delay; unset settings keep REW's value
+- **Add positions…** for multi-position measurements, loops, gap between steps, stop / skip / retry on errors, dry run, pause and abort; REW's settings are restored after the run
+- **SPLMeter measures each sweep too**: LAeq, LCeq, LZeq, LAFmax, LCSmax, LCpeak and, with an accelerometer, vibration RMS and peak per axis — saved with the run as **CSV and JSON**, plus one **timeline marker** per sweep
+- Sequences are saved as `*.rewseq.json`; the run continues when the window or editor is closed
+
 ### Input Modes
-- **Real Time** — live microphone / audio interface input, up to **32 channels**
+- **Real Time** — live microphone / audio interface input, up to **32 channels**; each input can be a microphone or an accelerometer axis
 - **File** — load and analyse an audio file (WAV, AIFF, FLAC, MP3, OGG)
 - **Monitor button** — speaker icon; output is muted by default, click to enable pass-through
 
 ### Export
-Accessible via the **Save…** button (popup menu):
-- **Save CSV** — exports the full measurement log (timestamps, all SPL values, all psychoacoustic metrics) as a CSV file
-- **Save WAV** — saves the last *Keep Last* seconds of Input 01 and 02 as a stereo 24-bit WAV file
+Accessible via the **Ex-/Import…** button (popup menu):
+- **Save CSV** — exports the full measurement log (timestamps, all SPL values, all psychoacoustic metrics; with an accelerometer also the vibration values) as a CSV file
+- **Save WAV** — saves the last *Keep Last* seconds of Input 01 and 02 as a stereo 24-bit WAV file; with an accelerometer, every non-Off input (up to 8 tracks) with roles and calibration in the file
 - **Save Screenshot** — exports the current view as a JPEG image
 - **Save All** — saves CSV, WAV, and screenshot in one step into a chosen folder
+- **Save Vibration Report** — one self-contained HTML file (setup, results, assessment, charts, events, disclaimer), printable to PDF
+- **Save / Load Settings** — JSON file with all settings, including input roles, accelerometer calibration and assessment values
 
 ### Analysis Tools
 Accessible via the **Tools…** button (popup menu):
@@ -80,6 +101,7 @@ Accessible via the **Tools…** button (popup menu):
 - **ViSQOL** *(macOS / Windows when pre-built lib is present)* — perceptual audio quality analysis (MOS-LQO + per-band NSIM)
 - **Correction Filter** — load a frequency-response correction curve (.txt / .csv: Hz + dB pairs); applied as a linear-phase FIR filter before metering (configured in Settings)
 - **Graph Overlay** — load a reference curve and display it as a dashed blue line in the FFT view (configured in Settings)
+- **REW Measurement Sequencer** *(not on iOS)* — runs a list of REW sweep measurements with per-step settings and measures each sweep with SPLMeter (see above)
 
 ### Title Bar Utilities
 - **Live clock** — auto-updating date/time display (updates every second)
@@ -94,7 +116,7 @@ Opened via the **Settings** button. A wide, two-column, card-based window with a
 | **FFT** | FFT enable toggle, FFT Gain fader, FFT Smooth fader, FFT Size (32 – 524,288 samples), Band Resolution, Display Mode, Window Function, Overlap, Peak Hold, RTA +3 dB/oct |
 | **Spectrogram** | FFT Size (32 – 524,288 samples) for the Spectrogram window |
 | **Analysis** | Correction Filter (enable / load / clear), Graph Overlay (enable / load / clear) |
-| **Input Channels** | Per-channel mute buttons for IN01 – IN32 |
+| **Input Channels** | Per-channel mute buttons for IN01 – IN32 (with the role tag), **Inputs and Sensors…** window for roles, accelerometer calibration, profile and assessment |
 
 ### MIDI Learn
 Right-click any of the three faders to assign or clear a MIDI CC mapping:
@@ -307,6 +329,7 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 |---|---|---|---|
 | **JUCE** | 8.0.7 | ISC / GPL-3.0 | https://github.com/juce-framework/JUCE |
 | **Steinberg VST3 SDK** (incl. ASIO SDK) | latest | Steinberg VST3 License | https://github.com/steinbergmedia/vst3sdk |
+| **Room EQ Wizard REST API** (used by the REW Measurement Sequencer; REW is not bundled) | API 0.9.9 (REW 5.40) | REW EULA | https://www.roomeqwizard.com/help/help_en-GB/html/api.html |
 
 ### Standards & Psychoacoustic Models
 
@@ -315,10 +338,31 @@ GitHub Actions workflows build the standalone for macOS and Windows on every pus
 | **IEC 61672-1:2013** | Electroacoustics — Sound level meters. Defines FAST (125 ms) and SLOW (1 s) time weighting and A/C frequency weighting curves. |
 | **ISO 266:1997** | Preferred frequencies — defines the 31 standard 1/3-octave band centre frequencies (20 Hz – 20 kHz). |
 | **Zwicker & Fastl, *Psychoacoustics: Facts and Models* (3rd ed., Springer, 2007)** | Theoretical basis for the Roughness, Sharpness, Fluctuation Strength, Specific Loudness, and Psychoacoustic Annoyance estimators. |
+| **ISO 8041-1, ISO 2631-1/-2/-4, ISO 5349-1** | Human vibration frequency weightings and evaluation (a_w, MTVV, VDV, A(8), comfort scale). |
+| **Directive 2002/44/EC, LärmVibrationsArbSchV** | Whole-body and hand-arm exposure action and limit values (EU, Germany). |
+| **ISO 10816-3 / ISO 20816-3** | Machinery vibration severity zones A–D. |
+| **DIN 4150-2, DIN 4150-3** | Building vibration: effects on people (KB weighting, A_u / A_o / A_r) and on structures (PPV guideline values). |
+| **IEC 61260-1** | 1/3-octave band centre frequencies (base 10) of the vibration spectrum. |
+
+Sources and verification status of all vibration parameters: [docs/VIBRATION_SPEC.md](docs/VIBRATION_SPEC.md) §14.
 
 ---
 
 ## Changelog
+
+### [v3.6.0](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.6.0)
+- **Vibration measurement with an IEPE accelerometer** alongside the microphone — see [docs/VIBRATION_GUIDE.md](docs/VIBRATION_GUIDE.md)
+- **Inputs and Sensors window** (Settings → Input Channels): a role per input (Mic, Accel X/Y/Z, Accel uniaxial, Off), live level meters, per-axis calibration (handheld calibrator or datasheet) with date and method
+- **Accelerometer signal chain**: high-pass, integration to velocity / displacement, ISO 8041 weightings (Wb, Wc, Wd, We, Wf, Wh, Wj, Wk, Wm), DIN 4150-2 KB weighting, band limit; detectors for RMS, peak, a_w,rms, MTVV, VDV, crest factor, PPV with dominant frequency, KB_Fmax / KB_FTr, vector sum, A(8), 1/3-octave spectrum
+- **Measurement profiles** for structure-borne sound, machinery, whole-body health and comfort, hand-arm, building perception and building structural
+- **Assessment** with editable reference values (EU / Germany, ISO 20816-3, DIN 4150-2, DIN 4150-3) and a status dot in the new **Vibration panel** below the SPL meter
+- **Timeline** vibration traces, **CSV** vibration columns, **JSON settings** with roles, calibration and limits
+- **Multichannel WAV recording** with roles and calibration in the file; file playback uses them
+- **HTML vibration report** (Ex-/Import → Save Vibration Report…)
+- **REW Measurement Sequencer** (Tools → REW Measurement Sequencer…): runs a list of Room EQ Wizard sweeps through REW's REST API with per-step output, second output / invert, inputs, level, sweep, repetitions, timing reference, protection, group and *wait for me* prompts; dry run, pause, abort, loops, error policy; REW's settings restored afterwards. SPLMeter measures every sweep (LAeq … LCpeak, vibration per axis) and saves the run as CSV and JSON, with a timeline marker per sweep — see [docs/REW_SEQUENCER_GUIDE.md](docs/REW_SEQUENCER_GUIDE.md)
+- **FFT source** selector (mix, Dual 1+2, or a single input) replaces the Dual FFT toggle; v3.5.2 settings load unchanged
+- The standalone app now accepts devices that open more than 8 inputs (up to 32); before, they fell back to a single input
+- Default behaviour without accelerometer roles is unchanged (bit-identical SPL results, verified by regression tests)
 
 ### [v3.5.2](https://github.com/ppklose/ppkSPLMeter/releases/tag/v3.5.2)
 - **All user settings now persist across launches** — previously some changes were silently reverted on quit, because the app's preferences shared a file with JUCE's standalone wrapper, which rewrote it from a stale copy. Preferences now live in their own `SPLMeter.prefs` (migrated automatically) and are saved every few seconds, so they also survive a crash or force-quit. Newly remembered: window size, timeline series checkboxes and psychoacoustic metric, FFT overlay toggle, Spectrogram view settings, Long-term SPL toggles and Y range, Sound Detective threshold and TFLite model, Impulse Fidelity frequency, loaded correction filter and graph overlays, MIDI CC assignments and channel names

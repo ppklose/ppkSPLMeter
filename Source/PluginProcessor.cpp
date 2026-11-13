@@ -95,7 +95,15 @@ SPLMeterAudioProcessor::createParameterLayout()
         "fftRTAMode", "FFT RTA +3dB/oct", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "fftDual", "Dual FFT (Input 1 + 2)", false));
+        "fftDual", "Dual FFT (Input 1 + 2)", false));   // legacy (≤ 3.5.2), mirrors fftSource == Dual
+
+    {
+        juce::StringArray sources { "Mix", "Dual (1+2)" };
+        for (int ch = 1; ch <= SPLMeterAudioProcessor::kMaxFftChannels; ++ch)
+            sources.add ("Input " + juce::String (ch));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            "fftSource", "FFT Source", sources, 0));
+    }
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "bandpassEnabled", "20-20k Bandpass", false));
@@ -177,12 +185,20 @@ SPLMeterAudioProcessor::SPLMeterAudioProcessor()
     formatManager.registerBasicFormats();
 }
 
-SPLMeterAudioProcessor::~SPLMeterAudioProcessor() {}
+SPLMeterAudioProcessor::~SPLMeterAudioProcessor()
+{
+    delete vibPending_.exchange (nullptr);
+    delete vibRetired_.exchange (nullptr);
+    delete vibActive_;
+}
 
 //==============================================================================
 void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    rewFastAlpha_ = 1.0 - std::exp (-1.0 / (0.125 * sampleRate));
+    rewSlowAlpha_ = 1.0 - std::exp (-1.0 / (1.0 * sampleRate));
+    rewFastA_ = rewSlowC_ = 0.0;
     aWeightL.prepare (sampleRate);
     cWeightL.prepare (sampleRate);
     roughnessEst.prepare (sampleRate);
@@ -204,14 +220,7 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     logIntervalSamples = static_cast<int> (0.125 * sampleRate);
     logSampleCounter = 0;
 
-    // WAV circular buffer: sized to current logDuration
-    {
-        const float logDurS = apvts.getRawParameterValue ("logDuration")->load();
-        wavBufSize_ = static_cast<int> (logDurS * sampleRate);
-        wavCircBuf_[0].assign (wavBufSize_, 0.0f);
-        wavCircBuf_[1].assign (wavBufSize_, 0.0f);
-        wavWritePos_.store (0, std::memory_order_relaxed);
-    }
+    // WAV recorder: sized to the current logDuration (built after currentSampleRate is set)
 
     // 20-20k bandpass: 8th-order Butterworth Q values for each biquad stage
     static const double bpQ[kBpStages] = { 0.5098, 0.6013, 0.8999, 2.5629 };
@@ -237,7 +246,38 @@ void SPLMeterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         rebuildCorrectionFIR();
 
     transportSource.prepareToPlay (samplesPerBlock, sampleRate);
-    fileReadBuffer.setSize (2, samplesPerBlock, false, true, false);
+    fileReadBuffer.setSize (WavRecording::kMaxTracks, samplesPerBlock, false, true, false);   // capacity for 8-track files
+
+    // Per-input FFT buffers: grow only (never freed while the GUI may read them).
+    // Inputs 1 + 2 always exist so Dual FFT works on mono devices too.
+    for (int ch = 0; ch < juce::jlimit (2, kMaxFftChannels, getTotalNumInputChannels()); ++ch)
+    {
+        if (fftChStorage_[(size_t) ch] == nullptr)
+        {
+            fftChStorage_[(size_t) ch] = std::make_unique<float[]> ((size_t) kFftCircBufSize);   // zeroed
+            fftChBuf_[(size_t) ch].store (fftChStorage_[(size_t) ch].get(), std::memory_order_release);
+        }
+    }
+
+    // Accelerometer engine for the new sample rate. The audio thread is stopped here,
+    // so the active engine can be replaced directly.
+    delete vibPending_.exchange (nullptr);
+    delete vibRetired_.exchange (nullptr);
+    delete vibActive_;
+    vibActive_ = buildVibrationEngine().release();
+    vibWork_ = {};
+    vibSnapshot_.write (vibWork_);
+    vibFile_.replaceNow (buildFileVibrationEngine());
+    vibSource_ = 0;
+    rebuildWavRecorder (true);
+
+    // A running calibrator measurement was set up for the old rate: abandon it
+    calState_.store (CalIdle, std::memory_order_release);
+    calProgress_.store (0.0, std::memory_order_relaxed);
+    inputMs_.fill (0.0);
+
+    nonMicScratch_.setSize (juce::jmax (1, juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)),
+                            samplesPerBlock, false, true, false);
 }
 
 void SPLMeterAudioProcessor::releaseResources()
@@ -313,6 +353,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         dawIsPlaying_.store (dawPlaying);
     }
     const bool skipMetering = paused_.load() || (isDawSyncEnabled && !dawPlaying);
+    handleRewStep (calOffset);
+    const bool rewStep = stepState_.load (std::memory_order_relaxed) == kStepRunning;
 
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
@@ -324,11 +366,105 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             buffer.clear (ch, 0, numSamples);
     }
 
+    // --- Sensor roles: only Mic inputs feed the SPL mix, bandpass and correction ---
+    // (File mode keeps mixing all file channels; role-aware playback follows with
+    //  multichannel recording, vibration spec §7.5.)
+    bool isMic[SensorConfig::kMaxInputs];
+    bool allMic = true;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        isMic[ch] = channelRoles_[(size_t) ch].load (std::memory_order_relaxed) == (int) SensorRole::Mic;
+        allMic = allMic && (isMic[ch] || ch >= numChannels);
+    }
+
     // --- File mode: pull audio from transport instead of live input ---
     const bool fileMode = fileModeActive.load();
+
+    // --- Accelerometer: take over a newly built engine, then feed the live inputs ---
+    // (before bandpass/correction, which never touch accelerometer inputs anyway;
+    //  file playback gets role-aware analysis with multichannel recording, spec §7.5)
+    if (vibPending_.load (std::memory_order_acquire) != nullptr
+        && vibRetired_.load (std::memory_order_acquire) == nullptr)
+    {
+        if (auto* next = vibPending_.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            vibRetired_.store (vibActive_, std::memory_order_release);
+            vibActive_ = next;
+            vibWork_ = {};
+            vibSnapshot_.write (vibWork_);   // invalid until the new engine publishes
+        }
+    }
+    // File playback has its own engine (recorded roles + calibration)
+    if (vibFile_.acquire() && fileMode)
+    {
+        vibWork_ = {};
+        vibSnapshot_.write (vibWork_);
+    }
+    auto* vibEngine = fileMode ? vibFile_.active() : vibActive_;
+    if (vibSource_ != (fileMode ? 1 : 0))
+    {
+        vibSource_ = fileMode ? 1 : 0;   // live ↔ file: start the readings afresh
+        vibWork_ = {};
+        vibSnapshot_.write (vibWork_);
+        if (vibEngine != nullptr) vibEngine->requestReset();
+    }
+    if (vibActive_ != nullptr && vibActive_->hasAxes() && ! fileMode)
+    {
+        if (vibResetRequest_.exchange (false, std::memory_order_acq_rel))
+            vibActive_->requestReset();
+        const float* axisIn[3];
+        for (int a = 0; a < 3; ++a)
+        {
+            const int ch = vibActive_->inputChannel (a);
+            axisIn[a] = (ch >= 0 && ch < numChannels) ? buffer.getReadPointer (ch) : nullptr;
+        }
+        if (vibActive_->process (axisIn, numSamples, ! skipMetering, vibWork_))
+        {
+            vibSnapshot_.write (vibWork_);
+            if (rewStep && ! skipMetering)
+                stepAccum_.addVib (vibWork_);
+        }
+    }
+
+    // --- Live input level per channel (Inputs table) ---
+    const int numLiveInputs = juce::jmin (getTotalNumInputChannels(), numChannels, SensorConfig::kMaxInputs);
+    if (numSamples > 0)
+    {
+        const double a = 1.0 - std::exp (-numSamples / (0.125 * currentSampleRate));
+        for (int ch = 0; ch < numLiveInputs; ++ch)
+        {
+            const float* x = buffer.getReadPointer (ch);
+            double sumSq = 0.0;
+            float  peak  = 0.0f;
+            for (int s = 0; s < numSamples; ++s)
+            {
+                sumSq += (double) x[s] * x[s];
+                peak = juce::jmax (peak, std::abs (x[s]));
+            }
+            auto& ms = inputMs_[(size_t) ch];
+            ms += a * (sumSq / numSamples - ms);
+            inputRms_[(size_t) ch].store ((float) std::sqrt (ms), std::memory_order_relaxed);
+            if (peak > inputPeak_[(size_t) ch].load (std::memory_order_relaxed))
+                inputPeak_[(size_t) ch].store (peak, std::memory_order_relaxed);
+        }
+    }
+
+    // --- Calibrator measurement on one live input ---
+    {
+        const int cs = calState_.load (std::memory_order_acquire);
+        if (cs == CalCancel)
+            calState_.store (CalIdle, std::memory_order_release);
+        else if (cs == CalRunning && calChannel_ < numLiveInputs)
+        {
+            calMeas_.process (buffer.getReadPointer (calChannel_), numSamples);
+            calProgress_.store (calMeas_.progress(), std::memory_order_relaxed);
+            if (calMeas_.finished())
+                calState_.store (CalDone, std::memory_order_release);
+        }
+    }
     if (fileMode)
     {
-        fileReadBuffer.setSize (2, numSamples, false, true, true);
+        fileReadBuffer.setSize (fileNumChannels_.load (std::memory_order_relaxed), numSamples, false, true, true);
         juce::AudioSourceChannelInfo info (&fileReadBuffer, 0, numSamples);
         transportSource.getNextAudioBlock (info);
 
@@ -341,32 +477,38 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Push Ch0 + Ch1 to WAV circular buffer (before bandpass/correction)
-    if (wavBufSize_ > 0)
+    // Accelerometer tracks of a recording (before bandpass/correction)
+    if (fileMode && vibEngine != nullptr && vibEngine->hasAxes())
     {
-        const juce::AudioBuffer<float>& wavSrc = fileMode ? fileReadBuffer : buffer;
-        const int nSrc = wavSrc.getNumChannels();
-        const float* ch0 = nSrc > 0 ? wavSrc.getReadPointer (0) : nullptr;
-        const float* ch1 = nSrc > 1 ? wavSrc.getReadPointer (1) : ch0;
-        int pos = wavWritePos_.load (std::memory_order_relaxed);
-        for (int s = 0; s < numSamples; ++s)
+        if (vibResetRequest_.exchange (false, std::memory_order_acq_rel))
+            vibEngine->requestReset();
+        const float* axisIn[3];
+        for (int a = 0; a < 3; ++a)
         {
-            wavCircBuf_[0][pos] = ch0 ? ch0[s] : 0.0f;
-            wavCircBuf_[1][pos] = ch1 ? ch1[s] : 0.0f;
-            if (++pos >= wavBufSize_) pos = 0;
+            const int ch = vibEngine->inputChannel (a);
+            axisIn[a] = (ch >= 0 && ch < fileReadBuffer.getNumChannels()) ? fileReadBuffer.getReadPointer (ch) : nullptr;
         }
-        wavWritePos_.store (pos, std::memory_order_release);
+        if (vibEngine->process (axisIn, numSamples, ! skipMetering, vibWork_))
+            vibSnapshot_.write (vibWork_);
     }
+    vibLogLive_ = vibEngine != nullptr && vibEngine->hasAxes() && vibWork_.valid;
+
+    // WAV recorder (before bandpass/correction)
+    wavRec_.acquire();
+    if (auto* rec = wavRec_.active())
+        rec->push (fileMode ? fileReadBuffer : buffer, numSamples);
 
     // 20Hz-20kHz bandpass (48dB/oct) applied per channel before mono mix
     if (apvts.getRawParameterValue ("bandpassEnabled")->load() > 0.5f)
     {
-        auto applyBP = [this] (juce::AudioBuffer<float>& buf)
+        auto applyBP = [this, &isMic] (juce::AudioBuffer<float>& buf, bool respectRoles)
         {
             const int nCh = std::min (buf.getNumChannels(), 8);
             const int nSa = buf.getNumSamples();
             for (int ch = 0; ch < nCh; ++ch)
             {
+                if (respectRoles && ! isMic[ch])
+                    continue;
                 float* data = buf.getWritePointer (ch);
                 for (int st = 0; st < kBpStages; ++st)
                 {
@@ -375,8 +517,8 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 }
             }
         };
-        if (fileMode) applyBP (fileReadBuffer);
-        else          applyBP (buffer);
+        if (fileMode) applyBP (fileReadBuffer, false);
+        else          applyBP (buffer, true);
     }
 
     // Correction filter (applied after bandpass, before metering)
@@ -401,8 +543,22 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const auto chClamped = juce::jmin (block.getNumChannels(),
                                                (size_t) correctionPreparedCh_);
             auto sub = block.getSubsetChannelBlock (0, chClamped);
+
+            // The convolution runs on all channels at once: keep non-Mic inputs untouched
+            const bool keepNonMic = ! fileMode && ! allMic
+                                 && numSamples <= nonMicScratch_.getNumSamples();
+            if (keepNonMic)
+                for (int ch = 0; ch < juce::jmin ((int) chClamped, nonMicScratch_.getNumChannels()); ++ch)
+                    if (! isMic[ch])
+                        nonMicScratch_.copyFrom (ch, 0, src, ch, 0, numSamples);
+
             juce::dsp::ProcessContextReplacing<float> ctx (sub);
             correctionConv_.process (ctx);
+
+            if (keepNonMic)
+                for (int ch = 0; ch < juce::jmin ((int) chClamped, nonMicScratch_.getNumChannels()); ++ch)
+                    if (! isMic[ch])
+                        src.copyFrom (ch, 0, nonMicScratch_, ch, 0, numSamples);
         }
     }
 
@@ -413,16 +569,30 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Muted channels have already been zeroed above, so they contribute 0 here.
     int activeChannels = 0;
     for (int ch = 0; ch < numChannels; ++ch)
-        if (buffer.getMagnitude (ch, 0, numSamples) > 1e-9f)
+        if ((ch >= SensorConfig::kMaxInputs || isMic[ch])
+            && buffer.getMagnitude (ch, 0, numSamples) > 1e-9f)
             ++activeChannels;
     if (activeChannels == 0) activeChannels = 1;   // silence guard
     const float channelScale = 1.0f / static_cast<float> (activeChannels);
 
-    // Inputs 1 + 2 individually, for the Dual FFT (same processing stage as the mono mix)
-    const juce::AudioBuffer<float>& dualSrc = fileMode ? fileReadBuffer : buffer;
-    const float* dualCh[2] = {
-        dualSrc.getNumChannels() > 0 ? dualSrc.getReadPointer (0) : nullptr,
-        dualSrc.getNumChannels() > 1 ? dualSrc.getReadPointer (1) : nullptr };
+    // Each input individually, for per-input / Dual FFT (same processing stage as the mono mix)
+    const juce::AudioBuffer<float>& chSrc = fileMode ? fileReadBuffer : buffer;
+    const float* chIn[kMaxFftChannels];
+    float*       chOut[kMaxFftChannels];
+    for (int ch = 0; ch < kMaxFftChannels; ++ch)
+    {
+        chIn[ch]  = ch < chSrc.getNumChannels() ? chSrc.getReadPointer (ch) : nullptr;
+        chOut[ch] = fftChBuf_[(size_t) ch].load (std::memory_order_acquire);
+    }
+
+    // File playback mixes its Mic tracks (all tracks for files without SPLMeter metadata)
+    const float* fileMicIn[WavRecording::kMaxTracks];
+    int fileMicCount = 0;
+    if (fileMode)
+        for (int ch = 0; ch < juce::jmin (fileReadBuffer.getNumChannels(), WavRecording::kMaxTracks); ++ch)
+            if (fileRoles_[(size_t) ch].load (std::memory_order_relaxed) == (int) SensorRole::Mic)
+                fileMicIn[fileMicCount++] = fileReadBuffer.getReadPointer (ch);
+    const float fileScl = 1.0f / static_cast<float> (juce::jmax (1, fileMicCount));
 
     for (int s = 0; s < numSamples; ++s)
     {
@@ -430,28 +600,41 @@ void SPLMeterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         float raw = 0.0f;
         if (fileMode)
         {
-            const int fileCh    = fileReadBuffer.getNumChannels();
-            const float fileScl = fileCh > 0 ? 1.0f / static_cast<float> (fileCh) : 1.0f;
-            for (int ch = 0; ch < fileCh; ++ch)
-                raw += fileReadBuffer.getReadPointer (ch)[s];
+            for (int ch = 0; ch < fileMicCount; ++ch)
+                raw += fileMicIn[ch][s];
             raw *= fileScl;
         }
         else
         {
             for (int ch = 0; ch < numChannels; ++ch)
-                raw += buffer.getReadPointer (ch)[s];
+                if (ch >= SensorConfig::kMaxInputs || isMic[ch])
+                    raw += buffer.getReadPointer (ch)[s];
             raw *= channelScale;
         }
 
         float aSample = aWeightL.processSample (raw);
         float cSample = cWeightL.processSample (raw);
 
+        // REW per-step L_AFmax / L_CSmax: own FAST-A and SLOW-C detectors, independent
+        // of the meter's FAST/SLOW choice and settled before a step starts
+        if (! skipMetering)
+        {
+            rewFastA_ += rewFastAlpha_ * ((double) aSample * aSample - rewFastA_);
+            rewSlowC_ += rewSlowAlpha_ * ((double) cSample * cSample - rewSlowC_);
+        }
+        if (rewStep)
+        {
+            if (skipMetering) ++stepAccum_.pausedSamples;
+            else              stepAccum_.add (raw, aSample, cSample, rewFastA_, rewSlowC_);
+        }
+
         // Feed FFT circular buffer
         {
             int pos = fftWritePos_.load (std::memory_order_relaxed);
             fftCircBuf_[pos] = raw;
-            fftCircBufDual_[0][pos] = dualCh[0] != nullptr ? dualCh[0][s] : 0.0f;
-            fftCircBufDual_[1][pos] = dualCh[1] != nullptr ? dualCh[1][s] : 0.0f;
+            for (int ch = 0; ch < kMaxFftChannels; ++ch)
+                if (chOut[ch] != nullptr)
+                    chOut[ch][pos] = chIn[ch] != nullptr ? chIn[ch][s] : 0.0f;
             fftWritePos_.store ((pos + 1) % kFftCircBufSize, std::memory_order_release);
         }
 
@@ -635,6 +818,21 @@ void SPLMeterAudioProcessor::pushLogEntry (float rawPk, float aPk, float cPk,
     e.impulsiveness  = impulsiveness;
     e.tonality       = tonality;
 
+    if (vibLogLive_)
+    {
+        e.vib.valid    = true;
+        e.vib.quantity = vibWork_.quantity;
+        e.vib.axisMask = vibWork_.axisMask;
+        e.vib.uniaxial = vibWork_.uniaxial;
+        e.vib.mainKind = vibWork_.mainKind;
+        e.vib.main     = vibWork_.main;
+        for (int a = 0; a < vib::kNumAxisSlots; ++a)
+        {
+            e.vib.rms[a]  = vibWork_.axis[a].rms;
+            e.vib.peak[a] = vibWork_.axis[a].peak;
+        }
+    }
+
     {
         const float N   = loudnessSone;
         const float R   = roughness   / 100.0f;
@@ -662,7 +860,17 @@ void SPLMeterAudioProcessor::pruneLog (float logDurationSeconds)
 
 void SPLMeterAudioProcessor::copyFftWindow (float* dest, int size, int channel) const noexcept
 {
-    const auto& src = (channel == 0 || channel == 1) ? fftCircBufDual_[(size_t) channel] : fftCircBuf_;
+    const float* src = fftCircBuf_.data();
+    if (channel >= 0)
+    {
+        src = channel < kMaxFftChannels ? fftChBuf_[(size_t) channel].load (std::memory_order_acquire)
+                                        : nullptr;
+        if (src == nullptr)
+        {
+            std::fill (dest, dest + size, 0.0f);
+            return;
+        }
+    }
     int writePos = fftWritePos_.load (std::memory_order_acquire);
     for (int i = 0; i < size; ++i)
     {
@@ -717,6 +925,18 @@ void SPLMeterAudioProcessor::restoreStateXml (const juce::XmlElement& xml)
     for (int i = 0; i < 32; ++i)
         channelNames_[i] = xml.getStringAttribute ("channelName_" + juce::String (i), "");
     apvts.replaceState (juce::ValueTree::fromXml (xml));
+    loadChannelRolesFromState();
+    rebuildVibrationEngine();
+
+    // ≤ 3.5.2 sessions have no fftSource: derive it from the legacy Dual FFT flag
+    {
+        bool hasSource = false;
+        for (auto* child : xml.getChildWithTagNameIterator ("PARAM"))
+            hasSource = hasSource || child->getStringAttribute ("id") == "fftSource";
+        if (! hasSource)
+            setFftSource (apvts.getRawParameterValue ("fftDual")->load() > 0.5f ? FftSourceDual
+                                                                                : FftSourceMix);
+    }
 
     // Apply the non-parameter settings held in UIState
     auto ui = getUiState();
@@ -773,13 +993,671 @@ void SPLMeterAudioProcessor::setStateInformation (const void* data, int sizeInBy
 }
 
 //==============================================================================
+int SPLMeterAudioProcessor::getFftSource() const noexcept
+{
+    return juce::jlimit (0, kNumFftSources - 1,
+                         (int) apvts.getRawParameterValue ("fftSource")->load());
+}
+
+void SPLMeterAudioProcessor::setFftSource (int source)
+{
+    source = juce::jlimit (0, kNumFftSources - 1, source);
+    if (auto* p = apvts.getParameter ("fftSource"))
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) source));
+    if (auto* d = apvts.getParameter ("fftDual"))
+        d->setValueNotifyingHost (source == FftSourceDual ? 1.0f : 0.0f);
+}
+
+//==============================================================================
+// Sensor roles — persisted in UIState/Inputs as "role<ch>" (non-Mic entries only)
+void SPLMeterAudioProcessor::setChannelRole (int ch, SensorRole role)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    channelRoles_[(size_t) ch].store ((int) role, std::memory_order_relaxed);
+
+    auto inputs = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+    const juce::Identifier key ("role" + juce::String (ch));
+    if (role == SensorRole::Mic) inputs.removeProperty (key, nullptr);
+    else                         inputs.setProperty (key, (int) role, nullptr);
+
+    rebuildVibrationEngine();
+}
+
+//==============================================================================
+// Accelerometer settings and engine
+namespace
+{
+    const juce::Identifier kAccelNode ("Accel");
+    const char* const kWeightingKeys[3] = { "weightingX", "weightingY", "weightingZ" };
+    const char* const kKKeys[3]         = { "kx", "ky", "kz" };
+}
+
+vib::VibrationSettings SPLMeterAudioProcessor::getVibrationSettings() const
+{
+    vib::VibrationSettings s;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (! node.isValid())
+        return s;
+    s.highPassHz = juce::jlimit (0.05, 50.0, (double) node.getProperty ("highPassHz", s.highPassHz));
+    s.quantity   = static_cast<vib::Quantity> (juce::jlimit (0, 2, (int) node.getProperty ("quantity", 0)));
+    for (int a = 0; a < 3; ++a)
+    {
+        s.weighting[a] = static_cast<vib::Weighting> (juce::jlimit (0, (int) vib::Weighting::KB,
+                                                                    (int) node.getProperty (kWeightingKeys[a], 0)));
+        s.k[a] = juce::jlimit (0.0, 5.0, (double) node.getProperty (kKKeys[a], 1.0));
+    }
+    s.bandLowHz  = juce::jlimit (0.1, 1000.0, (double) node.getProperty ("bandLowHz",  s.bandLowHz));
+    s.bandHighHz = juce::jlimit (1.0, 20000.0, (double) node.getProperty ("bandHighHz", s.bandHighHz));
+    s.tauSec     = juce::jlimit (0.01, 10.0, (double) node.getProperty ("tauSec", s.tauSec));
+    s.main       = static_cast<vib::MainValue> (juce::jlimit (0, vib::kNumMainValues - 1,
+                                                              (int) node.getProperty ("mainValue", 0)));
+    return s;
+}
+
+void SPLMeterAudioProcessor::setVibrationSettings (const vib::VibrationSettings& s)
+{
+    auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+    node.setProperty ("highPassHz", s.highPassHz, nullptr);
+    node.setProperty ("quantity",   (int) s.quantity, nullptr);
+    for (int a = 0; a < 3; ++a)
+    {
+        node.setProperty (kWeightingKeys[a], (int) s.weighting[a], nullptr);
+        node.setProperty (kKKeys[a],         s.k[a], nullptr);
+    }
+    node.setProperty ("bandLowHz",  s.bandLowHz,  nullptr);
+    node.setProperty ("bandHighHz", s.bandHighHz, nullptr);
+    node.setProperty ("tauSec",     s.tauSec,     nullptr);
+    node.setProperty ("mainValue",  (int) s.main, nullptr);
+    rebuildVibrationEngine();
+}
+
+double SPLMeterAudioProcessor::getAccelCalDb (int ch) const
+{
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    const double v = inputs.isValid() ? (double) inputs.getProperty ("cal" + juce::String (ch), 140.0) : 140.0;
+    return juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb, v);
+}
+
+void SPLMeterAudioProcessor::setAccelCalDb (int ch, double calDb)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    getUiState().getOrCreateChildWithName ("Inputs", nullptr)
+        .setProperty ("cal" + juce::String (ch),
+                      juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb, calDb), nullptr);
+    rebuildVibrationEngine();
+}
+
+namespace
+{
+    // Engine for the given channel roles; calOf(ch) gives the calibration of a channel
+    template <typename CalOf>
+    std::unique_ptr<vib::VibrationEngine> makeVibrationEngine (double fs, const vib::VibrationSettings& settings,
+                                                               const SensorConfig::Roles& roles, int numInputs,
+                                                               CalOf&& calOf)
+    {
+        vib::AxisInput axes[3];
+        bool uniaxial = false;
+        if (SensorConfig::isValid (SensorConfig::validate (roles, numInputs)))
+        {
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                int axis = -1;
+                switch (roles[(size_t) ch])
+                {
+                    case SensorRole::AccelX:        axis = vib::AxisX; break;
+                    case SensorRole::AccelY:        axis = vib::AxisY; break;
+                    case SensorRole::AccelZ:        axis = vib::AxisZ; break;
+                    case SensorRole::AccelUniaxial: axis = vib::AxisX; uniaxial = true; break;
+                    case SensorRole::Mic:
+                    case SensorRole::Off:           break;
+                }
+                if (axis >= 0)
+                    axes[axis] = { ch, calOf (ch) };
+            }
+        }
+        // Without a (valid) accelerometer this is an empty engine: hasAxes() == false
+        return std::make_unique<vib::VibrationEngine> (fs, settings, axes, uniaxial);
+    }
+}
+
+std::unique_ptr<vib::VibrationEngine> SPLMeterAudioProcessor::buildFileVibrationEngine() const
+{
+    auto roles = SensorConfig::defaultRoles();
+    const int n = juce::jmin ((int) fileTracks_.size(), WavRecording::kMaxTracks);
+    for (int t = 0; t < n; ++t)
+        roles[(size_t) t] = fileTracks_[(size_t) t].role;
+    return makeVibrationEngine (currentSampleRate, getVibrationSettings(), roles, n,
+                                [this] (int t) { return fileTracks_[(size_t) t].calDb; });
+}
+
+std::unique_ptr<vib::VibrationEngine> SPLMeterAudioProcessor::buildVibrationEngine() const
+{
+    return makeVibrationEngine (currentSampleRate, getVibrationSettings(), getChannelRoles(),
+                                juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs),
+                                [this] (int ch) { return getAccelCalDb (ch); });
+}
+
+void SPLMeterAudioProcessor::rebuildVibrationEngine()
+{
+    delete vibRetired_.exchange (nullptr, std::memory_order_acq_rel);   // no longer used by the audio thread
+    delete vibPending_.exchange (buildVibrationEngine().release(), std::memory_order_acq_rel);
+    vibFile_.publish (buildFileVibrationEngine());   // follows settings changes
+    rebuildWavRecorder (false);                       // follows role changes
+}
+
+SensorConfig::Roles SPLMeterAudioProcessor::getChannelRoles() const noexcept
+{
+    SensorConfig::Roles r;
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+        r[(size_t) ch] = getChannelRole (ch);
+    return r;
+}
+
+void SPLMeterAudioProcessor::loadChannelRolesFromState()
+{
+    const auto inputs = getUiState().getChildWithName ("Inputs");
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const int v = inputs.isValid() ? (int) inputs.getProperty ("role" + juce::String (ch), 0) : 0;
+        channelRoles_[(size_t) ch].store ((int) SensorConfig::fromInt (v), std::memory_order_relaxed);
+    }
+}
+
+SPLMeterAudioProcessor::AccelSensorInfo SPLMeterAudioProcessor::getAccelSensorInfo() const
+{
+    AccelSensorInfo info;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (! node.isValid())
+        return info;
+    info.serial       = node.getProperty ("sensorSerial", juce::String()).toString();
+    info.lowerLimitHz = juce::jlimit (0.01, 1000.0,  (double) node.getProperty ("lowerLimitHz", info.lowerLimitHz));
+    info.upperLimitHz = juce::jlimit (1.0, 100000.0, (double) node.getProperty ("upperLimitHz", info.upperLimitHz));
+    info.exposureHours = juce::jlimit (0.01, 24.0, (double) node.getProperty ("exposureHours", info.exposureHours));
+    return info;
+}
+
+void SPLMeterAudioProcessor::setAccelSensorInfo (const AccelSensorInfo& info)
+{
+    auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+    node.setProperty ("sensorSerial", info.serial,       nullptr);
+    node.setProperty ("lowerLimitHz", info.lowerLimitHz, nullptr);
+    node.setProperty ("upperLimitHz", info.upperLimitHz, nullptr);
+    node.setProperty ("exposureHours", info.exposureHours, nullptr);
+}
+
+vib::Profile SPLMeterAudioProcessor::getVibrationProfile() const
+{
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    return vib::profileFromInt (node.isValid() ? (int) node.getProperty ("profile", 0) : 0);
+}
+
+void SPLMeterAudioProcessor::applyVibrationProfile (vib::Profile profile)
+{
+    getUiState().getOrCreateChildWithName (kAccelNode, nullptr).setProperty ("profile", (int) profile, nullptr);
+    if (profile == vib::Profile::Custom)
+        return;   // keeps the current settings
+    const auto& def = vib::profileDefinition (profile);
+    setVibrationDisplayUnit (def.unit);
+    setVibrationSettings (def.settings);
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationProfileLabel() const
+{
+    return juce::String::fromUTF8 (vib::profileLabel (getVibrationSettings(), getVibrationProfile()).c_str());
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationProfileKey() const
+{
+    const auto p = getVibrationProfile();
+    const juce::String key (vib::profileDefinition (p).key);
+    if (p == vib::Profile::Custom || vib::settingsMatchProfile (getVibrationSettings(), p))
+        return key;
+    return "custom(" + key + ")";
+}
+
+juce::String SPLMeterAudioProcessor::getVibrationMainLabel() const
+{
+    return juce::String::fromUTF8 (vib::mainValueLabel (getVibrationSettings(), getVibrationProfile()).c_str());
+}
+
+vib::DisplayUnit SPLMeterAudioProcessor::getVibrationDisplayUnit() const
+{
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    return (vib::DisplayUnit) juce::jlimit (0, (int) vib::DisplayUnit::Db,
+                                            node.isValid() ? (int) node.getProperty ("displayUnit", 0) : 0);
+}
+
+void SPLMeterAudioProcessor::setVibrationDisplayUnit (vib::DisplayUnit unit)
+{
+    getUiState().getOrCreateChildWithName (kAccelNode, nullptr).setProperty ("displayUnit", (int) unit, nullptr);
+}
+
+namespace
+{
+    const juce::Identifier kLimitsNode ("AccelLimits");
+
+    // Numeric assessment limits: key + member (enums and flags are handled separately)
+    struct LimitKey { const char* key; double vib::AssessmentLimits::* member; double lo, hi; };
+    const LimitKey kLimitKeys[] = {
+        { "wbAction",    &vib::AssessmentLimits::wbAction,    0.01, 100.0 },
+        { "wbLimitXY",   &vib::AssessmentLimits::wbLimitXY,   0.01, 100.0 },
+        { "wbLimitZ",    &vib::AssessmentLimits::wbLimitZ,    0.01, 100.0 },
+        { "wbVdvAction", &vib::AssessmentLimits::wbVdvAction, 0.01, 1000.0 },
+        { "wbVdvLimit",  &vib::AssessmentLimits::wbVdvLimit,  0.01, 1000.0 },
+        { "haAction",    &vib::AssessmentLimits::haAction,    0.01, 100.0 },
+        { "haLimit",     &vib::AssessmentLimits::haLimit,     0.01, 100.0 },
+        { "machAB",      &vib::AssessmentLimits::machAB,      0.01, 1000.0 },
+        { "machBC",      &vib::AssessmentLimits::machBC,      0.01, 1000.0 },
+        { "machCD",      &vib::AssessmentLimits::machCD,      0.01, 1000.0 },
+        { "din2Au",      &vib::AssessmentLimits::din2Au,      0.001, 100.0 },
+        { "din2Ao",      &vib::AssessmentLimits::din2Ao,      0.001, 100.0 },
+        { "din2Ar",      &vib::AssessmentLimits::din2Ar,      0.001, 100.0 },
+        { "din2ExposureHours", &vib::AssessmentLimits::din2ExposureHours, 0.0, 16.0 },
+        { "din3At10",    &vib::AssessmentLimits::din3At10,    0.01, 1000.0 },
+        { "din3At50",    &vib::AssessmentLimits::din3At50,    0.01, 1000.0 },
+        { "din3At100",   &vib::AssessmentLimits::din3At100,   0.01, 1000.0 },
+        { "din3Single",  &vib::AssessmentLimits::din3Single,  0.01, 1000.0 },
+    };
+    const char* const kLimitEnumKeys[] = { "wbPreset", "wbCriterion", "machGroup", "machFoundation",
+                                           "din2Zone", "din2Night", "din3Line", "din3Location", "din3LongTerm" };
+
+    // Keys of UIState/Accel exchanged with JSON settings files
+    const char* const kAccelJsonKeys[] = { "highPassHz", "quantity", "weightingX", "weightingY", "weightingZ",
+                                           "kx", "ky", "kz", "bandLowHz", "bandHighHz", "tauSec",
+                                           "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit",
+                                           "mainValue", "profile", "exposureHours" };
+}
+
+vib::AssessmentLimits SPLMeterAudioProcessor::getAssessmentLimits() const
+{
+    auto l = vib::defaultAssessmentLimits();
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kLimitsNode);
+    if (! node.isValid())
+        return l;
+    for (const auto& k : kLimitKeys)
+        l.*k.member = juce::jlimit (k.lo, k.hi, (double) node.getProperty (k.key, l.*k.member));
+    auto e = [&] (const char* key, int current, int maxV) { return juce::jlimit (0, maxV, (int) node.getProperty (key, current)); };
+    l.wbPreset       = (vib::WholeBodyPreset)    e ("wbPreset",       (int) l.wbPreset, 1);
+    l.wbCriterion    = (vib::WholeBodyCriterion) e ("wbCriterion",    (int) l.wbCriterion, 1);
+    l.machGroup      = (vib::MachineGroup)       e ("machGroup",      (int) l.machGroup, 1);
+    l.machFoundation = (vib::Foundation)         e ("machFoundation", (int) l.machFoundation, 1);
+    l.din2Zone       = (vib::Din4150Zone)        e ("din2Zone",       (int) l.din2Zone, 4);
+    l.din2Night      = e ("din2Night", l.din2Night ? 1 : 0, 1) != 0;
+    l.din3Line       = (vib::Din4150Line)        e ("din3Line",       (int) l.din3Line, 2);
+    l.din3Location   = (vib::Din4150Location)    e ("din3Location",   (int) l.din3Location, 2);
+    l.din3LongTerm   = e ("din3LongTerm", l.din3LongTerm ? 1 : 0, 1) != 0;
+    return l;
+}
+
+void SPLMeterAudioProcessor::setAssessmentLimits (const vib::AssessmentLimits& l)
+{
+    auto node = getUiState().getOrCreateChildWithName (kLimitsNode, nullptr);
+    for (const auto& k : kLimitKeys)
+        node.setProperty (k.key, l.*k.member, nullptr);
+    node.setProperty ("wbPreset",       (int) l.wbPreset,       nullptr);
+    node.setProperty ("wbCriterion",    (int) l.wbCriterion,    nullptr);
+    node.setProperty ("machGroup",      (int) l.machGroup,      nullptr);
+    node.setProperty ("machFoundation", (int) l.machFoundation, nullptr);
+    node.setProperty ("din2Zone",       (int) l.din2Zone,       nullptr);
+    node.setProperty ("din2Night",      l.din2Night ? 1 : 0,    nullptr);
+    node.setProperty ("din3Line",       (int) l.din3Line,       nullptr);
+    node.setProperty ("din3Location",   (int) l.din3Location,   nullptr);
+    node.setProperty ("din3LongTerm",   l.din3LongTerm ? 1 : 0, nullptr);
+}
+
+vib::Assessment SPLMeterAudioProcessor::getVibrationAssessment() const
+{
+    const auto s = getVibrationSettings();
+    return vib::assess (getVibrationProfile(), getVibrationSnapshot(), s.k,
+                        getAccelSensorInfo().exposureHours, getAssessmentLimits());
+}
+
+rew::Sequence SPLMeterAudioProcessor::getRewSequence() const
+{
+    rew::Sequence q;
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName ("RewSequencer");
+    if (node.isValid())
+        rew::sequenceFromVar (juce::JSON::parse (node.getProperty ("json").toString()), q);
+    return q;
+}
+
+void SPLMeterAudioProcessor::setRewSequence (const rew::Sequence& sequence)
+{
+    getUiState().getOrCreateChildWithName ("RewSequencer", nullptr)
+                .setProperty ("json", rew::toJsonText (sequence), nullptr);
+}
+
+bool SPLMeterAudioProcessor::startRewRun (bool dryRun, std::unique_ptr<rew::Transport> transport,
+                                          rew::RunOptions options)
+{
+    if (rewSequencer_.isRunning())
+        return false;
+    const auto seq = getRewSequence();
+    if (transport == nullptr)
+        transport = std::make_unique<rew::HttpTransport> (seq.port);
+    options.dryRun = dryRun;
+
+    // Header of the results, read here on the message thread (spec §6.2)
+    rew::RunInfo info;
+    info.splmeterVersion = JucePlugin_VersionString;
+    info.calOffsetDb = apvts.getRawParameterValue ("calOffset")->load();
+    info.vibUnit = getVibrationDisplayUnit();
+    for (int ch = 0; ch < juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs); ++ch)
+    {
+        const auto role = getChannelRole (ch);
+        if (! SensorConfig::isAccel (role))
+            continue;
+        static const char* names[] = { "Mic", "X", "Y", "Z", "uniaxial", "Off" };
+        auto line = juce::String (names[(int) role]) + ": " + getChannelName (ch) + ", "
+                    + juce::String (getAccelCalDb (ch), 2) + " dB";
+        if (const auto calInfo = getAccelCalInfo (ch); calInfo.isNotEmpty())
+            line << " (" << calInfo << ")";
+        info.vibCalibration.add (line);
+    }
+    if (! info.vibCalibration.isEmpty())
+        info.vibProfile = getVibrationProfileKey();
+
+    {
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewLevels_.clear();
+        rewResultsFile_ = juce::File();
+    }
+
+    rew::Hooks hooks;
+    const int total = rew::totalSweeps (seq);
+    auto sweep = std::make_shared<int> (0);
+    hooks.stepStarted = [this, sweep, total, markers = seq.addLogMarkers] (const rew::StepResult& r)
+    {
+        beginRewStepMeasurement();
+        if (r.attempts == 1)
+            ++*sweep;
+        if (markers)
+        {
+            const auto now = juce::Time::currentTimeMillis() - getPauseOffsetMs();
+            auto text = "REW " + juce::String (*sweep) + "/" + juce::String (total) + " " + r.title;
+            if (r.attempts > 1) text << " (retry)";
+            std::lock_guard<std::mutex> l (rewMutex_);
+            if (pendingMarkers_.size() < 1000)
+                pendingMarkers_.push_back ({ now, text });
+        }
+    };
+    hooks.stepFinished = [this] (const rew::StepResult&)
+    {
+        const auto levels = endRewStepMeasurement();   // invalid for steps without a sweep
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewLevels_.push_back (levels);
+    };
+    hooks.runFinished = [this, seq, info] (const rew::Progress& p) -> juce::String
+    {
+        if (p.dryRun || p.results.empty())
+            return {};
+        auto runInfo = info;
+        runInfo.finished = juce::Time::getCurrentTime();
+        juce::String error;
+        const auto file = rew::writeResults (seq, p, getRewStepLevels(), runInfo, error);
+        std::lock_guard<std::mutex> l (rewMutex_);
+        rewResultsFile_ = file;
+        return file != juce::File() ? "Results: " + file.getFullPathName() : "Results not saved: " + error;
+    };
+    return rewSequencer_.start (seq, std::move (transport), options, std::move (hooks));
+}
+
+void SPLMeterAudioProcessor::beginRewStepMeasurement() noexcept
+{
+    stepState_.store (kStepBegin, std::memory_order_release);
+}
+
+rew::StepLevels SPLMeterAudioProcessor::endRewStepMeasurement()
+{
+    int expected = kStepRunning;
+    if (! stepState_.compare_exchange_strong (expected, kStepEnd, std::memory_order_acq_rel))
+    {
+        stepState_.store (kStepIdle, std::memory_order_release);   // never started (no audio) or idle
+        return {};
+    }
+    auto take = [this]
+    {
+        const auto r = stepResult_;
+        stepState_.store (kStepIdle, std::memory_order_release);
+        return r;
+    };
+    for (int i = 0; i < 100; ++i)
+    {
+        if (stepState_.load (std::memory_order_acquire) == kStepDone)
+            return take();
+        juce::Thread::sleep (5);
+    }
+    expected = kStepEnd;   // audio stopped: give up, unless it finished just now
+    if (stepState_.compare_exchange_strong (expected, kStepIdle, std::memory_order_acq_rel))
+        return {};
+    return stepState_.load (std::memory_order_acquire) == kStepDone ? take() : rew::StepLevels {};
+}
+
+void SPLMeterAudioProcessor::handleRewStep (float calOffset) noexcept
+{
+    int st = stepState_.load (std::memory_order_acquire);
+    if (st == kStepBegin)
+    {
+        stepAccum_ = {};
+        stepState_.compare_exchange_strong (st, kStepRunning, std::memory_order_acq_rel);
+    }
+    else if (st == kStepEnd)
+    {
+        const auto& a = stepAccum_;
+        auto db = [calOffset] (double ms) { return 10.0 * std::log10 (std::max (ms, 1.0e-20)) + calOffset; };
+        rew::StepLevels r;
+        r.valid = a.n > 0;
+        r.seconds = (double) a.n / currentSampleRate;
+        r.pausedSeconds = (double) a.pausedSamples / currentSampleRate;
+        if (a.n > 0)
+        {
+            r.laeq = db (a.sumA / (double) a.n);
+            r.lceq = db (a.sumC / (double) a.n);
+            r.lzeq = db (a.sumZ / (double) a.n);
+            r.lafmax = db (a.maxFastA);
+            r.lcsmax = db (a.maxSlowC);
+            r.lcpeak = db ((double) a.peakC * a.peakC);
+        }
+        r.vibValid = a.vibCount > 0;
+        r.quantity = a.vibQuantity;
+        r.axisMask = a.vibAxisMask;
+        r.uniaxial = a.vibUniaxial;
+        for (int slot = 0; slot < vib::kNumAxisSlots && r.vibValid; ++slot)
+        {
+            r.vibRms[slot] = std::sqrt (a.vibSumSq[slot] / (double) a.vibCount);
+            r.vibPeak[slot] = a.vibPeak[slot];
+        }
+        stepResult_ = r;
+        stepState_.compare_exchange_strong (st, kStepDone, std::memory_order_acq_rel);
+    }
+}
+
+std::vector<rew::StepLevels> SPLMeterAudioProcessor::getRewStepLevels() const
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return rewLevels_;
+}
+
+juce::File SPLMeterAudioProcessor::getRewResultsFile() const
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return rewResultsFile_;
+}
+
+std::vector<SPLMeterAudioProcessor::TimelineMarker> SPLMeterAudioProcessor::takePendingMarkers()
+{
+    std::lock_guard<std::mutex> l (rewMutex_);
+    return std::exchange (pendingMarkers_, {});
+}
+
+juce::var SPLMeterAudioProcessor::getInputsJson() const
+{
+    juce::Array<juce::var> list;
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    for (int ch = 0; ch < SensorConfig::kMaxInputs; ++ch)
+    {
+        const auto chs = juce::String (ch);
+        if (getChannelRole (ch) == SensorRole::Mic && ! inputs.hasProperty ("cal" + chs))
+            continue;   // defaults are not written
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("channel", ch);
+        o->setProperty ("role", (int) getChannelRole (ch));
+        o->setProperty ("calDb", getAccelCalDb (ch));
+        o->setProperty ("calDate",   inputs.getProperty ("calDate"   + chs, juce::String()));
+        o->setProperty ("calMethod", inputs.getProperty ("calMethod" + chs, juce::String()));
+        list.add (juce::var (o));
+    }
+    return list;
+}
+
+juce::var SPLMeterAudioProcessor::getAccelJson() const
+{
+    auto* o = new juce::DynamicObject();
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kAccelNode);
+    if (node.isValid())
+        for (auto* key : kAccelJsonKeys)
+            if (node.hasProperty (key))
+                o->setProperty (key, node.getProperty (key));
+    const auto limits = apvts.state.getChildWithName ("UIState").getChildWithName (kLimitsNode);
+    if (limits.isValid())
+    {
+        auto* l = new juce::DynamicObject();
+        for (int i = 0; i < limits.getNumProperties(); ++i)
+            l->setProperty (limits.getPropertyName (i), limits.getProperty (limits.getPropertyName (i)));
+        o->setProperty ("limits", juce::var (l));
+    }
+    return juce::var (o);
+}
+
+void SPLMeterAudioProcessor::setInputsAndAccelFromJson (const juce::var& inputs, const juce::var& accel)
+{
+    if (auto* list = inputs.getArray())
+    {
+        auto node = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+        node.removeAllProperties (nullptr);   // the file describes the complete input setup
+        for (const auto& v : *list)
+        {
+            const int ch = v.getProperty ("channel", -1);
+            if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+                continue;
+            const auto chs = juce::String (ch);
+            const auto role = SensorConfig::fromInt (v.getProperty ("role", 0));
+            if (role != SensorRole::Mic)
+                node.setProperty ("role" + chs, (int) role, nullptr);
+            if (v.hasProperty ("calDb"))
+                node.setProperty ("cal" + chs, juce::jlimit (vib::calibration::kMinCalDb, vib::calibration::kMaxCalDb,
+                                                             (double) v.getProperty ("calDb", 140.0)), nullptr);
+            for (auto* key : { "calDate", "calMethod" })
+                if (v.getProperty (key, juce::String()).toString().isNotEmpty())
+                    node.setProperty (key + chs, v.getProperty (key, {}), nullptr);
+        }
+        loadChannelRolesFromState();
+    }
+    if (auto* obj = accel.getDynamicObject())
+    {
+        auto node = getUiState().getOrCreateChildWithName (kAccelNode, nullptr);
+        for (auto* key : kAccelJsonKeys)
+            if (obj->hasProperty (key))
+                node.setProperty (key, obj->getProperty (key), nullptr);
+        if (auto* lim = obj->getProperty ("limits").getDynamicObject())
+        {
+            auto ln = getUiState().getOrCreateChildWithName (kLimitsNode, nullptr);
+            for (const auto& k : kLimitKeys)
+                if (lim->hasProperty (k.key))
+                    ln.setProperty (k.key, lim->getProperty (k.key), nullptr);
+            for (auto* key : kLimitEnumKeys)
+                if (lim->hasProperty (key))
+                    ln.setProperty (key, lim->getProperty (key), nullptr);
+        }
+    }
+    rebuildVibrationEngine();   // getters clamp every value
+}
+
+juce::String SPLMeterAudioProcessor::getAccelCalInfo (int ch) const
+{
+    const auto inputs = apvts.state.getChildWithName ("UIState").getChildWithName ("Inputs");
+    if (! inputs.isValid())
+        return {};
+    const auto date   = inputs.getProperty ("calDate"   + juce::String (ch), juce::String()).toString();
+    const auto method = inputs.getProperty ("calMethod" + juce::String (ch), juce::String()).toString();
+    if (date.isEmpty())
+        return {};
+    return method.isNotEmpty() ? date + " · " + method : date;
+}
+
+void SPLMeterAudioProcessor::setAccelCalInfo (int ch, const juce::String& method)
+{
+    if (ch < 0 || ch >= SensorConfig::kMaxInputs)
+        return;
+    auto inputs = getUiState().getOrCreateChildWithName ("Inputs", nullptr);
+    inputs.setProperty ("calDate"   + juce::String (ch), juce::Time::getCurrentTime().formatted ("%Y-%m-%d"), nullptr);
+    inputs.setProperty ("calMethod" + juce::String (ch), method, nullptr);
+}
+
+//==============================================================================
+// Calibrator measurement (spec §4)
+bool SPLMeterAudioProcessor::startAccelCalibration (int ch, double referenceHz)
+{
+    if (ch < 0 || ch >= juce::jmin (getTotalNumInputChannels(), SensorConfig::kMaxInputs)
+        || referenceHz <= 0.0 || referenceHz > 0.4 * currentSampleRate)
+        return false;
+
+    // Only from Idle or Done: the audio thread does not touch calMeas_ then
+    int s = calState_.load (std::memory_order_acquire);
+    if (s != CalIdle && s != CalDone)
+        return false;
+    calChannel_ = ch;
+    calMeas_.prepare (currentSampleRate, referenceHz);
+    calProgress_.store (0.0, std::memory_order_relaxed);
+    return calState_.compare_exchange_strong (s, CalRunning, std::memory_order_acq_rel);
+}
+
+void SPLMeterAudioProcessor::cancelAccelCalibration() noexcept
+{
+    int s = CalRunning;
+    if (! calState_.compare_exchange_strong (s, CalCancel, std::memory_order_acq_rel) && s == CalDone)
+        calState_.store (CalIdle, std::memory_order_release);
+}
+
+bool SPLMeterAudioProcessor::takeAccelCalibrationResult (vib::CalibratorMeasurement::Result& result) noexcept
+{
+    if (calState_.load (std::memory_order_acquire) != CalDone)
+        return false;
+    result = calMeas_.result();
+    calState_.store (CalIdle, std::memory_order_release);
+    return true;
+}
+
+//==============================================================================
 void SPLMeterAudioProcessor::loadFile (const juce::File& file)
 {
     auto* reader = formatManager.createReaderFor (file);
     if (reader == nullptr) return;
 
+    // Track roles + calibration of an SPLMeter recording (spec §7.5); other
+    // files: every channel is a microphone channel, as before
+    std::vector<WavRecording::Track> tracks;
+    if (! WavRecording::fromJson (reader->metadataValues.getValue (juce::WavAudioFormat::aswgUserData, {}), tracks))
+        tracks.clear();
+    const int fileChannels = (int) reader->numChannels;
+    tracks.resize ((size_t) juce::jmin (fileChannels, WavRecording::kMaxTracks));   // missing entries: Mic
+    fileTracks_ = tracks;
+    bool anyAccel = false;
+    for (int t = 0; t < WavRecording::kMaxTracks; ++t)
+    {
+        const auto role = t < (int) tracks.size() ? tracks[(size_t) t].role : SensorRole::Mic;
+        fileRoles_[(size_t) t].store ((int) role, std::memory_order_relaxed);
+        anyAccel = anyAccel || SensorConfig::isAccel (role);
+    }
+    fileHasAccel_.store (anyAccel);
+    fileNumChannels_.store (juce::jlimit (2, WavRecording::kMaxTracks, fileChannels));
+    vibFile_.publish (buildFileVibrationEngine());
+
     auto newSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
-    transportSource.setSource (newSource.get(), 0, nullptr, reader->sampleRate);
+    // Up to 8 tracks (the transport passes only 2 channels by default)
+    transportSource.setSource (newSource.get(), 0, nullptr, reader->sampleRate, WavRecording::kMaxTracks);
     readerSource = std::move (newSource);
 
     transportSource.setPosition (0.0);
@@ -1066,40 +1944,73 @@ void SPLMeterAudioProcessor::clearGraphOverlay2()
 //==============================================================================
 bool SPLMeterAudioProcessor::saveWavToFile (const juce::File& destFile)
 {
-    if (wavBufSize_ <= 0 || currentSampleRate < 1.0) return false;
+    const auto* rec = wavRec_.current();
+    if (rec == nullptr || currentSampleRate < 1.0) return false;
 
-    const float logDurS        = apvts.getRawParameterValue ("logDuration")->load();
-    const int   numSamplesToSave = juce::jmin (wavBufSize_,
-                                               static_cast<int> (logDurS * currentSampleRate));
+    const float logDurS          = apvts.getRawParameterValue ("logDuration")->load();
+    const int   numSamplesToSave = juce::jmin (rec->size(), static_cast<int> (logDurS * currentSampleRate));
     if (numSamplesToSave <= 0) return false;
 
-    // Snapshot: copy the most recent numSamplesToSave samples from the circular buffer.
-    // Reading across the audio-thread write is a benign race for audio data.
-    const int writePos = wavWritePos_.load (std::memory_order_acquire);
+    const auto snapBuf = rec->snapshot (numSamplesToSave);
 
-    juce::AudioBuffer<float> snapBuf (2, numSamplesToSave);
-    float* out0 = snapBuf.getWritePointer (0);
-    float* out1 = snapBuf.getWritePointer (1);
-
-    for (int s = 0; s < numSamplesToSave; ++s)
+    // Track roles + calibration (only for accelerometer recordings: the default
+    // stereo recording stays as in 3.5.2)
+    juce::StringPairArray metadata;
+    std::vector<WavRecording::Track> tracks;
+    bool anyAccel = false;
+    for (int input : rec->inputs())
     {
-        const int readPos = (writePos - numSamplesToSave + s + wavBufSize_) % wavBufSize_;
-        out0[s] = wavCircBuf_[0][readPos];
-        out1[s] = wavCircBuf_[1][readPos];
+        WavRecording::Track t;
+        t.input = input;
+        t.role  = getChannelRole (input);
+        t.calDb = getAccelCalDb (input);
+        t.name  = getChannelName (input);
+        anyAccel = anyAccel || SensorConfig::isAccel (t.role);
+        tracks.push_back (t);
     }
+    if (anyAccel)
+        metadata.set (juce::WavAudioFormat::aswgUserData, WavRecording::toJson (tracks));
 
-    // Write stereo 24-bit WAV
     juce::WavAudioFormat wavFmt;
     auto stream = std::make_unique<juce::FileOutputStream> (destFile);
     if (!stream->openedOk()) return false;
     stream->setPosition (0);
     stream->truncate();
 
-    auto* writer = wavFmt.createWriterFor (stream.release(), currentSampleRate, 2, 24, {}, 0);
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        wavFmt.createWriterFor (stream.get(), currentSampleRate, (unsigned int) snapBuf.getNumChannels(),
+                                24, metadata, 0));
     if (writer == nullptr) return false;
+    stream.release();   // owned by the writer now
+    return writer->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
+}
 
-    std::unique_ptr<juce::AudioFormatWriter> writerOwner (writer);
-    return writerOwner->writeFromAudioSampleBuffer (snapBuf, 0, numSamplesToSave);
+std::vector<int> SPLMeterAudioProcessor::getRecordedInputs() const
+{
+    if (const auto* rec = wavRec_.current())
+        return rec->inputs();
+    return {};
+}
+
+void SPLMeterAudioProcessor::rebuildWavRecorder (bool audioStopped)
+{
+    auto layout = WavRecording::layoutFor (getChannelRoles(), getTotalNumInputChannels());
+    if (! audioStopped && layout == wavLayout_ && wavRec_.current() != nullptr)
+        return;   // same tracks: keep the recorded history
+    wavLayout_ = layout;
+    const float logDurS = apvts.getRawParameterValue ("logDuration")->load();
+    auto rec = std::make_unique<WavRecording::Recorder> (std::move (layout),
+                                                         static_cast<int> (logDurS * currentSampleRate));
+    if (audioStopped) wavRec_.replaceNow (std::move (rec));
+    else              wavRec_.publish (std::move (rec));
+}
+
+bool SPLMeterAudioProcessor::isVibrationAvailable() const
+{
+    if (isFileModeActive())
+        return fileHasAccelerometer();
+    const auto v = getSensorValidity();
+    return SensorConfig::isValid (v) && v != SensorConfig::Validity::NoAccelerometer;
 }
 
 //==============================================================================

@@ -61,12 +61,20 @@ private:
     juce::ToggleButton tonalityVisButton       { "Tonality" };
     juce::ToggleButton bassComfortVisButton    { "Bass LCeq-LAeq" };
 
+    // Vibration traces X / Y / Z / Σ (vibration spec §7.3), shown when an
+    // accelerometer is configured; they take over the right axis
+    juce::ToggleButton vibVisButtons_[4];
+    bool               vibAvailable_ = false;
+    bool               vibUniaxial_  = false;
+    static const juce::Colour colVib[3];   // X brown, Y mint, Z slate (Σ: text colour)
+
     // FFT
     static constexpr int   kMaxFftOrder = 19;    // 2^19 = 524288, matches PluginProcessor::kFftCircBufSize
     static constexpr int   kMaxFftBands = 256;   // enough for 1/24-Oct (~240 bands)
 
-    // Per-signal analysis state. Mono mode uses fftCh_[0] fed by the input mix;
-    // Dual FFT feeds fftCh_[0] / fftCh_[1] from inputs 1 / 2 with identical settings.
+    // Per-signal analysis state. Mix / single-input mode uses fftCh_[0]; Dual FFT
+    // feeds fftCh_[0] / fftCh_[1] from inputs 1 / 2 with identical settings.
+    // fftSource_ is the processor's FftSource value.
     struct FftChannel
     {
         std::vector<float> inputHistory;   // overlap history
@@ -79,7 +87,16 @@ private:
         double             peakTimestamps[kMaxFftBands] {};
     };
     void processFftChannel (FftChannel&, int sourceChannel);
-    int  numFftChannels() const noexcept { return fftDual_ ? 2 : 1; }
+    bool fftDual() const noexcept        { return fftSource_ == SPLMeterAudioProcessor::FftSourceDual; }
+    int  numFftChannels() const noexcept { return fftDual() ? 2 : 1; }
+    // Processor channel feeding fftCh_[c]: -1 = mix, otherwise the input index
+    int  fftSourceChannel (int c) const noexcept
+    {
+        if (fftDual())                                         return c;
+        if (fftSource_ >= SPLMeterAudioProcessor::FftSourceInput1)
+            return fftSource_ - SPLMeterAudioProcessor::FftSourceInput1;
+        return -1;
+    }
 
     static const juce::Colour colFftIn1;   // Dual FFT: input 1 (green)
     static const juce::Colour colFftIn2;   // Dual FFT: input 2 (red)
@@ -91,7 +108,7 @@ private:
     int                             currentNumBands_    = 0;
     int                             currentBandN_       = -1;
     int                             currentWindowType_  = -1;
-    bool                            fftDual_    = false;
+    int                             fftSource_  = SPLMeterAudioProcessor::FftSourceMix;
     bool                            fftEnabled_ = false;
     bool                            lightMode_  = false;
 

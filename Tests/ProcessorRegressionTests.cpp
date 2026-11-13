@@ -1,0 +1,278 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <JuceHeader.h>
+#include "PluginProcessor.h"
+#include "ProcessorTestHelpers.h"
+
+#include <cstdlib>
+#include <fstream>
+#include <functional>
+#include <sstream>
+
+// Golden-file regression test for the real SPLMeterAudioProcessor.
+//
+// Deterministic input signals are run through processBlock and every metering
+// output (meter atomics per block, log entries, FFT ring buffers, session values)
+// is compared with a reference file in Tests/golden/.
+//
+//   SPLMETER_UPDATE_GOLDEN=1  rewrite the golden files from the current code
+//   SPLMETER_GOLDEN_EXACT=1   require bit-identical values (same machine/compiler,
+//                             used to verify refactors); default is a tight
+//                             tolerance so the test also passes on other platforms
+
+#ifndef SPLMETER_GOLDEN_DIR
+ #error "SPLMETER_GOLDEN_DIR must be defined by the build"
+#endif
+
+namespace
+{
+using namespace ProcTest;
+
+std::vector<Scenario> scenarios()
+{
+    return {
+        { "mono_sine_1k", 1, 3.0,
+          [] (int, int n) { return sine (1000.0, 0.1, n); },
+          [] (SPLMeterAudioProcessor&) {} },
+
+        { "stereo_noise_sine", 2, 3.0,
+          [] (int ch, int n) { return ch == 0 ? noise (ch, n, 0.2f) : sine (100.0, 0.3, n); },
+          [] (SPLMeterAudioProcessor&) {} },
+
+        { "quad_silent_impulses", 4, 3.0,
+          [] (int ch, int n)
+          {
+              switch (ch)
+              {
+                  case 0:  return sine (440.0, 0.05, n);
+                  case 1:  return noise (ch, n, 0.02f);
+                  case 2:  return 0.0f;                                   // silent input
+                  default: return (n % 4800) == 0 ? 0.9f : 0.0f;          // 10 Hz impulse train
+              }
+          },
+          [] (SPLMeterAudioProcessor&) {} },
+
+        { "stereo_bandpass_lowfreq", 2, 3.0,
+          [] (int ch, int n) { return ch == 0 ? sine (5.0, 0.5, n) + sine (40.0, 0.1, n)
+                                               : sine (12500.0, 0.05, n); },
+          [] (SPLMeterAudioProcessor& p) { setParam (p, "bandpassEnabled", 1.0f); },
+          // The 8th-order float bandpass drives the 5 Hz tone deep into its stopband;
+          // rounding residues there differ between arm64/macOS and x86/Linux libm+FMA
+          // (measured max diff 0.067, peak SPL 0.015 dB; FFT samples 2.6e-4 ≈ -72 dBFS)
+          // and the psychoacoustic estimators amplify them slightly.
+          0.1f, 1.0e-3f },
+
+        { "stereo_slow_muted", 2, 3.0,
+          [] (int ch, int n) { return ch == 0 ? noise (ch, n, 0.1f) : sine (2000.0, 0.5, n); },
+          [] (SPLMeterAudioProcessor& p)
+          {
+              setParam (p, "splTimeWeight", 1.0f);   // SLOW
+              setParam (p, "channelMute1", 1.0f);    // input 2 muted
+              setParam (p, "calOffset", 110.0f);
+          } },
+    };
+}
+
+std::string formatValue (float v)
+{
+    char buf[64];
+    std::snprintf (buf, sizeof (buf), "%.9g", static_cast<double> (v));   // 9 digits round-trip a float exactly
+    return buf;
+}
+
+bool envSet (const char* name)
+{
+    const char* v = std::getenv (name);
+    return v != nullptr && *v != '\0' && std::string (v) != "0";
+}
+
+// Tolerance for cross-platform runs: libm and FMA contraction differ between
+// compilers/architectures. Tight enough that any real behaviour change fails.
+bool closeEnough (const std::string& key, float expected, float actual, float absTol, float fftAbsTol)
+{
+    if (expected == actual) return true;
+    if (std::isnan (expected) || std::isnan (actual)) return std::isnan (expected) && std::isnan (actual);
+    const float diff = std::fabs (expected - actual);
+    if (key.rfind ("fft", 0) == 0)
+        return diff <= fftAbsTol + 1.0e-5f * std::fabs (expected);
+    return diff <= absTol + 1.0e-4f * std::fabs (expected);
+}
+} // namespace
+
+TEST_CASE ("Processor regression: outputs match golden files", "[regression]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    const bool update = envSet ("SPLMETER_UPDATE_GOLDEN");
+    const bool exact  = envSet ("SPLMETER_GOLDEN_EXACT");
+    const juce::File goldenDir (SPLMETER_GOLDEN_DIR);
+
+    for (const auto& sc : scenarios())
+    {
+        DYNAMIC_SECTION (sc.name)
+        {
+            const auto values = runScenario (sc);
+            const auto file   = goldenDir.getChildFile (juce::String (sc.name) + ".txt");
+
+            if (update)
+            {
+                goldenDir.createDirectory();
+                std::ostringstream os;
+                os << "# SPLMeter processor golden output: " << sc.name << "\n";
+                for (const auto& [key, v] : values)
+                    os << key << ' ' << formatValue (v) << '\n';
+                REQUIRE (file.replaceWithText (os.str()));
+                WARN ("Golden file written: " << file.getFullPathName());
+                continue;
+            }
+
+            REQUIRE (file.existsAsFile());
+            std::istringstream is (file.loadFileAsString().toStdString());
+            std::vector<std::pair<std::string, float>> expected;
+            for (std::string line; std::getline (is, line);)
+            {
+                if (line.empty() || line[0] == '#') continue;
+                std::istringstream ls (line);
+                std::string key; std::string val;
+                ls >> key >> val;
+                expected.emplace_back (key, std::strtof (val.c_str(), nullptr));
+            }
+
+            REQUIRE (expected.size() == values.size());
+
+            int mismatches = 0;
+            float maxDiff = 0.0f;
+            std::string report;
+            for (size_t i = 0; i < values.size(); ++i)
+            {
+                const auto& [key, actual] = values[i];
+                REQUIRE (key == expected[i].first);
+                const bool ok = exact ? (formatValue (actual) == formatValue (expected[i].second))
+                                      : closeEnough (key, expected[i].second, actual,
+                                                     sc.crossPlatformTol, sc.crossPlatformFftTol);
+                if (ok) continue;
+                maxDiff = std::max (maxDiff, std::fabs (actual - expected[i].second));
+                if (++mismatches <= 20)
+                    report += key + ": expected " + formatValue (expected[i].second)
+                            + ", got " + formatValue (actual) + "\n";
+            }
+            INFO (mismatches << " mismatches, max abs diff " << maxDiff << "\n" << report);
+            CHECK (mismatches == 0);
+        }
+    }
+}
+
+//==============================================================================
+// State compatibility: plugin state written by v3.5.2 (Tests/golden/state_v3.5.2.xml)
+// must keep loading into newer versions. The fixture is created once from v3.5.2
+// (SPLMETER_WRITE_STATE_FIXTURE=1) and must never be regenerated afterwards.
+
+namespace
+{
+std::unique_ptr<juce::XmlElement> makeV352StyleState()
+{
+    auto procPtr = std::make_unique<SPLMeterAudioProcessor>();
+    auto& proc = *procPtr;
+
+    // Every parameter gets a non-default value
+    const auto& params = proc.getParameters();
+    for (int i = 0; i < params.size(); ++i)
+    {
+        auto* p = params[i];
+        const float def = p->getDefaultValue();
+        const float v   = def > 0.5f ? 0.13f + 0.002f * (float) (i % 50)
+                                     : 0.71f + 0.002f * (float) (i % 50);
+        p->setValueNotifyingHost (v);
+    }
+
+    auto ui = proc.getUiState();
+    ui.setProperty ("dawSync", true, nullptr);
+    ui.setProperty ("sdThreshold", 0.55, nullptr);
+    ui.setProperty ("logShowSPL", false, nullptr);
+    ui.setProperty ("logPsychoMetric", 3, nullptr);
+    ui.setProperty ("logFftEnabled", true, nullptr);
+    ui.setProperty ("spectroColourMap", 2, nullptr);
+    ui.setProperty ("longTermYMin", 35.0, nullptr);
+    ui.setProperty ("impulseFidelityFreq", 1000.0, nullptr);
+
+    proc.setMidiCC (0, 7);
+    proc.setMidiCC (2, 11);
+    proc.setChannelName (0, "Mic left");
+    proc.setChannelName (1, "Mic right");
+
+    return proc.createStateXml();
+}
+} // namespace
+
+TEST_CASE ("State compatibility: v3.5.2 plugin state still loads", "[regression][state]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    const auto fixture = juce::File (SPLMETER_GOLDEN_DIR).getChildFile ("state_v3.5.2.xml");
+
+    if (envSet ("SPLMETER_WRITE_STATE_FIXTURE"))
+    {
+        REQUIRE (makeV352StyleState()->writeTo (fixture));
+        WARN ("State fixture written: " << fixture.getFullPathName());
+        return;
+    }
+
+    REQUIRE (fixture.existsAsFile());
+    const auto savedXml = juce::XmlDocument::parse (fixture);
+    REQUIRE (savedXml != nullptr);
+
+    // Load through the host path (binary blob, as a DAW would)
+    juce::MemoryBlock blob;
+    juce::AudioProcessor::copyXmlToBinary (*savedXml, blob);
+
+    auto procPtr = std::make_unique<SPLMeterAudioProcessor>();
+    auto& proc = *procPtr;
+    proc.setStateInformation (blob.getData(), (int) blob.getSize());
+
+    const auto saved = juce::ValueTree::fromXml (*savedXml);
+
+    SECTION ("every saved parameter is restored")
+    {
+        int checked = 0;
+        for (const auto& child : saved)
+        {
+            if (! child.hasType ("PARAM")) continue;
+            const auto id = child.getProperty ("id").toString();
+            auto* p = proc.apvts.getParameter (id);
+            INFO ("parameter " << id);
+            REQUIRE (p != nullptr);   // a removed/renamed parameter breaks old sessions
+            const float expected = (float) (double) child.getProperty ("value");
+            CHECK (p->convertFrom0to1 (p->getValue()) == Catch::Approx (expected).margin (1.0e-4));
+            ++checked;
+        }
+        CHECK (checked > 50);
+    }
+
+    SECTION ("UIState, MIDI CC and channel names are restored")
+    {
+        const auto savedUi = saved.getChildWithName ("UIState");
+        REQUIRE (savedUi.isValid());
+        auto ui = proc.getUiState();
+        for (int i = 0; i < savedUi.getNumProperties(); ++i)
+        {
+            const auto name = savedUi.getPropertyName (i);
+            INFO ("UIState property " << name.toString());
+            CHECK (ui.getProperty (name).toString() == savedUi.getProperty (name).toString());
+        }
+        CHECK (proc.isDawSync());
+        CHECK (proc.getMidiCC (0) == 7);
+        CHECK (proc.getMidiCC (1) == -1);
+        CHECK (proc.getMidiCC (2) == 11);
+        CHECK (proc.getChannelName (0) == "Mic left");
+        CHECK (proc.getChannelName (1) == "Mic right");
+    }
+
+    SECTION ("save after load round-trips unchanged")
+    {
+        juce::MemoryBlock again;
+        proc.getStateInformation (again);
+        auto proc2 = std::make_unique<SPLMeterAudioProcessor>();
+        proc2->setStateInformation (again.getData(), (int) again.getSize());
+        CHECK (proc2->createStateXml()->isEquivalentTo (proc.createStateXml().get(), false));
+    }
+}

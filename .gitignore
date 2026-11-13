@@ -23,3 +23,9 @@ Vendor/asiosdk/
 *.a
 *.d
 *.dia
+
+# Local CMake build trees
+build-*/
+
+# Stray artefact of a mis-quoted path (Vendor:asiosdk:common)
+Vendor:asiosdk:common/
