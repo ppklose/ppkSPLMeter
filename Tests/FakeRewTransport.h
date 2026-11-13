@@ -80,6 +80,7 @@ public:
     juce::String nextError;          // the next sweep ends with this error, no measurement
     juce::String nextWarning;        // the next sweep adds this warning and the measurement
     bool hangNextSweep = false;      // the next sweep never finishes (until Cancel)
+    int busyRejects = 0;             // the next n measure commands get 400 "busy"
 
     std::vector<Call> calls() const               { std::lock_guard<std::mutex> l (m_); return log_; }
     void clearCalls()                             { std::lock_guard<std::mutex> l (m_); log_.clear(); }
@@ -134,8 +135,11 @@ public:
                 busy_ = false;
                 return ok ("Cancelled");
             }
-            if (busy_)
+            if (busy_ || busyRejects > 0)
+            {
+                busyRejects = std::max (0, busyRejects - 1);
                 return { 400, "{\"message\":\"Command in progress\"}" };
+            }
             if (! choiceContains ("/measure/commands", cmd))
                 return { 400, "{\"message\":\"Unknown command\"}" };
             busy_ = true;
