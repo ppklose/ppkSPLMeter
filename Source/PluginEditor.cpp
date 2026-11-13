@@ -328,6 +328,10 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (3, "SoundDetective...");
         menu.addItem (5, "Long-term SPL");
         menu.addItem (6, "Impulse Fidelity");
+#if ! JUCE_IOS
+        menu.addSeparator();
+        menu.addItem (7, "REW Measurement Sequencer...");
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
         menu.addItem (2, "ViSQOL");
 #endif
@@ -373,6 +377,11 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                 else if (result == 6)
                     openWindow (impulseFidelityWindow,
                                 [this] { return std::make_unique<ImpulseFidelityWindow> (audioProcessor); });
+#if ! JUCE_IOS
+                else if (result == 7)
+                    openWindow (rewSequencerWindow,
+                                [this] { return std::make_unique<RewUi::RewSequencerWindow> (audioProcessor, lightMode_); });
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
                 else if (result == 2)
                 {
@@ -724,6 +733,10 @@ void SPLMeterAudioProcessorEditor::applyTheme (bool light)
     meter.setLightMode (light);
     log.setLightMode   (light);
     vibPanel.setLightMode (light);
+#if ! JUCE_IOS
+    if (rewSequencerWindow != nullptr)
+        rewSequencerWindow->setLightMode (light);
+#endif
 
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     if (visqolWindow != nullptr)

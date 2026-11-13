@@ -11,6 +11,9 @@
 #include "LFFTComponent.h"
 #include "LongTermSPLComponent.h"
 #include "ImpulseFidelityComponent.h"
+#if ! JUCE_IOS
+ #include "RewSequencerComponent.h"
+#endif
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
  #include "VisqolComponent.h"
 #endif
@@ -347,6 +350,9 @@ private:
     std::unique_ptr<LFFTWindow>           lfftWindow;
     std::unique_ptr<LongTermSPLWindow>    longTermSPLWindow;
     std::unique_ptr<ImpulseFidelityWindow> impulseFidelityWindow;
+#if ! JUCE_IOS
+    std::unique_ptr<RewUi::RewSequencerWindow> rewSequencerWindow;
+#endif
     std::vector<SoundEvent>               allSoundEvents_;
 #if SPLMETER_HAS_VISQOL || JUCE_MAC
     std::unique_ptr<VisqolWindow>   visqolWindow;
