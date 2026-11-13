@@ -1,6 +1,6 @@
 # SPLMeter — Vibration Measurement (Accelerometer) Specification
 
-Status: **Draft v0.2** · 2026-11-12 · target: **v3.6.0**
+Status: **Implemented** (v0.3) · 2026-11-13 · release: **v3.6.0** · user guide: [VIBRATION_GUIDE.md](VIBRATION_GUIDE.md)
 (v0.2: open points resolved, weighting parameters and limit values cross-checked against public sources — see §14)
 
 ## 1. Goals
@@ -366,7 +366,7 @@ Manual verification: handheld calibrator per axis; compare a short machinery and
 12. HTML report (§9) with inline SVG charts.
 13. README + user documentation; version bump to **v3.6.0** (CMakeLists.txt, SPLMeter.jucer, JucePluginDefines.h, PluginEditor version label).
 
-### Status (2026-11-12)
+### Status (2026-11-13)
 
 | Step | State | Commit |
 |---|---|---|
@@ -384,8 +384,8 @@ Manual verification: handheld calibrator per axis; compare a short machinery and
 | 10 Accumulating detectors, engine settling | done | 9a84337 |
 | Fix: distinct axis colours, short weighting labels, .gitignore | done | b1ed461 |
 | 11 Assessment + status dot, verified ⚠ values | done | 02353a1 |
-| 12 HTML report, 1/3-octave spectrum | done | |
-| 13 Docs, v3.6.0 bump, PR to main | **next** | |
+| 12 HTML report, 1/3-octave spectrum | done | 10602fc |
+| 13 User guide, README, v3.6.0 bump, PR to main | done | |
 
 **Step 11 plan.** `Source/Vibration/Assessment.h` (no JUCE, unit-tested): status None / Ok / Warning / Exceeded with a short text, one evaluator per profile following §9.3 — health (A(8) and VDV against EU action/limit values, Germany preset), hand-arm (A(8)), comfort (informational band), machinery (zones A–D by group and foundation), DIN 4150-2 (zone, day/night, KB_Fmax/A_u/A_o then KB_FTr/A_r), DIN 4150-3 (line, foundation with frequency interpolation via f_dom or top floor, short-/long-term). Limits as editable defaults in `UIState/AccelLimits` (included in JSON export/import), edited in an "Assessment" group of the Inputs and Sensors window. The Vibration panel header gets the status dot and text. Tests cover each evaluator at its boundaries, the DIN 4150-3 interpolation and the DIN 4150-2 decision flow. The ⚠ items of §13 are resolved before release.
 
