@@ -276,6 +276,8 @@ private:
     void doSaveJpg();
     void doSaveAll();
     void doSaveSettingsJson();
+    void doSaveVibrationReport();
+    bool canSaveVibrationReport() const;
     void doLoadSettingsJson();
     static void writeCsvRows (juce::OutputStream&, const std::vector<LogEntry>&,
                               const std::vector<LogComponent::MarkerEvent>&, vib::DisplayUnit,

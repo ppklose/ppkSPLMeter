@@ -344,6 +344,7 @@ if(SPLMETER_BUILD_TESTS)
         Tests/SensorRoleTests.cpp
         Tests/FftSourceTests.cpp
         Tests/VibrationProcessorTests.cpp
+        Tests/VibrationReportTests.cpp
     )
     target_link_libraries(SPLMeterProcessorTests PRIVATE
         SPLMeter

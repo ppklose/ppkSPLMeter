@@ -10,6 +10,8 @@ namespace vib
 // Axis slots of the vibration readout. A uniaxial sensor uses slot X.
 enum Axis : int { AxisX = 0, AxisY = 1, AxisZ = 2, AxisSum = 3, kNumAxisSlots = 4 };
 
+constexpr int kNumThirdOctaveBands = 32;   // 1 Hz … 1250 Hz (ThirdOctaveBank)
+
 struct AxisValues
 {
     float rms     = 0.0f;   // running RMS (exponential, time constant τ)
@@ -40,6 +42,8 @@ struct VibrationSnapshot
     AxisValues axis[kNumAxisSlots];
     int        mainKind  = 0;       // vib::MainValue of the profile
     float      main      = 0.0f;    // the profile's main value (SI units)
+    int        numBands  = 0;       // 1/3-octave bands from 1 Hz (ThirdOctaveBank::exactCentre)
+    float      bandRms[3][kNumThirdOctaveBands] {};   // per axis, linear RMS since the last reset
 };
 static_assert (std::is_trivially_copyable_v<VibrationSnapshot>);
 

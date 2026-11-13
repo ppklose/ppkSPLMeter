@@ -603,3 +603,57 @@ TEST_CASE ("Vibration engine: vector sum of the accumulated values", "[vibration
     CHECK (summary.ppvAxis == AxisZ);
     CHECK (dailyExposureA8 (0.5, 2.0) == Approx (0.25));
 }
+
+//==============================================================================
+// 1/3-octave band spectrum (spec §9.2)
+#include "Vibration/ThirdOctave.h"
+
+TEST_CASE ("Vibration 1/3-octave bank: band range and labels", "[vibration][thirdoctave]")
+{
+    ThirdOctaveBank bank;
+    bank.prepare (12000.0);
+    CHECK (bank.numBands() == 32);   // 1250 Hz · 8 ≤ 12 kHz
+    bank.prepare (8000.0);
+    CHECK (bank.numBands() == 31);   // up to 1000 Hz: 10^3 · 8 = 8000 ≤ 8000
+    CHECK (std::string (ThirdOctaveBank::nominalLabel (0)) == "1");
+    CHECK (std::string (ThirdOctaveBank::nominalLabel (15)) == "31.5");
+    CHECK (ThirdOctaveBank::exactCentre (30) == Approx (1000.0));
+}
+
+TEST_CASE ("Vibration 1/3-octave bank: a sine reads its RMS in its own band", "[vibration][thirdoctave]")
+{
+    const double fs = 12000.0, twoPi = 2.0 * kPi;
+    for (int band : { 0, 5, 10, 17, 24, 30 })   // 1, 3.16, 10, 50, 251, 1000 Hz
+    {
+        const double f = ThirdOctaveBank::exactCentre (band);
+        ThirdOctaveBank bank;
+        bank.prepare (fs);
+        const double settle = std::max (4.0, 40.0 / f), measure = std::max (2.0, 60.0 / f);
+        const long n0 = (long) (settle * fs), n1 = (long) ((settle + measure) * fs);
+        for (long i = 0; i < n1; ++i)
+            bank.process (std::sin (twoPi * f * i / fs), i >= n0);
+        INFO ("band " << band << " (" << f << " Hz)");
+        CHECK (dB (bank.bandRms (band) * std::sqrt (2.0)) == Approx (0.0).margin (0.2));
+        // Neighbouring bands: a 6th-order Butterworth is ≥ 10 dB down one band away
+        // (at its edge it is −3 dB, at the next band centre about −13 dB)
+        if (band > 0)  CHECK (dB (bank.bandRms (band - 1) / bank.bandRms (band)) < -10.0);
+        if (band < 31) CHECK (dB (bank.bandRms (band + 1) / bank.bandRms (band)) < -10.0);
+        // Two bands away: well below
+        if (band > 1)  CHECK (dB (bank.bandRms (band - 2) / bank.bandRms (band)) < -30.0);
+        if (band < 30) CHECK (dB (bank.bandRms (band + 2) / bank.bandRms (band)) < -30.0);
+    }
+}
+
+TEST_CASE ("Vibration 1/3-octave bank: reset clears the averages, not the filters", "[vibration][thirdoctave]")
+{
+    const double fs = 12000.0, twoPi = 2.0 * kPi;
+    ThirdOctaveBank bank;
+    bank.prepare (fs);
+    for (long i = 0; i < (long) (3 * fs); ++i)
+        bank.process (std::sin (twoPi * 100.0 * i / fs), true);
+    bank.resetSums();
+    CHECK (bank.bandRms (20) == 0.0);
+    for (long i = 0; i < (long) (1 * fs); ++i)
+        bank.process (std::sin (twoPi * 100.0 * i / fs), true);
+    CHECK (dB (bank.bandRms (20) * std::sqrt (2.0)) == Approx (0.0).margin (0.2));
+}

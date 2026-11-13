@@ -263,6 +263,16 @@ File playback reads that metadata: Mic tracks feed the SPL mix (all tracks for f
 7. **Mic summary** (if a mic is configured): LAeq, LCeq, LAFmax for the same period.
 8. **Disclaimer** (§9.4).
 
+**Implementation (step 12).**
+- `Source/VibrationReport.h`: `VibrationReport::generateHtml (Input)` is pure (no files, no processor) and unit-tested (`Tests/VibrationReportTests.cpp`); all visible text lives in `VibrationReport::Text` (English). User text is HTML-escaped; the file has no scripts, links, images or external styles. Print CSS keeps charts and tables on one page.
+- Menu: Ex-/Import → **Save Vibration Report…**, enabled when the vibration snapshot is valid and has metered time. A dialog asks for project, location, operator, sensor mounting and notes (persisted in `UIState/Report`), then a file chooser (default name `SPLMeter_Vibration_<project>_<date>.html`).
+- Interface: the standalone app writes the audio device name and type (`StandalonePluginHolder`); plugins write the host. File playback lists the recorded tracks with their calibration.
+- Results: per axis and Σ: RMS over the measurement, running RMS at the end, peak since reset (PPV), crest factor; MTVV and VDV for acceleration; f_dom for velocity; KB_Fmax / KB_FTm / KB_FTr with the KB weighting; plus the main value.
+- Assessment: standard, parameters, the values compared and the reference values used, verdict with coloured dot (same evaluator as the panel).
+- Charts (inline SVG): time history of the running RMS per axis and Σ from the log (markers red, pauses grey); 1/3-octave spectrum per axis in dB (bands outside the usable range or below the high-pass shaded); for DIN 4150-3, PPV over f_dom on log-log axes with the three Table 1 foundation lines and the values used.
+- Time history and the mic summary (LAeq, LCeq, LA(F|S)max) cover the log period (`logDuration`); the accumulated values cover the time since the last reset. The report states both.
+- 1/3-octave spectrum: `Source/Vibration/ThirdOctave.h`, base-10 bands 1 Hz … 1250 Hz (up to fs_d / 8), 6th-order Butterworth band-pass per band (edges prewarped), multirate (6th-order Butterworth low-pass at 0.15·rate, ÷2 per octave, each band at 8–16× its centre). It runs on the weighted signal of each axis, accumulates like the other detectors (after settling, while metering, reset with the session) and is published in the snapshot (`numBands`, `bandRms`). Engine overhead rose from 0.43 % to 0.62 % of one core (triaxial, 48 kHz).
+
 ### 9.3 Assessment reference values
 
 All limit values ship as **editable defaults** in Settings; the report lists the values actually used. Status markers refer to the sources in §14.
@@ -373,9 +383,9 @@ Manual verification: handheld calibrator per axis; compare a short machinery and
 | 9 Profiles | done | 2141ed9 |
 | 10 Accumulating detectors, engine settling | done | 9a84337 |
 | Fix: distinct axis colours, short weighting labels, .gitignore | done | b1ed461 |
-| 11 Assessment + status dot, verified ⚠ values | done | |
-| 12 HTML report | **next** | |
-| 13 Docs, v3.6.0 bump, PR to main | open | |
+| 11 Assessment + status dot, verified ⚠ values | done | 02353a1 |
+| 12 HTML report, 1/3-octave spectrum | done | |
+| 13 Docs, v3.6.0 bump, PR to main | **next** | |
 
 **Step 11 plan.** `Source/Vibration/Assessment.h` (no JUCE, unit-tested): status None / Ok / Warning / Exceeded with a short text, one evaluator per profile following §9.3 — health (A(8) and VDV against EU action/limit values, Germany preset), hand-arm (A(8)), comfort (informational band), machinery (zones A–D by group and foundation), DIN 4150-2 (zone, day/night, KB_Fmax/A_u/A_o then KB_FTr/A_r), DIN 4150-3 (line, foundation with frequency interpolation via f_dom or top floor, short-/long-term). Limits as editable defaults in `UIState/AccelLimits` (included in JSON export/import), edited in an "Assessment" group of the Inputs and Sensors window. The Vibration panel header gets the status dot and text. Tests cover each evaluator at its boundaries, the DIN 4150-3 interpolation and the DIN 4150-2 decision flow. The ⚠ items of §13 are resolved before release.
 

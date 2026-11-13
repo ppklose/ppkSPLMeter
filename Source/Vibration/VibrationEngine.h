@@ -1,6 +1,7 @@
 #pragma once
 #include "AccelChannel.h"
 #include "Detectors.h"
+#include "ThirdOctave.h"
 
 namespace vib
 {
@@ -102,6 +103,7 @@ public:
             cfg.bandHighHz = settings.bandHighHz;
             channel_[a].prepare (fs, cfg);
             fsd_ = channel_[a].decimatedRate();
+            bands_[a].prepare (fsd_);
             axisMask_ |= 1 << a;
             ++numAxes_;
         }
@@ -124,6 +126,7 @@ public:
         if (resetPending_)
         {
             for (auto& d : detector_) d.reset();
+            for (auto& b : bands_) b.resetSums();
             meteredSamples_ = 0;
             mtvvSumSq_ = 0.0;
             resetPending_ = false;
@@ -143,6 +146,10 @@ public:
             }
             if (! produced)
                 continue;
+            const bool accumulate = settleRemaining_ == 0 && metering;
+            for (int a = 0; a < 3; ++a)
+                if (input_[a] >= 0)
+                    bands_[a].process (decimated[a], accumulate);
             if (settleRemaining_ > 0)
             {
                 --settleRemaining_;   // filters run, detectors wait (snapshot stays invalid)
@@ -213,6 +220,14 @@ private:
         sum.crest  = sum.awRms > 0.0f ? sum.peakMax / sum.awRms : 0.0f;
         sum.fDom   = 0.0f;
         sum.kbFmax = sum.kbFTm = 0.0f;   // DIN 4150-2 assesses single axes
+        out.numBands = 0;
+        for (int a = 0; a < 3; ++a)
+        {
+            if (input_[a] < 0) continue;
+            out.numBands = bands_[a].numBands();
+            for (int b = 0; b < kNumThirdOctaveBands; ++b)
+                out.bandRms[a][b] = (float) bands_[a].bandRms (b);
+        }
         out.mainKind = static_cast<int> (settings_.main);
         out.main     = computeMainValue (settings_.main, out, settings_.k);
     }
@@ -222,6 +237,7 @@ private:
     AccelChannel      channel_[3];
     int               input_[3] { -1, -1, -1 };
     AxisDetector      detector_[kNumAxisSlots];
+    ThirdOctaveBank   bands_[3];
     int               axisMask_ = 0, numAxes_ = 0;
     double            fsd_ = 12000.0;
     int               intervalSamples_ = 1500, intervalCount_ = 0;

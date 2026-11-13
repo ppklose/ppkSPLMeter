@@ -1,5 +1,9 @@
 #include "PluginEditor.h"
 #include "VibrationCsv.h"
+#include "VibrationReport.h"
+#if JucePlugin_Build_Standalone
+ #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#endif
 #include <map>
 
 static juce::File splmeterLastFolder()                              { return UserPrefs::lastUsedFolder(); }
@@ -76,7 +80,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
 
     saveMenuButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff3a3a3c));
     saveMenuButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-    saveMenuButton.setTooltip ("Save CSV log, WAV recording, or screenshot");
+    saveMenuButton.setTooltip ("Save CSV log, WAV recording, screenshot or vibration report; save or load settings");
     saveMenuButton.onClick = [this]
     {
         juce::PopupMenu menu;
@@ -85,6 +89,8 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
         menu.addItem (3, "Save Screenshot...");
         menu.addSeparator();
         menu.addItem (4, "Save All...");
+        menu.addSeparator();
+        menu.addItem (7, "Save Vibration Report...", canSaveVibrationReport());
         menu.addSeparator();
         menu.addItem (5, "Save Settings...");
         menu.addItem (6, "Load Settings...");
@@ -100,6 +106,7 @@ SPLMeterAudioProcessorEditor::SPLMeterAudioProcessorEditor (SPLMeterAudioProcess
                     case 4: doSaveAll(); break;
                     case 5: doSaveSettingsJson(); break;
                     case 6: doLoadSettingsJson(); break;
+                    case 7: doSaveVibrationReport(); break;
                     default: break;
                 }
             });
@@ -823,6 +830,145 @@ void SPLMeterAudioProcessorEditor::doSaveCsv()
             stream.setPosition (0); stream.truncate();
             writeCsvRows (stream, rows, markers, vibUnit, vibProfile);
         });
+}
+
+//==============================================================================
+// Vibration report (spec §9): metadata dialog → file chooser → HTML
+bool SPLMeterAudioProcessorEditor::canSaveVibrationReport() const
+{
+    const auto s = audioProcessor.getVibrationSnapshot();
+    return s.valid && s.seconds > 0.0;
+}
+
+namespace
+{
+    juce::String reportDeviceName (SPLMeterAudioProcessor& p)
+    {
+       #if JucePlugin_Build_Standalone
+        if (juce::JUCEApplicationBase::isStandaloneApp())
+            if (auto* holder = juce::StandalonePluginHolder::getInstance())
+                if (auto* dev = holder->deviceManager.getCurrentAudioDevice())
+                    return dev->getName() + " (" + dev->getTypeName() + ")";
+       #endif
+        juce::ignoreUnused (p);
+        return juce::String ("Plugin in ") + juce::PluginHostType().getHostDescription();
+    }
+
+    juce::String reportRoleName (SensorRole r)
+    {
+        switch (r)
+        {
+            case SensorRole::Mic:           return "Mic";
+            case SensorRole::AccelX:        return "Accel X";
+            case SensorRole::AccelY:        return "Accel Y";
+            case SensorRole::AccelZ:        return "Accel Z";
+            case SensorRole::AccelUniaxial: return "Accel (uniaxial)";
+            case SensorRole::Off:           return "Off";
+        }
+        return {};
+    }
+
+    const char* const kReportKeys[5] = { "project", "location", "operator", "mounting", "notes" };
+}
+
+void SPLMeterAudioProcessorEditor::doSaveVibrationReport()
+{
+    if (! canSaveVibrationReport())
+        return;
+
+    auto stored = audioProcessor.getUiState().getOrCreateChildWithName ("Report", nullptr);
+    auto* aw = new juce::AlertWindow ("Save Vibration Report",
+                                      "Details for the report header (remembered for the next report):",
+                                      juce::MessageBoxIconType::NoIcon);
+    const char* labels[5] = { "Project:", "Location / measurement point:", "Operator:", "Sensor mounting:", "Notes:" };
+    for (int i = 0; i < 5; ++i)
+        aw->addTextEditor (kReportKeys[i], stored.getProperty (kReportKeys[i], juce::String()).toString(), labels[i]);
+    aw->addButton ("Continue", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel",   0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result)
+    {
+        std::unique_ptr<juce::AlertWindow> owner (aw);
+        if (result != 1)
+            return;
+
+        auto node = audioProcessor.getUiState().getOrCreateChildWithName ("Report", nullptr);
+        for (auto* key : kReportKeys)
+            node.setProperty (key, aw->getTextEditorContents (key).trim(), nullptr);
+
+        // Collect everything now; the file chooser is asynchronous
+        VibrationReport::Input in;
+        in.meta = { aw->getTextEditorContents ("project").trim(), aw->getTextEditorContents ("location").trim(),
+                    aw->getTextEditorContents ("operator").trim(), aw->getTextEditorContents ("mounting").trim(),
+                    aw->getTextEditorContents ("notes").trim() };
+        in.version       = JucePlugin_VersionString;
+        in.created       = juce::Time::getCurrentTime();
+        in.device        = reportDeviceName (audioProcessor);
+        in.sampleRate    = audioProcessor.getSampleRate();
+        const auto info  = audioProcessor.getAccelSensorInfo();
+        in.serial        = info.serial;
+        in.lowerLimitHz  = info.lowerLimitHz;
+        in.upperLimitHz  = info.upperLimitHz;
+        in.exposureHours = info.exposureHours;
+        in.profile       = audioProcessor.getVibrationProfile();
+        in.profileLabel  = audioProcessor.getVibrationProfileLabel();
+        in.mainLabel     = audioProcessor.getVibrationMainLabel();
+        in.settings      = audioProcessor.getVibrationSettings();
+        in.unit          = audioProcessor.getVibrationDisplayUnit();
+        in.snap          = audioProcessor.getVibrationSnapshot();
+        in.limits        = audioProcessor.getAssessmentLimits();
+        in.log           = audioProcessor.copyLog();
+        in.timeWeighting = audioProcessor.apvts.getRawParameterValue ("splTimeWeight")->load() > 0.5f ? "S" : "F";
+
+        if (audioProcessor.isFileModeActive() && audioProcessor.fileHasAccelerometer())
+        {
+            for (const auto& t : audioProcessor.getFileTracks())
+            {
+                in.channels.push_back ({ t.name.isNotEmpty() ? t.name : "Track " + juce::String (t.input + 1),
+                                         reportRoleName (t.role), t.calDb, "from the recording",
+                                         SensorConfig::isAccel (t.role) });
+                in.hasMic = in.hasMic || t.role == SensorRole::Mic;
+            }
+            in.device = "File playback";
+        }
+        else
+        {
+            const int numInputs = juce::jmin (audioProcessor.getTotalNumInputChannels(), SensorConfig::kMaxInputs);
+            for (int ch = 0; ch < numInputs; ++ch)
+            {
+                const auto role = audioProcessor.getChannelRole (ch);
+                const bool muted = audioProcessor.apvts.getRawParameterValue ("channelMute" + juce::String (ch))->load() > 0.5f;
+                if (muted && role == SensorRole::Mic)
+                    continue;
+                const bool accel = SensorConfig::isAccel (role);
+                in.channels.push_back ({ audioProcessor.getChannelName (ch), reportRoleName (role),
+                                         accel ? audioProcessor.getAccelCalDb (ch) : 0.0,
+                                         accel ? audioProcessor.getAccelCalInfo (ch) : juce::String(), accel });
+                in.hasMic = in.hasMic || (role == SensorRole::Mic && ! muted);
+            }
+        }
+        for (const auto& m : markerEvents_)
+            in.events.push_back ({ m.timestampMs, 0, m.text, false });
+        for (const auto& p : pauseEvents_)
+            in.events.push_back ({ p.startMs, p.durationMs, {}, true });
+
+        fileChooser = std::make_unique<juce::FileChooser> (
+            "Save vibration report", splmeterLastFolder().getChildFile (VibrationReport::suggestedFileName (in)), "*.html");
+        fileChooser->launchAsync (
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                | juce::FileBrowserComponent::warnAboutOverwriting,
+            [in] (const juce::FileChooser& fc)
+            {
+                auto file = fc.getResult();
+                if (file == juce::File{}) return;
+                if (! file.hasFileExtension ("html;htm"))
+                    file = file.withFileExtension ("html");
+                splmeterSaveLastFolder (file);
+                if (! file.replaceWithText (VibrationReport::generateHtml (in), false, false, "\n"))
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                            "Save Vibration Report", "Could not write " + file.getFullPathName());
+            });
+    }), false);
 }
 
 void SPLMeterAudioProcessorEditor::doSaveWav()
