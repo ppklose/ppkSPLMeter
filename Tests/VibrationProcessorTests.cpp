@@ -752,3 +752,47 @@ TEST_CASE ("Input bus: standalone takes up to 32 inputs, plugins 1-8", "[vibrati
     standalone->setChannelRole (12, SensorRole::AccelUniaxial);
     CHECK (standalone->getSensorValidity() == SensorConfig::Validity::Uniaxial);
 }
+
+TEST_CASE ("Vibration in processor: assessment limits persist and travel in JSON", "[vibration][processor][state]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    auto src = std::make_unique<SPLMeterAudioProcessor>();
+    auto l = src->getAssessmentLimits();
+    CHECK (l.din2Au == Approx (0.15));   // defaults without a stored node
+    vib::applyDin4150_2Preset (l, vib::Din4150Zone::Mixed, true);
+    vib::applyWholeBodyPreset (l, vib::WholeBodyPreset::Germany);
+    l.wbCriterion = vib::WholeBodyCriterion::Vdv;
+    l.haLimit = 4.2;
+    vib::applyDin4150_3Preset (l, vib::Din4150Line::Line3, vib::Din4150Location::TopFloorHorizontal, true);
+    src->setAssessmentLimits (l);
+
+    auto check = [] (const vib::AssessmentLimits& r)
+    {
+        CHECK (r.din2Zone == vib::Din4150Zone::Mixed);
+        CHECK (r.din2Night);
+        CHECK (r.din2Ao == Approx (0.3));
+        CHECK (r.din2ExposureHours == Approx (8.0));
+        CHECK (r.wbPreset == vib::WholeBodyPreset::Germany);
+        CHECK (r.wbCriterion == vib::WholeBodyCriterion::Vdv);
+        CHECK (r.wbLimitZ == Approx (0.8));
+        CHECK (r.haLimit == Approx (4.2));
+        CHECK (r.din3Line == vib::Din4150Line::Line3);
+        CHECK (r.din3Location == vib::Din4150Location::TopFloorHorizontal);
+        CHECK (r.din3LongTerm);
+        CHECK (r.din3Single == Approx (2.5));
+    };
+
+    // Plugin state
+    juce::MemoryBlock blob;
+    src->getStateInformation (blob);
+    auto restored = std::make_unique<SPLMeterAudioProcessor>();
+    restored->setStateInformation (blob.getData(), (int) blob.getSize());
+    check (restored->getAssessmentLimits());
+
+    // JSON settings file: nested in "accel"
+    const auto parsed = juce::JSON::parse (juce::JSON::toString (src->getAccelJson()));
+    auto dst = std::make_unique<SPLMeterAudioProcessor>();
+    dst->setInputsAndAccelFromJson (juce::var(), parsed);
+    check (dst->getAssessmentLimits());
+}

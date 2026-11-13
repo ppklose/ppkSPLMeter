@@ -24,7 +24,7 @@ struct AxisValues
     float crest   = 0.0f;   // peakMax / awRms
     float fDom    = 0.0f;   // dominant frequency at peakMax (Hz; half-period between zero crossings)
     float kbFmax  = 0.0f;   // max of the running RMS with τ = 0.125 s (KB_Fmax)
-    float kbFTr   = 0.0f;   // √(mean of the squared 30 s cycle maxima) (KB_FTr)
+    float kbFTm   = 0.0f;   // √(mean of the squared 30 s cycle maxima) (KB_FTm; KB_FTr = KB_FTm · √(T_e / T_r))
 };
 
 // Published every snapshot interval (125 ms). Units follow the quantity:
@@ -205,7 +205,7 @@ public:
         v.kbFmax  = (float) std::sqrt (kbFmax_);
         // Completed cycles; before the first one completes, the running cycle
         const double ftr2 = cycleCount_ > 0 ? cycleSumSq_ / (double) cycleCount_ : cycleMax_;
-        v.kbFTr   = (float) std::sqrt (ftr2);
+        v.kbFTm   = (float) std::sqrt (ftr2);
         return v;
     }
 

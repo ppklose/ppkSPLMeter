@@ -574,6 +574,7 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
     for (int a = 0; a < 3; ++a)
         st.k[a] = settings.k[a];
     st.exposureHours = audioProcessor.getAccelSensorInfo().exposureHours;
+    st.limits        = audioProcessor.getAssessmentLimits();
     const auto missingText = missing.isEmpty() ? juce::String()
                            : missing.joinIntoString (", ") + (missing.size() == 1 ? " is" : " are")
                              + " not available on this input";
@@ -654,6 +655,8 @@ bool SPLMeterAudioProcessorEditor::updateVibrationPanel()
         else if (missingText.isNotEmpty())
             st.note = missingText;
     }
+    if (st.kind == Kind::Running)
+        st.assessment = vib::assess (audioProcessor.getVibrationProfile(), st.snap, st.k, st.exposureHours, st.limits);
     vibPanel.setState (st);
     vibPanel.setVisible (st.kind != Kind::Hidden);
     return vibPanel.preferredHeight() != heightBefore;

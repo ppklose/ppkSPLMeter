@@ -13,6 +13,7 @@
 #include "Vibration/CalibratorMeasurement.h"
 #include "Vibration/Units.h"
 #include "Vibration/Profiles.h"
+#include "Vibration/Assessment.h"
 #include "RtHandover.h"
 #include "WavRecording.h"
 #include <array>
@@ -369,6 +370,11 @@ public:
     juce::String getVibrationProfileLabel() const;    // e.g. "Custom (based on Hand-arm (ISO 5349-1))"
     juce::String getVibrationProfileKey() const;      // CSV/JSON: "hand-arm" or "custom(hand-arm)"
     juce::String getVibrationMainLabel() const;       // e.g. "a_w"
+
+    // Assessment reference values (spec §9.3, UIState/AccelLimits); defaults from the standards
+    vib::AssessmentLimits getAssessmentLimits() const;
+    void setAssessmentLimits (const vib::AssessmentLimits& limits);
+    vib::Assessment getVibrationAssessment() const;   // of the latest snapshot for the current profile
 
     // Display unit of the vibration readout (UIState/Accel "displayUnit")
     vib::DisplayUnit getVibrationDisplayUnit() const;

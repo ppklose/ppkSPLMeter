@@ -152,13 +152,13 @@ Unit tests (`Tests/VibrationDspTests.cpp`):
 | PPV | max \|v(t)\| per axis, plus the **dominant frequency** at the peak (zero-crossing half-period around the peak, cross-checked with the FFT) | DIN 4150-3 |
 | KB_F(t) | running RMS of KB-weighted velocity, τ = 0.125 s | DIN 4150-2 |
 | KB_Fmax | max KB_F(t) | DIN 4150-2 |
-| KB_FTm / KB_FTr | max of KB_F per 30 s cycle; `KB_FTr = √(1/N · Σ KB_FTi²)` | DIN 4150-2 |
+| KB_FTm / KB_FTr | max of KB_F per 30 s cycle; `KB_FTm = √(1/N · Σ KB_FTi²)`, `KB_FTr = KB_FTm · √(T_e / T_r)` (T_r = 16 h day, 8 h night) | DIN 4150-2 |
 
 **Vector sum**: `a_v = √(kx²·ax² + ky²·ay² + kz²·az²)`, computed from the per-axis detectors (RMS-type values) or sample-wise (VDV, peak). The vector sum is labelled Σ.
 
 Accumulating detectors (a_w,rms, MTVV, VDV, PPV, KB_FTr) reset together with the existing session reset (the same button that resets `sessionPeakDBCSPL_`). They pause during DAW-sync pauses, like the log.
 
-Implementation (step 10, `Source/Vibration/Detectors.h`): every axis detector accumulates a_w,rms (linear), MTVV (exponential τ = 1 s, independent of the running-RMS τ), VDV, crest factor (peak since reset / a_w,rms), KB_Fmax and KB_FTr (τ = 0.125 s; completed 30 s cycles, the running cycle until the first one completes) and the dominant frequency at the PPV (interpolated zero crossings around the peak; for a peak in the first half-cycle of an event, the following half-cycle). Σ combines the axes with the k-factors: a_w,rms and MTVV as √Σ k²·x², VDV_total = (Σ (k·VDV)⁴)^¼ (ISO 2631-1). A(8) = a_w · √(T / 8 h) with the daily exposure time T (`exposureHours`, default 8 h, in the accelerometer group).
+Implementation (step 10, `Source/Vibration/Detectors.h`): every axis detector accumulates a_w,rms (linear), MTVV (exponential τ = 1 s, independent of the running-RMS τ), VDV, crest factor (peak since reset / a_w,rms), KB_Fmax and KB_FTm (τ = 0.125 s; completed 30 s cycles, the running cycle until the first one completes; the assessment derives KB_FTr from it, step 11) and the dominant frequency at the PPV (interpolated zero crossings around the peak; for a peak in the first half-cycle of an event, the following half-cycle). Σ combines the axes with the k-factors: a_w,rms and MTVV as √Σ k²·x², VDV_total = (Σ (k·VDV)⁴)^¼ (ISO 2631-1). A(8) = a_w · √(T / 8 h) with the daily exposure time T (`exposureHours`, default 8 h, in the accelerometer group).
 
 Settling: after an engine is built (start, settings or role change) the filters run for `0.8 s / highPassHz` (0.5 … 10 s) before the detectors start, so the start-up transient of the high-pass, integrators and weightings does not reach PPV, MTVV, KB_Fmax or the crest factor. The readout shows "--" meanwhile. A session reset does not need settling.
 
@@ -268,9 +268,9 @@ File playback reads that metadata: Mic tracks feed the SPL mix (all tracks for f
 All limit values ship as **editable defaults** in Settings; the report lists the values actually used. Status markers refer to the sources in §14.
 
 - **EU 2002/44/EC** ✔ [E][O]: hand-arm A(8) action 2.5 m/s², limit 5.0 m/s²; whole-body A(8) action 0.5 m/s², limit 1.15 m/s²; alternative whole-body VDV action 9.1, limit 21 m/s^1.75.
-  **Germany** (LärmVibrationsArbSchV) ⚠ [D] only: whole-body limit 0.8 m/s² in Z, 1.15 m/s² in X/Y. Offered as a "Germany" preset; check the legal text before release.
+  **Germany** (LärmVibrationsArbSchV §9) ✔ [D][J]: whole-body limit 0.8 m/s² in Z, 1.15 m/s² in X/Y; action value 0.5 m/s²; hand-arm as EU. Offered as the "Germany" preset.
   A(8) = a · √(T / 8 h), where *a* is the highest axis value with k-factors applied (whole-body) or a_hv (hand-arm). T is entered by the user (default: measurement duration).
-- **ISO 2631-1 comfort scale** (unverified, from memory): < 0.315 not uncomfortable · 0.315–0.63 a little · 0.5–1 fairly · 0.8–1.6 uncomfortable · 1.25–2.5 very · > 2 m/s² extremely uncomfortable. Informational only, no pass/fail.
+- **ISO 2631-1 Annex C comfort scale** (informative annex) ✔ [C], two secondary sources agree except for the top band: < 0.315 not uncomfortable · 0.315–0.63 a little · 0.5–1 fairly · 0.8–1.6 uncomfortable · 1.25–2.5 very · > 2 m/s² extremely uncomfortable (one source: > 2.5). Overlapping ranges are shown with both names ("Uncomfortable to very uncomfortable"). Informative only, no pass/fail.
 - **ISO 10816-3 / 20816-3** ✔ [M] (velocity RMS, mm/s), zone boundaries A/B, B/C, C/D:
   | | Rigid | Flexible |
   |---|---|---|
@@ -278,13 +278,13 @@ All limit values ship as **editable defaults** in Settings; the report lists the
   | Group 2 (15–300 kW, or shaft height 160–315 mm) | 1.4 / 2.8 / 4.5 | 2.3 / 4.5 / 7.1 |
   The user selects the group and foundation. ISO 20816-3 keeps the same values.
 - **DIN 4150-3**, short-term vibration ✔ [H][G][L] (PPV in mm/s at the foundation, for 1–10 Hz / 10–50 Hz / 50–100 Hz, linearly interpolated within each band; last column is the top floor, horizontal, all frequencies):
-  | Line | Building type | 1–10 | 10–50 | 50–100 | Top floor |
-  |---|---|---|---|---|---|
-  | 1 | Commercial / industrial | 20 | 20–40 | 40–50 | 40 |
-  | 2 | Residential | 5 | 5–15 | 15–20 | 15 |
-  | 3 | Particularly sensitive / heritage-protected | 3 | 3–8 | 8–10 | 8 |
-  Above 100 Hz, the 100 Hz values apply.
-  **Long-term vibration** (top floor, horizontal): line 3 = 2.5 mm/s ✔ [T]; lines 1 = 10 and 2 = 5 mm/s ⚠ from memory, verify.
+  | Line | Building type | 1–10 | 10–50 | 50–100 | Top floor | Floor slab, vertical |
+  |---|---|---|---|---|---|---|
+  | 1 | Commercial / industrial | 20 | 20–40 | 40–50 | 40 | 20 |
+  | 2 | Residential | 5 | 5–15 | 15–20 | 15 | 20 |
+  | 3 | Particularly sensitive / heritage-protected | 3 | 3–8 | 8–10 | 8 | 20 |
+  Above 100 Hz, at least the 100 Hz values apply.
+  **Long-term vibration** (DIN 4150-3:2016 Table 3) ✔ [T][P]: top floor, horizontal: line 1 = 10, line 2 = 5, line 3 = 2.5 mm/s; floor slab, vertical: 10 mm/s for all lines. No foundation values for long-term vibration.
 - **DIN 4150-2** ✔ [L] plus consistent values in several expert reports (KB values, dimensionless):
   | Zone | Day A_u / A_o / A_r | Night A_u / A_o / A_r |
   |---|---|---|
@@ -293,8 +293,19 @@ All limit values ship as **editable defaults** in Settings; the report lists the
   | Mixed / village / core (MI, MD, MK) | 0.2 / 5 / 0.1 | 0.15 / 0.3 / 0.07 |
   | Residential (WR, WA) | 0.15 / 3 / 0.07 | 0.1 / 0.2 / 0.05 |
   | Hospitals, spa areas (SO) | 0.1 / 3 / 0.05 | 0.1 / 0.15 / 0.05 |
-  Values are from the 1999 edition. Special rules (e.g. a different A_o at night for rail traffic, construction-site tables) are not modelled; the user edits the values in such cases.
-  Assessment logic: KB_Fmax ≤ A_u → requirement met; KB_Fmax > A_o → not met; otherwise KB_FTr ≤ A_r → met.
+  Values are from the 1999 edition ✔ [P]; the 2025-08 edition keeps Table 1 and the procedure essentially unchanged [A]. Special rules (rail factor α_Zug and the separate night A_o for new rail lines in 2025, the construction-site Table 2) are not modelled; the user edits the values in such cases.
+  Assessment logic ✔ [P]: KB_Fmax ≤ A_u → requirement met; KB_Fmax > A_o → not met; otherwise KB_FTr ≤ A_r → met. KB weighting ✔ [K]: high-pass `1/√(1 + (f₀/f)²)`, f₀ = 5.6 Hz, KB_F(t) with τ = 0.125 s.
+
+**Implementation (step 11, `Source/Vibration/Assessment.h`).** `vib::assess (profile, snapshot, k, exposureHours, limits)` returns a verdict (None, Info, Ok, Warning, Exceeded) and a short text; the base profile decides the evaluator, so "Custom (based on …)" keeps its assessment. The quantity must match (acceleration for human exposure, velocity for machinery and buildings), otherwise there is none.
+- Whole-body health: A(8) of the highest k·a_w,rms against action (warning) and limit (exceeded); the limit is per axis (Z vs. X/Y). Criterion VDV: the largest k·VDV scaled to the daily exposure, `VDV · (T_exp / T_meas)^¼`. A uniaxial sensor is slot X with X's weighting and k, so the X/Y limit applies.
+- Hand-arm: A(8) of a_hv (Σ a_w,rms, or the single axis).
+- Comfort: the band of a_v (Info).
+- Machinery: the largest axis linear RMS over the measurement → zone A/B (ok), C (warning), D (exceeded).
+- DIN 4150-2: largest axis KB_Fmax and KB_FTm; KB_FTr = KB_FTm · √(T_e / T_r), T_e defaults to T_r (16 h / 8 h) and is clamped to it.
+- DIN 4150-3: PPV (peak since reset) per axis; foundation: all axes against the value at the axis' f_dom (unknown f_dom → the 1–10 Hz value); top floor: X/Y; floor slab: Z; long-term at the foundation gives no verdict.
+- A value on a limit is not "exceeded" (relative tolerance 1e-6 for the float snapshot).
+- Limits live in `UIState/AccelLimits` (enums as ints) and travel in the JSON settings file as `accel.limits`. Presets fill the editable values: whole-body EU / Germany, machine group + foundation, DIN 4150-2 zone + day/night, DIN 4150-3 line + duration + location. The **Assessment** card of the Inputs and Sensors window shows only the controls of the current profile, with a **Defaults** button that reloads the values of the selected presets.
+- The Vibration panel shows a coloured dot and the text on the right of the results line (green ok, amber warning, red exceeded, blue info).
 
 ### 9.4 Disclaimer (fixed text)
 
@@ -361,13 +372,14 @@ Manual verification: handheld calibrator per axis; compare a short machinery and
 | Fix: standalone up to 32 inputs, unmuted inputs listed | done | 4ec51b0 |
 | 9 Profiles | done | 2141ed9 |
 | 10 Accumulating detectors, engine settling | done | 9a84337 |
-| 11 Assessment + status dot | **next** | |
-| 12 HTML report | open | |
+| Fix: distinct axis colours, short weighting labels, .gitignore | done | b1ed461 |
+| 11 Assessment + status dot, verified ⚠ values | done | |
+| 12 HTML report | **next** | |
 | 13 Docs, v3.6.0 bump, PR to main | open | |
 
 **Step 11 plan.** `Source/Vibration/Assessment.h` (no JUCE, unit-tested): status None / Ok / Warning / Exceeded with a short text, one evaluator per profile following §9.3 — health (A(8) and VDV against EU action/limit values, Germany preset), hand-arm (A(8)), comfort (informational band), machinery (zones A–D by group and foundation), DIN 4150-2 (zone, day/night, KB_Fmax/A_u/A_o then KB_FTr/A_r), DIN 4150-3 (line, foundation with frequency interpolation via f_dom or top floor, short-/long-term). Limits as editable defaults in `UIState/AccelLimits` (included in JSON export/import), edited in an "Assessment" group of the Inputs and Sensors window. The Vibration panel header gets the status dot and text. Tests cover each evaluator at its boundaries, the DIN 4150-3 interpolation and the DIN 4150-2 decision flow. The ⚠ items of §13 are resolved before release.
 
-Open small items: Vib X colour close to the dBA trace; weighting names truncated in the Inputs window; `.gitignore` for build folders; devices opening more than 32 inputs.
+Open small items: devices opening more than 32 inputs still fall back to one input.
 
 ### Later
 
@@ -384,12 +396,10 @@ Decided (2026-11-12):
 3. Parameters and limits were cross-checked against public sources (§14).
 4. DIN 4150-2 zone values ship as editable defaults.
 
-Remaining ⚠ items to check before release:
-- DIN 4150-3 long-term values for lines 1 and 2 (10 / 5 mm/s).
-- The German whole-body Z limit of 0.8 m/s² (LärmVibrationsArbSchV legal text).
-- The ISO 2631-1 comfort scale bands.
+Checked on 2026-11-13 (step 11): DIN 4150-3 long-term values [P], the German Z limit [J], the ISO 2631-1 comfort bands [C] (informative; top band > 2 vs. > 2.5 differs between sources), the KB weighting [K] and the DIN 4150-2 flow [P]. This found that KB_FTr needs the factor √(T_e / T_r); the detector value is now called KB_FTm.
+
+Remaining ⚠ item:
 - The Wb gain K = 1.024 and the Wm/Wb parameters (single source [V]). The unit-test tables will catch any inconsistency between parameters and response.
-- The KB weighting definition (f0 = 5.6 Hz) and the DIN 4150-2 assessment flow; neither has been cross-checked against a public source yet.
 
 ## 14. Sources
 
@@ -405,3 +415,8 @@ Remaining ⚠ items to check before release:
 - [H] HLNUG, Einwirkungen auf Bauwerke: https://www.hlnug.de/themen/erschuetterungen/beurteilung/einwirkungen-auf-bauwerke
 - [G] Bundesverband Geothermie, Schadensgrenze: https://www.geothermie.de/bibliothek/lexikon-der-geothermie/s/schadensgrenze-erschuetterungen
 - [T] terrana Geophysik, Regelwerke DIN 4150 und LAI: https://www.terrana-geophysik.de/images/Methode_Erschuetterung.htm
+- [J] LärmVibrationsArbSchV §9 (legal text): https://www.gesetze-im-internet.de/l_rmvibrationsarbschv/__9.html
+- [P] Erschütterungsabschätzung Isar/Altheim (Regierung von Niederbayern, 2024), quoting DIN 4150-2 Table 1 and the KB_FTr formula and DIN 4150-3:2016 Tables 1 and 3: https://regierung.niederbayern.bayern.de/mam/service/planfeststellungsverfahren/aktuell/20240923_isar_altheim/u_08_03__8.3_erschütterungsabschätzung.pdf
+- [A] DAGA 2026, Wie wirkt sich die neue DIN 4150-2 auf die Beurteilung … aus: https://pub.dega-akustik.de/DAGA_2026/files/upload/paper/038.pdf
+- [K] LUBW, Messung und Beurteilung von Erschütterungsimmissionen (KB weighting): https://www.lubw.baden-wuerttemberg.de/documents/10184/84452/erschuetterungen.pdf/7727cac7-304a-4bb4-83de-44398f1f980f
+- [C] ISO 2631-1 comfort tables in J. Anim. Sci. (2021) https://pmc.ncbi.nlm.nih.gov/articles/PMC7904064/table/T3 and Sensors 21 (2021) 3127 https://pmc.ncbi.nlm.nih.gov/articles/PMC8125624/table/sensors-21-03127-t003

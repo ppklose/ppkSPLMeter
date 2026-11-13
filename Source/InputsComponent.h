@@ -829,6 +829,49 @@ public:
         addAndMakeVisible (lowerLimit_);
         addAndMakeVisible (upperLimit_);
 
+        // --- Assessment group (spec §9.3): the controls depend on the profile ---
+        setupLabel (assessTitle_, "ASSESSMENT", 11.0f, true);
+        setupLabel (assessDesc_, {}, 11.5f);
+        for (int i = 0; i < kAssessCombos; ++i)
+        {
+            setupLabel (assessComboLabels_[i], {});
+            assessCombos_[i].onChange = [this, i]
+            {
+                if (assessCombos_[i].getSelectedId() <= 0 || i >= (int) comboSetters_.size()) return;
+                auto l = processor_.getAssessmentLimits();
+                comboSetters_[(size_t) i] (l, assessCombos_[i].getSelectedId() - 1);
+                processor_.setAssessmentLimits (l);
+                loadAssessment();
+            };
+            addAndMakeVisible (assessCombos_[i]);
+        }
+        for (int i = 0; i < kAssessFields; ++i)
+        {
+            setupLabel (assessFieldLabels_[i], {});
+            assessFields_[i].onValueChange = [this, i] (double v)
+            {
+                if (i >= (int) fieldMembers_.size()) return;
+                auto l = processor_.getAssessmentLimits();
+                l.*fieldMembers_[(size_t) i] = v;
+                processor_.setAssessmentLimits (l);
+            };
+            addAndMakeVisible (assessFields_[i]);
+        }
+        assessDefaults_.setTooltip ("Reload the reference values of the selected standard, group, zone or line");
+        assessDefaults_.onClick = [this]
+        {
+            auto l = processor_.getAssessmentLimits();
+            vib::applyWholeBodyPreset (l, l.wbPreset);
+            vib::applyMachineryPreset (l, l.machGroup, l.machFoundation);
+            vib::applyDin4150_2Preset (l, l.din2Zone, l.din2Night);
+            vib::applyDin4150_3Preset (l, l.din3Line, l.din3Location, l.din3LongTerm);
+            const auto d = vib::defaultAssessmentLimits();
+            l.haAction = d.haAction; l.haLimit = d.haLimit;
+            processor_.setAssessmentLimits (l);
+            loadAssessment();
+        };
+        addAndMakeVisible (assessDefaults_);
+
         setLightMode (light);
         loadAccelSettings();
         rebuildRows();
@@ -863,6 +906,14 @@ public:
         for (auto* c : { &profileCombo_, &mainCombo_, &quantityCombo_, &tauCombo_,
                          &weightingCombos_[0], &weightingCombos_[1], &weightingCombos_[2] })
             pal_.style (*c);
+        assessTitle_.setColour (juce::Label::textColourId, pal_.subtext);
+        assessDesc_.setColour (juce::Label::textColourId, pal_.subtext.withAlpha (0.85f));
+        for (auto& l : assessComboLabels_) l.setColour (juce::Label::textColourId, pal_.text);
+        for (auto& l : assessFieldLabels_) l.setColour (juce::Label::textColourId, pal_.text);
+        for (auto& c : assessCombos_) pal_.style (c);
+        for (auto& f : assessFields_) f.style (pal_);
+        assessDefaults_.setColour (juce::TextButton::buttonColourId, pal_.field);
+        assessDefaults_.setColour (juce::TextButton::textColourOffId, pal_.text);
         serialEditor_.setColour (juce::TextEditor::backgroundColourId, pal_.field);
         serialEditor_.setColour (juce::TextEditor::textColourId, pal_.text);
         serialEditor_.setColour (juce::TextEditor::outlineColourId, pal_.border);
@@ -874,7 +925,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (pal_.bg);
-        for (auto* b : { &inputsCard_, &accelCard_ })
+        for (auto* b : { &inputsCard_, &accelCard_, &assessCard_ })
         {
             if (b->isEmpty()) continue;
             g.setColour (pal_.card);
@@ -889,10 +940,40 @@ public:
         constexpr int margin = 16, pad = 14, rowH = 30;
         auto page = getLocalBounds().reduced (margin);
 
-        // Accelerometer card at the bottom (fixed height), inputs card fills the rest
+        // Accelerometer and assessment cards at the bottom (fixed height), inputs card fills the rest
         accelCard_ = {};
+        assessCard_ = {};
         if (accelVisible_)
         {
+            assessCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 3 * 28 + 2 * 6);
+            page.removeFromBottom (16);
+            {
+                auto c = assessCard_.reduced (pad);
+                auto titleRow = c.removeFromTop (16);
+                assessDefaults_.setBounds (titleRow.removeFromRight (90).withHeight (22).translated (0, -2));
+                assessTitle_.setBounds (titleRow);
+                c.removeFromTop (3);
+                assessDesc_.setBounds (c.removeFromTop (16));
+                c.removeFromTop (10);
+                const int colW = c.getWidth() / 3;
+                auto cell = [&] (juce::Rectangle<int> row, int col, juce::Label& label, juce::Component& comp)
+                {
+                    auto r = row.withX (row.getX() + col * colW).withWidth (colW - 12);
+                    label.setBounds (r.removeFromLeft (128));
+                    comp.setBounds (r.reduced (0, 2));
+                };
+                auto row = c.removeFromTop (28);
+                for (int i = 0; i < kAssessCombos; ++i)
+                    cell (row, i, assessComboLabels_[i], assessCombos_[i]);
+                for (int r = 0; r < 2; ++r)
+                {
+                    c.removeFromTop (6);
+                    row = c.removeFromTop (28);
+                    for (int i = 0; i < 3; ++i)
+                        cell (row, i, assessFieldLabels_[r * 3 + i], assessFields_[r * 3 + i]);
+                }
+            }
+
             accelCard_ = page.removeFromBottom (pad * 2 + 16 + 3 + 16 + 10 + 6 * 28 + 5 * 6);
             page.removeFromBottom (16);
             auto c = accelCard_.reduced (pad);
@@ -1143,6 +1224,10 @@ private:
             uniaxial_ = uniaxial;
             for (juce::Component* comp : accelComponents())
                 comp->setVisible (anyAccel);
+            assessKey_ = -1;   // loadAssessment() re-applies the per-profile visibility
+            for (int i = 0; i < kAssessCombos; ++i) { assessComboLabels_[i].setVisible (false); assessCombos_[i].setVisible (false); }
+            for (int i = 0; i < kAssessFields; ++i) { assessFieldLabels_[i].setVisible (false); assessFields_[i].setVisible (false); }
+            assessDefaults_.setVisible (false);
             // Uniaxial: one weighting, no vector sum
             weightingLabels_[0].setText (uniaxial ? "Weighting" : "Weighting X", juce::dontSendNotification);
             for (int a = 1; a < 3; ++a)
@@ -1159,7 +1244,153 @@ private:
             repaint();
         }
         if (anyAccel)
+        {
             loadAccelSettings();
+            loadAssessment();
+        }
+    }
+
+    //==========================================================================
+    // Assessment group: which controls a profile uses (spec §9.3)
+    using Limits = vib::AssessmentLimits;
+    using Setter = std::function<void (Limits&, int)>;
+
+    struct AssessLayout
+    {
+        juce::String desc;
+        std::vector<std::pair<juce::String, juce::StringArray>> combos;   // label, items
+        std::vector<Setter> setters;
+        std::vector<std::pair<juce::String, double Limits::*>> fields;   // label, member
+    };
+
+    static AssessLayout assessLayout (vib::Profile p, const Limits& l)
+    {
+        AssessLayout a;
+        switch (p)
+        {
+            case vib::Profile::WholeBodyHealth:
+                a.desc = U ("A(8) of the highest kÂ·" "a_w, or the daily VDV; exposure time from the accelerometer group.");
+                a.combos = { { "Standard",  { "EU 2002/44/EC", U ("Germany (LÃ¤rmVibrationsArbSchV)") } },
+                             { "Criterion", { "A(8)", "VDV" } } };
+                a.setters = { [] (Limits& x, int v) { vib::applyWholeBodyPreset (x, (vib::WholeBodyPreset) v); },
+                              [] (Limits& x, int v) { x.wbCriterion = (vib::WholeBodyCriterion) v; } };
+                a.fields = { { U ("Action (m/sÂ²)"),      &Limits::wbAction },
+                             { U ("Limit X/Y (m/sÂ²)"),   &Limits::wbLimitXY },
+                             { U ("Limit Z (m/sÂ²)"),     &Limits::wbLimitZ },
+                             { "VDV action",                    &Limits::wbVdvAction },
+                             { "VDV limit",                     &Limits::wbVdvLimit } };
+                break;
+            case vib::Profile::HandArm:
+                a.desc = "A(8) of a_hv against the EU 2002/44/EC action and limit values.";
+                a.fields = { { U ("Action (m/sÂ²)"), &Limits::haAction },
+                             { U ("Limit (m/sÂ²)"),  &Limits::haLimit } };
+                break;
+            case vib::Profile::WholeBodyComfort:
+                a.desc = "ISO 2631-1 Annex C comfort scale for a_v (informative, no limit values).";
+                break;
+            case vib::Profile::MachineryIso20816:
+            case vib::Profile::MachineryLowSpeed:
+                a.desc = U ("Largest axis v_rms over the measurement â zones Aâ" "D (ISO 10816-3 / 20816-3).");
+                a.combos = { { "Machine group", { U ("Group 1 (> 300 kW)"), U ("Group 2 (15â" "300 kW)") } },
+                             { "Foundation",    { "Rigid", "Flexible" } } };
+                a.setters = { [] (Limits& x, int v) { vib::applyMachineryPreset (x, (vib::MachineGroup) v, x.machFoundation); },
+                              [] (Limits& x, int v) { vib::applyMachineryPreset (x, x.machGroup, (vib::Foundation) v); } };
+                a.fields = { { "A/B (mm/s)", &Limits::machAB }, { "B/C (mm/s)", &Limits::machBC }, { "C/D (mm/s)", &Limits::machCD } };
+                break;
+            case vib::Profile::BuildingPerception:
+                a.desc = U ("DIN 4150-2: KB_Fmax against A_u / A_o, then KB_FTr = KB_FTm Â· sqrt(T_e / T_r) against A_r.");
+                a.combos = { { "Zone",   { "Industrial (GI)", "Commercial (GE)", "Mixed (MI, MD, MK)",
+                                           "Residential (WR, WA)", "Hospitals, spa (SO)" } },
+                             { "Period", { U ("Day (T_r 16 h)"), U ("Night (T_r 8 h)") } } };
+                a.setters = { [] (Limits& x, int v) { vib::applyDin4150_2Preset (x, (vib::Din4150Zone) v, x.din2Night); },
+                              [] (Limits& x, int v) { vib::applyDin4150_2Preset (x, x.din2Zone, v == 1); } };
+                a.fields = { { "A_u", &Limits::din2Au }, { "A_o", &Limits::din2Ao }, { "A_r", &Limits::din2Ar },
+                             { "T_e exposure (h)", &Limits::din2ExposureHours } };
+                break;
+            case vib::Profile::BuildingStructural:
+                a.desc = l.din3Location == vib::Din4150Location::Foundation
+                       ? U ("DIN 4150-3: PPV per axis against the value at its dominant frequency (linear between 10, 50 and 100 Hz).")
+                       : U ("DIN 4150-3: PPV against one value for all frequencies (top floor: X/Y, floor slab: Z).");
+                a.combos = { { "Building", { "Line 1 commercial", "Line 2 residential", "Line 3 sensitive" } },
+                             { "Duration", { "Short-term", "Long-term" } },
+                             { "Location", { "Foundation", "Top floor, horizontal", "Floor slab, vertical" } } };
+                a.setters = { [] (Limits& x, int v) { vib::applyDin4150_3Preset (x, (vib::Din4150Line) v, x.din3Location, x.din3LongTerm); },
+                              [] (Limits& x, int v) { vib::applyDin4150_3Preset (x, x.din3Line, x.din3Location, v == 1); },
+                              [] (Limits& x, int v) { vib::applyDin4150_3Preset (x, x.din3Line, (vib::Din4150Location) v, x.din3LongTerm); } };
+                if (l.din3Location == vib::Din4150Location::Foundation)
+                    a.fields = { { U ("1â" "10 Hz (mm/s)"), &Limits::din3At10 },
+                                 { "50 Hz (mm/s)",  &Limits::din3At50 },
+                                 { "100 Hz (mm/s)", &Limits::din3At100 } };
+                else
+                    a.fields = { { "Guideline (mm/s)", &Limits::din3Single } };
+                break;
+            case vib::Profile::Custom:
+            case vib::Profile::StructureBorne:
+            case vib::Profile::NumProfiles:
+                a.desc = "No assessment for this profile.";
+                break;
+        }
+        return a;
+    }
+
+    static int comboValue (vib::Profile p, const Limits& l, int i)
+    {
+        switch (p)
+        {
+            case vib::Profile::WholeBodyHealth:    return i == 0 ? (int) l.wbPreset : (int) l.wbCriterion;
+            case vib::Profile::MachineryIso20816:
+            case vib::Profile::MachineryLowSpeed:  return i == 0 ? (int) l.machGroup : (int) l.machFoundation;
+            case vib::Profile::BuildingPerception: return i == 0 ? (int) l.din2Zone : (l.din2Night ? 1 : 0);
+            case vib::Profile::BuildingStructural: return i == 0 ? (int) l.din3Line : i == 1 ? (l.din3LongTerm ? 1 : 0)
+                                                                                     : (int) l.din3Location;
+            default: break;
+        }
+        return 0;
+    }
+
+    void loadAssessment()
+    {
+        const auto p = processor_.getVibrationProfile();
+        const auto l = processor_.getAssessmentLimits();
+        const int key = (int) p * 16 + (int) l.din3Location;
+        if (key != assessKey_)
+        {
+            assessKey_ = key;
+            const auto a = assessLayout (p, l);
+            assessDesc_.setText (a.desc, juce::dontSendNotification);
+            comboSetters_ = a.setters;
+            for (int i = 0; i < kAssessCombos; ++i)
+            {
+                const bool used = i < (int) a.combos.size();
+                assessCombos_[i].clear (juce::dontSendNotification);
+                if (used)
+                {
+                    assessComboLabels_[i].setText (a.combos[(size_t) i].first, juce::dontSendNotification);
+                    assessCombos_[i].addItemList (a.combos[(size_t) i].second, 1);
+                }
+                assessComboLabels_[i].setVisible (accelVisible_ && used);
+                assessCombos_[i].setVisible (accelVisible_ && used);
+            }
+            fieldMembers_.clear();
+            for (int i = 0; i < kAssessFields; ++i)
+            {
+                const bool used = i < (int) a.fields.size();
+                if (used)
+                {
+                    assessFieldLabels_[i].setText (a.fields[(size_t) i].first, juce::dontSendNotification);
+                    fieldMembers_.push_back (a.fields[(size_t) i].second);
+                }
+                assessFieldLabels_[i].setVisible (accelVisible_ && used);
+                assessFields_[i].setVisible (accelVisible_ && used);
+            }
+            assessDefaults_.setVisible (accelVisible_ && (! a.fields.empty()));
+        }
+        for (int i = 0; i < (int) comboSetters_.size(); ++i)
+            if (! assessCombos_[i].isPopupActive())
+                assessCombos_[i].setSelectedId (comboValue (p, l, i) + 1, juce::dontSendNotification);
+        for (int i = 0; i < (int) fieldMembers_.size(); ++i)
+            if (! assessFields_[i].isBeingEdited())
+                assessFields_[i].setValue (l.*fieldMembers_[(size_t) i]);
     }
 
     std::vector<juce::Component*> accelComponents()
@@ -1168,7 +1399,8 @@ private:
                                           &mainLabel_, &mainCombo_, &quantityLabel_, &quantityCombo_,
                                           &highPassLabel_, &highPass_, &tauLabel_, &tauCombo_,
                                           &bandLabel_, &bandLow_, &bandHigh_, &serialLabel_, &serialEditor_,
-                                          &rangeLabel_, &lowerLimit_, &upperLimit_, &exposureLabel_, &exposure_ };
+                                          &rangeLabel_, &lowerLimit_, &upperLimit_, &exposureLabel_, &exposure_,
+                                          &assessTitle_, &assessDesc_ };
         for (int a = 0; a < 3; ++a)
         {
             v.push_back (&weightingLabels_[a]); v.push_back (&weightingCombos_[a]);
@@ -1206,6 +1438,18 @@ private:
     juce::Label exposureLabel_;
     NumberField exposure_ { 0.01, 24.0, 2, "h" };
 
+    static constexpr int kAssessCombos = 3, kAssessFields = 6;
+    juce::Rectangle<int> assessCard_;
+    juce::Label assessTitle_, assessDesc_;
+    juce::Label assessComboLabels_[kAssessCombos], assessFieldLabels_[kAssessFields];
+    juce::ComboBox assessCombos_[kAssessCombos];
+    NumberField assessFields_[kAssessFields] { { 0.0, 1000.0, 2 }, { 0.0, 1000.0, 2 }, { 0.0, 1000.0, 2 },
+                                               { 0.0, 1000.0, 2 }, { 0.0, 1000.0, 2 }, { 0.0, 1000.0, 2 } };
+    juce::TextButton assessDefaults_ { "Defaults" };
+    std::vector<Setter> comboSetters_;
+    std::vector<double Limits::*> fieldMembers_;
+    int assessKey_ = -1;   // profile + DIN 4150-3 location the controls are laid out for
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InputsComponent)
 };
 
@@ -1218,10 +1462,10 @@ public:
     {
         setUsingNativeTitleBar (false);
         content_ = new InputsComponent (p, light);
-        content_->setSize (960, 720);
+        content_->setSize (960, 880);
         setContentOwned (content_, true);
         setResizable (true, false);
-        setResizeLimits (860, 420, 1600, 1400);
+        setResizeLimits (860, 640, 1600, 1400);
     }
 
     void setLightMode (bool light) { content_->setLightMode (light); }

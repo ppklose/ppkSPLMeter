@@ -140,7 +140,7 @@ struct MeasurementSummary
     float vdv = 0.0f;     // Σ: VDV_total, max axis: max k·VDV
     float mtvv = 0.0f;    // Σ or max k·MTVV
     float crest = 0.0f;   // largest axis crest factor
-    float kbFTr = 0.0f;   // largest axis KB_FTr
+    float kbFTm = 0.0f;   // largest axis KB_FTm (KB_FTr: vib::kbFTr)
     float ppv = 0.0f;     // largest axis peak since reset
     float fDom = 0.0f;    // dominant frequency at that peak
     int   ppvAxis = -1;   // axis of ppv (0–2)
@@ -158,7 +158,7 @@ inline MeasurementSummary summarize (const VibrationSnapshot& s, MainValue m, co
         r.vdv   = std::max (r.vdv,  (float) k[a] * v.vdv);
         r.mtvv  = std::max (r.mtvv, (float) k[a] * v.mtvv);
         r.crest = std::max (r.crest, v.crest);
-        r.kbFTr = std::max (r.kbFTr, v.kbFTr);
+        r.kbFTm = std::max (r.kbFTm, v.kbFTm);
         if (v.peakMax > r.ppv) { r.ppv = v.peakMax; r.fDom = v.fDom; r.ppvAxis = a; }
     }
     if ((m == MainValue::SumAw || m == MainValue::SumRms) && axes > 1 && ! s.uniaxial)

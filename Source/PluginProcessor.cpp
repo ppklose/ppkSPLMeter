@@ -1214,11 +1214,82 @@ void SPLMeterAudioProcessor::setVibrationDisplayUnit (vib::DisplayUnit unit)
 
 namespace
 {
+    const juce::Identifier kLimitsNode ("AccelLimits");
+
+    // Numeric assessment limits: key + member (enums and flags are handled separately)
+    struct LimitKey { const char* key; double vib::AssessmentLimits::* member; double lo, hi; };
+    const LimitKey kLimitKeys[] = {
+        { "wbAction",    &vib::AssessmentLimits::wbAction,    0.01, 100.0 },
+        { "wbLimitXY",   &vib::AssessmentLimits::wbLimitXY,   0.01, 100.0 },
+        { "wbLimitZ",    &vib::AssessmentLimits::wbLimitZ,    0.01, 100.0 },
+        { "wbVdvAction", &vib::AssessmentLimits::wbVdvAction, 0.01, 1000.0 },
+        { "wbVdvLimit",  &vib::AssessmentLimits::wbVdvLimit,  0.01, 1000.0 },
+        { "haAction",    &vib::AssessmentLimits::haAction,    0.01, 100.0 },
+        { "haLimit",     &vib::AssessmentLimits::haLimit,     0.01, 100.0 },
+        { "machAB",      &vib::AssessmentLimits::machAB,      0.01, 1000.0 },
+        { "machBC",      &vib::AssessmentLimits::machBC,      0.01, 1000.0 },
+        { "machCD",      &vib::AssessmentLimits::machCD,      0.01, 1000.0 },
+        { "din2Au",      &vib::AssessmentLimits::din2Au,      0.001, 100.0 },
+        { "din2Ao",      &vib::AssessmentLimits::din2Ao,      0.001, 100.0 },
+        { "din2Ar",      &vib::AssessmentLimits::din2Ar,      0.001, 100.0 },
+        { "din2ExposureHours", &vib::AssessmentLimits::din2ExposureHours, 0.0, 16.0 },
+        { "din3At10",    &vib::AssessmentLimits::din3At10,    0.01, 1000.0 },
+        { "din3At50",    &vib::AssessmentLimits::din3At50,    0.01, 1000.0 },
+        { "din3At100",   &vib::AssessmentLimits::din3At100,   0.01, 1000.0 },
+        { "din3Single",  &vib::AssessmentLimits::din3Single,  0.01, 1000.0 },
+    };
+    const char* const kLimitEnumKeys[] = { "wbPreset", "wbCriterion", "machGroup", "machFoundation",
+                                           "din2Zone", "din2Night", "din3Line", "din3Location", "din3LongTerm" };
+
     // Keys of UIState/Accel exchanged with JSON settings files
     const char* const kAccelJsonKeys[] = { "highPassHz", "quantity", "weightingX", "weightingY", "weightingZ",
                                            "kx", "ky", "kz", "bandLowHz", "bandHighHz", "tauSec",
                                            "sensorSerial", "lowerLimitHz", "upperLimitHz", "displayUnit",
                                            "mainValue", "profile", "exposureHours" };
+}
+
+vib::AssessmentLimits SPLMeterAudioProcessor::getAssessmentLimits() const
+{
+    auto l = vib::defaultAssessmentLimits();
+    const auto node = apvts.state.getChildWithName ("UIState").getChildWithName (kLimitsNode);
+    if (! node.isValid())
+        return l;
+    for (const auto& k : kLimitKeys)
+        l.*k.member = juce::jlimit (k.lo, k.hi, (double) node.getProperty (k.key, l.*k.member));
+    auto e = [&] (const char* key, int current, int maxV) { return juce::jlimit (0, maxV, (int) node.getProperty (key, current)); };
+    l.wbPreset       = (vib::WholeBodyPreset)    e ("wbPreset",       (int) l.wbPreset, 1);
+    l.wbCriterion    = (vib::WholeBodyCriterion) e ("wbCriterion",    (int) l.wbCriterion, 1);
+    l.machGroup      = (vib::MachineGroup)       e ("machGroup",      (int) l.machGroup, 1);
+    l.machFoundation = (vib::Foundation)         e ("machFoundation", (int) l.machFoundation, 1);
+    l.din2Zone       = (vib::Din4150Zone)        e ("din2Zone",       (int) l.din2Zone, 4);
+    l.din2Night      = e ("din2Night", l.din2Night ? 1 : 0, 1) != 0;
+    l.din3Line       = (vib::Din4150Line)        e ("din3Line",       (int) l.din3Line, 2);
+    l.din3Location   = (vib::Din4150Location)    e ("din3Location",   (int) l.din3Location, 2);
+    l.din3LongTerm   = e ("din3LongTerm", l.din3LongTerm ? 1 : 0, 1) != 0;
+    return l;
+}
+
+void SPLMeterAudioProcessor::setAssessmentLimits (const vib::AssessmentLimits& l)
+{
+    auto node = getUiState().getOrCreateChildWithName (kLimitsNode, nullptr);
+    for (const auto& k : kLimitKeys)
+        node.setProperty (k.key, l.*k.member, nullptr);
+    node.setProperty ("wbPreset",       (int) l.wbPreset,       nullptr);
+    node.setProperty ("wbCriterion",    (int) l.wbCriterion,    nullptr);
+    node.setProperty ("machGroup",      (int) l.machGroup,      nullptr);
+    node.setProperty ("machFoundation", (int) l.machFoundation, nullptr);
+    node.setProperty ("din2Zone",       (int) l.din2Zone,       nullptr);
+    node.setProperty ("din2Night",      l.din2Night ? 1 : 0,    nullptr);
+    node.setProperty ("din3Line",       (int) l.din3Line,       nullptr);
+    node.setProperty ("din3Location",   (int) l.din3Location,   nullptr);
+    node.setProperty ("din3LongTerm",   l.din3LongTerm ? 1 : 0, nullptr);
+}
+
+vib::Assessment SPLMeterAudioProcessor::getVibrationAssessment() const
+{
+    const auto s = getVibrationSettings();
+    return vib::assess (getVibrationProfile(), getVibrationSnapshot(), s.k,
+                        getAccelSensorInfo().exposureHours, getAssessmentLimits());
 }
 
 juce::var SPLMeterAudioProcessor::getInputsJson() const
@@ -1249,6 +1320,14 @@ juce::var SPLMeterAudioProcessor::getAccelJson() const
         for (auto* key : kAccelJsonKeys)
             if (node.hasProperty (key))
                 o->setProperty (key, node.getProperty (key));
+    const auto limits = apvts.state.getChildWithName ("UIState").getChildWithName (kLimitsNode);
+    if (limits.isValid())
+    {
+        auto* l = new juce::DynamicObject();
+        for (int i = 0; i < limits.getNumProperties(); ++i)
+            l->setProperty (limits.getPropertyName (i), limits.getProperty (limits.getPropertyName (i)));
+        o->setProperty ("limits", juce::var (l));
+    }
     return juce::var (o);
 }
 
@@ -1282,6 +1361,16 @@ void SPLMeterAudioProcessor::setInputsAndAccelFromJson (const juce::var& inputs,
         for (auto* key : kAccelJsonKeys)
             if (obj->hasProperty (key))
                 node.setProperty (key, obj->getProperty (key), nullptr);
+        if (auto* lim = obj->getProperty ("limits").getDynamicObject())
+        {
+            auto ln = getUiState().getOrCreateChildWithName (kLimitsNode, nullptr);
+            for (const auto& k : kLimitKeys)
+                if (lim->hasProperty (k.key))
+                    ln.setProperty (k.key, lim->getProperty (k.key), nullptr);
+            for (auto* key : kLimitEnumKeys)
+                if (lim->hasProperty (key))
+                    ln.setProperty (key, lim->getProperty (key), nullptr);
+        }
     }
     rebuildVibrationEngine();   // getters clamp every value
 }

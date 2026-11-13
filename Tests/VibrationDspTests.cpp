@@ -539,7 +539,7 @@ TEST_CASE ("Vibration accumulating detectors: PPV with dominant frequency", "[vi
     }
 }
 
-TEST_CASE ("Vibration accumulating detectors: KB_Fmax and KB_FTr over 30 s cycles", "[vibration][detectors]")
+TEST_CASE ("Vibration accumulating detectors: KB_Fmax and KB_FTm over 30 s cycles", "[vibration][detectors]")
 {
     const double twoPi = 2.0 * kPi, fs = 2000.0;
     // Cycle 1: 0.5 mm/s peak, cycle 2: 1 mm/s, cycle 3: 2 mm/s (rising, so no cycle
@@ -552,11 +552,11 @@ TEST_CASE ("Vibration accumulating detectors: KB_Fmax and KB_FTr over 30 s cycle
 
     const double r = 1.0 / std::sqrt (2.0);
     CHECK (v.kbFmax == Approx (2.0e-3 * r).epsilon (0.01));
-    CHECK (v.kbFTr  == Approx (r * 1.0e-3 * std::sqrt ((0.25 + 1.0 + 4.0) / 3.0)).epsilon (0.01));
+    CHECK (v.kbFTm  == Approx (r * 1.0e-3 * std::sqrt ((0.25 + 1.0 + 4.0) / 3.0)).epsilon (0.01));
 
-    // Before the first cycle completes, KB_FTr is the running cycle's maximum
+    // Before the first cycle completes, KB_FTm is the running cycle's maximum
     const auto early = runDetector (fs, 10.0, [&] (double t) { return 1.0e-3 * std::sin (twoPi * 100.0 * t); }, 1.0);
-    CHECK (early.kbFTr == Approx (1.0e-3 * r).epsilon (0.01));
+    CHECK (early.kbFTm == Approx (1.0e-3 * r).epsilon (0.01));
 }
 
 TEST_CASE ("Vibration engine: vector sum of the accumulated values", "[vibration][detectors]")

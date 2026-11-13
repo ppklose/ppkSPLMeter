@@ -212,7 +212,7 @@ private:
         sum.vdv    = (float) std::pow (sumVdv4, 0.25);
         sum.crest  = sum.awRms > 0.0f ? sum.peakMax / sum.awRms : 0.0f;
         sum.fDom   = 0.0f;
-        sum.kbFmax = sum.kbFTr = 0.0f;   // DIN 4150-2 assesses single axes
+        sum.kbFmax = sum.kbFTm = 0.0f;   // DIN 4150-2 assesses single axes
         out.mainKind = static_cast<int> (settings_.main);
         out.main     = computeMainValue (settings_.main, out, settings_.k);
     }

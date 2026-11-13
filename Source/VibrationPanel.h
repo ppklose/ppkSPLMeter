@@ -3,6 +3,7 @@
 #include "Vibration/Detectors.h"
 #include "Vibration/Units.h"
 #include "Vibration/Profiles.h"
+#include "Vibration/Assessment.h"
 
 //==============================================================================
 // Vibration readout below the SPL meter (vibration spec §7.2): one row per axis
@@ -25,6 +26,8 @@ public:
         juce::String      mainLabel;        // symbol of snap.main, e.g. "a_w"
         double            k[3] { 1.0, 1.0, 1.0 };
         double            exposureHours = 8.0;   // for A(8)
+        vib::AssessmentLimits limits;            // KB_FTr needs T_e / T_r
+        vib::Assessment   assessment;            // status dot + text (spec §9.3)
     };
 
     std::function<void (vib::DisplayUnit)> onUnitChange;
@@ -132,10 +135,27 @@ public:
 
         if (state_.kind == State::Kind::Running)
         {
+            auto results = content.removeFromTop (kResultsH).withTrimmedLeft (90);
+            const auto& a = state_.assessment;
+            if (a.verdict != vib::Verdict::None && a.text.size() > 0)
+            {
+                // Assessment status, right-aligned: dot + text
+                const juce::Font f (juce::FontOptions().withHeight (13.0f).withStyle ("Bold"));
+                const auto text = juce::String::fromUTF8 (a.text.c_str());
+                const int w = juce::jmin (results.getWidth() / 2,
+                                          (int) std::ceil (juce::GlyphArrangement::getStringWidth (f, text)) + 22);
+                auto area = results.removeFromRight (w);
+                auto dot = area.removeFromLeft (16).toFloat().withSizeKeepingCentre (10.0f, 10.0f);
+                g.setColour (verdictColour (a.verdict, textSec));
+                g.fillEllipse (dot);
+                g.setColour (textPri);
+                g.setFont (f);
+                g.drawText (text, area.withTrimmedLeft (4), juce::Justification::centredLeft, true);
+                results.removeFromRight (12);
+            }
             g.setColour (textSec);
             g.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
-            g.drawText (resultsLine(), content.removeFromTop (kResultsH).withTrimmedLeft (90),
-                        juce::Justification::centredLeft, true);
+            g.drawText (resultsLine(), results, juce::Justification::centredLeft, true);
         }
 
         if (state_.kind == State::Kind::Message)
@@ -235,7 +255,10 @@ private:
         }
         else if (m == vib::MainValue::MaxAxisKbFmax)
         {
-            text << dot << "KB_FTr " << value (sum.kbFTr);
+            const double tr = vib::din4150_2RatingHours (state_.limits.din2Night);
+            text << dot << "KB_FTr " << juce::String (vib::kbFTr (sum.kbFTm * 1000.0, state_.limits), 3)
+                 << " (T_e " << juce::String (juce::jmin (state_.limits.din2ExposureHours, tr), 1)
+                 << " h / T_r " << juce::String (tr, 0) << " h)";
         }
         else if (m == vib::MainValue::MaxAxisPeakMax && sum.ppvAxis >= 0)
         {
@@ -244,6 +267,19 @@ private:
                  << dot << "f_dom " << (sum.fDom > 0.0f ? juce::String (sum.fDom, 1) + " Hz" : juce::String ("--"));
         }
         return text;
+    }
+
+    juce::Colour verdictColour (vib::Verdict v, juce::Colour neutral) const
+    {
+        switch (v)
+        {
+            case vib::Verdict::Ok:       return light_ ? juce::Colour (0xff248a3d) : juce::Colour (0xff34c759);
+            case vib::Verdict::Warning:  return light_ ? juce::Colour (0xffc93400) : juce::Colour (0xffff9f0a);
+            case vib::Verdict::Exceeded: return light_ ? juce::Colour (0xffd70015) : juce::Colour (0xffff453a);
+            case vib::Verdict::Info:     return light_ ? juce::Colour (0xff007aff) : juce::Colour (0xff5ac8fa);
+            case vib::Verdict::None:     break;
+        }
+        return neutral;
     }
 
     struct Row { int slot; juce::String label; juce::Colour colour; };
