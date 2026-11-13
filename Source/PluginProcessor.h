@@ -14,7 +14,7 @@
 #include "Vibration/Units.h"
 #include "Vibration/Profiles.h"
 #include "Vibration/Assessment.h"
-#include "Rew/RewSequence.h"
+#include "Rew/RewSequencer.h"
 #include "RtHandover.h"
 #include "WavRecording.h"
 #include <array>
@@ -382,6 +382,13 @@ public:
     rew::Sequence getRewSequence() const;
     void setRewSequence (const rew::Sequence& sequence);
 
+    // Runs the stored sequence. The processor owns the run (spec Q4), so it goes on
+    // when the window or editor closes. transport: nullptr = HTTP to REW on the
+    // sequence's port (tests pass a simulated REW). False if a run is active.
+    bool startRewRun (bool dryRun, std::unique_ptr<rew::Transport> transport = nullptr,
+                      rew::RunOptions options = {});
+    rew::Sequencer& getRewSequencer() noexcept { return rewSequencer_; }
+
     // Display unit of the vibration readout (UIState/Accel "displayUnit")
     vib::DisplayUnit getVibrationDisplayUnit() const;
     void setVibrationDisplayUnit (vib::DisplayUnit unit);
@@ -592,6 +599,10 @@ private:
     std::atomic<bool>         impFidActive_    { false };
     std::atomic<int>          impFidPos_       { 0 };
     int                       impFidSignalLen_ { 0 };
+
+    // Declared last, so it is destroyed first: aborts a run and restores REW
+    // before anything a run uses goes away
+    rew::Sequencer rewSequencer_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SPLMeterAudioProcessor)
 };

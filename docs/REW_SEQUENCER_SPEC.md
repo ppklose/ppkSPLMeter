@@ -30,6 +30,7 @@ Run a list of Room EQ Wizard sweep measurements one after the other, each step w
 | Audio ready | `GET /audio/status` → `{enabled, ready}` | |
 | Driver | `GET /audio/driver` → `Java` or `ASIO` | controls which channel endpoints are used |
 | Output channel | Java: `POST /audio/java/output-channel {"channel":"L"}`, choices from `GET /audio/java/output-channels` (`L`, `R`, `L+R`, `3`…); ASIO: `/audio/asio/output`, `/audio/asio/outputs` | |
+| Second output | ASIO: `POST /audio/asio/secondary-output {"output":…}` + `/audio/asio/secondary-output-enable {"enable":true}`; both drivers: `POST /measure/invert-second-output true` | REW has no secondary output for the Java driver; there the output `L+R` drives two outputs and only *invert* applies |
 | Input channel | Java: `/audio/java/input-channel {"channel":1}`, `/audio/java/last-input-channel` (multi-input, Pro); ASIO: `/audio/asio/input`, `/audio/asio/last-input` | set *last* before *first*, otherwise REW clamps the range (VirtualEareality lesson) |
 | Level | `POST /measure/level {"value":-12,"unit":"dBFS"}`; units `dBu`, `dBV`, `V`, `dBFS` | |
 | Sweep | `POST /measure/sweep/configuration {startFrequency, endFrequency, length, fillSilenceWithDither}`; lengths `64k`…`4M` | |
@@ -55,6 +56,7 @@ RewStep
   name             string        → REW measurement title ("" = sequence name + step number)
   notes            string
   output           string        e.g. "L", "R", "L+R", "3" (driver-specific choice list)
+  secondOutput     enabled, output, invert   (ASIO secondary output; Java: invert only, with L+R)
   inputFirst/Last  int           last > first only with REW Pro multi-input
   level            double + unit dBFS | dBu | dBV | V
   sweepStart/End   int Hz

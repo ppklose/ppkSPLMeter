@@ -35,6 +35,20 @@ struct Protection                     // /measure/protection-options (spec Q1)
     }
 };
 
+// A second output driven with the first (REW: ASIO only), optionally inverted.
+// With the Java driver two outputs come from the output choice "L+R"; only
+// `invert` applies there.
+struct SecondOutput
+{
+    bool enabled = false;
+    juce::String output;              // ASIO output name
+    bool invert = false;              // /measure/invert-second-output
+    bool operator== (const SecondOutput& o) const
+    {
+        return enabled == o.enabled && output == o.output && invert == o.invert;
+    }
+};
+
 struct Step
 {
     bool enabled = true;
@@ -42,6 +56,7 @@ struct Step
     juce::String notes;
 
     std::optional<juce::String> output;      // "L", "R", "L+R", "3" (Java) or an ASIO output name
+    std::optional<SecondOutput> secondOutput;
     std::optional<juce::String> input;       // Java: "1", "2" … ; ASIO: input name
     std::optional<juce::String> lastInput;   // multi-input (REW Pro); unset = input only
     std::optional<Level> level;
@@ -58,6 +73,7 @@ struct Step
     bool operator== (const Step& o) const
     {
         return enabled == o.enabled && name == o.name && notes == o.notes && output == o.output
+            && secondOutput == o.secondOutput
             && input == o.input && lastInput == o.lastInput && level == o.level && sweep == o.sweep
             && repetitions == o.repetitions && timingRef == o.timingRef && protection == o.protection
             && group == o.group && waitForUser == o.waitForUser && prompt == o.prompt
@@ -177,6 +193,14 @@ inline juce::var toVar (const Step& s)
     o->setProperty ("name", s.name);
     if (s.notes.isNotEmpty())   o->setProperty ("notes", s.notes);
     if (s.output)    o->setProperty ("output", *s.output);
+    if (s.secondOutput)
+    {
+        juce::var so;
+        detail::obj (so)->setProperty ("enabled", s.secondOutput->enabled);
+        so.getDynamicObject()->setProperty ("output", s.secondOutput->output);
+        so.getDynamicObject()->setProperty ("invert", s.secondOutput->invert);
+        o->setProperty ("secondOutput", so);
+    }
     if (s.input)     o->setProperty ("input", *s.input);
     if (s.lastInput) o->setProperty ("lastInput", *s.lastInput);
     if (s.level)
@@ -219,6 +243,11 @@ inline Step stepFromVar (const juce::var& v)
     s.name      = str (v, "name");
     s.notes     = str (v, "notes");
     s.output    = optStr (v, "output");
+    if (has (v, "secondOutput"))
+    {
+        const auto so = v.getProperty ("secondOutput", {});
+        s.secondOutput = SecondOutput { flag (so, "enabled", false), str (so, "output"), flag (so, "invert", false) };
+    }
     s.input     = optStr (v, "input");
     s.lastInput = optStr (v, "lastInput");
     if (has (v, "level"))
@@ -411,6 +440,18 @@ inline std::vector<Issue> validate (const Sequence& q, const Choices& c)
             err (i, "output", "Output is empty.");
         else if (s.output && strict && ! c.outputs.contains (*s.output))
             err (i, "output", "REW has no output \"" + *s.output + "\".");
+
+        if (s.secondOutput && s.secondOutput->enabled)
+        {
+            if (strict && java)
+                err (i, "secondOutput", "REW's second output needs the ASIO driver; with Java use the output L+R.");
+            else if (s.secondOutput->output.isEmpty())
+                err (i, "secondOutput", "Second output is empty.");
+            else if (strict && ! c.outputs.contains (s.secondOutput->output))
+                err (i, "secondOutput", "REW has no output \"" + s.secondOutput->output + "\".");
+            else if (s.output && *s.output == s.secondOutput->output)
+                err (i, "secondOutput", "Second output is the same as the output.");
+        }
 
         if (s.lastInput && ! s.input)
             err (i, "lastInput", "Last input needs a first input.");

@@ -9,7 +9,7 @@
 
 //==============================================================================
 // "REW Measurement Sequencer" window (REW sequencer spec §4): connection status,
-// step table, step editor, sequence options. Running comes in step 5.
+// step table, step editor, sequence options, run controls and run log.
 namespace RewUi
 {
 using InputsUi::Palette;
@@ -129,8 +129,8 @@ public:
         const int flags = juce::TableHeaderComponent::visible;
         h.addColumn ("#",      cNum,   32,  32,  48, flags);
         h.addColumn (U ("✓"),  cOn,    26,  26,  36, flags);
-        h.addColumn ("Name",   cName,  130, 60,  400, flags | juce::TableHeaderComponent::resizable);
-        h.addColumn ("Out",    cOut,   44,  32,  140, flags | juce::TableHeaderComponent::resizable);
+        h.addColumn ("Name",   cName,  104, 60,  400, flags | juce::TableHeaderComponent::resizable);
+        h.addColumn ("Out",    cOut,   84,  32,  200, flags | juce::TableHeaderComponent::resizable);
         h.addColumn ("In",     cIn,    44,  32,  140, flags | juce::TableHeaderComponent::resizable);
         h.addColumn ("Level",  cLevel, 74,  50,  140, flags | juce::TableHeaderComponent::resizable);
         h.addColumn ("Sweep",  cSweep, 70,  50,  140, flags | juce::TableHeaderComponent::resizable);
@@ -149,6 +149,14 @@ public:
         seq_ = q;
         errorRows_ = std::move (errorRows);
         table_.updateContent();
+        table_.repaint();
+    }
+
+    // Row of the step being run (−1 = none)
+    void setActiveRow (int row)
+    {
+        if (row == activeRow_) return;
+        activeRow_ = row;
         table_.repaint();
     }
 
@@ -179,7 +187,9 @@ private:
 
     void paintRowBackground (juce::Graphics& g, int row, int w, int h, bool selected) override
     {
-        if (selected)
+        if (row == activeRow_)
+            g.fillAll (pal_.ok.withAlpha (0.30f));
+        else if (selected)
             g.fillAll (pal_.accent.withAlpha (0.28f));
         else if (row < (int) errorRows_.size() && errorRows_[(size_t) row])
             g.fillAll (pal_.bad.withAlpha (0.16f));
@@ -206,7 +216,12 @@ private:
             case cName:  t = rew::stepTitle (*seq_, row);
                          if (s.name.isEmpty()) g.setColour (pal_.subtext);
                          break;
-            case cOut:   t = opt (s.output, [] (auto& v) { return v; }); break;
+            case cOut:   t = opt (s.output, [] (auto& v) { return v; });
+                         if (s.secondOutput && s.secondOutput->enabled)
+                             t << " + " << (s.secondOutput->invert ? U ("−") : juce::String()) << s.secondOutput->output;
+                         else if (s.secondOutput && s.secondOutput->invert)
+                             t << U (" (inv)");
+                         break;
             case cIn:    t = s.input ? *s.input + (s.lastInput && *s.lastInput != *s.input ? U ("–") + *s.lastInput : juce::String())
                                      : dash();
                          break;
@@ -236,6 +251,7 @@ private:
     juce::TableListBox table_ { "REW steps" };
     const rew::Sequence* seq_ = nullptr;
     std::vector<bool> errorRows_;
+    int activeRow_ = -1;
     Palette pal_ = Palette::get (false);
 };
 
@@ -261,12 +277,14 @@ public:
         notes_.setTextToShowWhenEmpty ("REW measurement notes", juce::Colours::grey);
 
         for (auto* b : { &enabled_, &setOut_, &setIn_, &setLevel_, &setSweep_, &setReps_, &setRef_, &setProt_,
-                         &clip_, &splLimit_, &wait_ })
+                         &clip_, &splLimit_, &wait_, &setOut2_, &out2On_, &invert_ })
         {
             b->onClick = [this] { commit(); };
             addAndMakeVisible (b);
         }
-        for (auto* c : { &out_, &inFirst_, &inLast_, &unit_, &length_, &ref_ })
+        out2On_.setTooltip ("Play the sweep on a second output too (REW: ASIO driver only; with Java choose the output L+R)");
+        invert_.setTooltip ("Invert the second output (REW: invert second output, also for L+R)");
+        for (auto* c : { &out_, &inFirst_, &inLast_, &unit_, &length_, &ref_, &out2_ })
         {
             c->onChange = [this] { commit(); };
             addAndMakeVisible (c);
@@ -287,7 +305,7 @@ public:
         delay_.setValue (0.0);
 
         for (auto* l : { &lName_, &lNotes_, &lOut_, &lIn_, &lLevel_, &lSweep_, &lReps_, &lRef_, &lProt_,
-                         &lGroup_, &lWait_, &lDelay_, &lTo_, &lHz_ })
+                         &lGroup_, &lWait_, &lDelay_, &lTo_, &lHz_, &lOut2_ })
         {
             l->setFont (uiFont());
             addAndMakeVisible (l);
@@ -325,6 +343,14 @@ public:
 
             setOut_.setToggleState (s->output.has_value(), juce::dontSendNotification);
             out_.setText (s->output.value_or (choices.outputs.isEmpty() ? "L" : choices.outputs[0]), juce::dontSendNotification);
+
+            const auto so = s->secondOutput.value_or (rew::SecondOutput {});
+            setOut2_.setToggleState (s->secondOutput.has_value(), juce::dontSendNotification);
+            out2On_.setToggleState (so.enabled, juce::dontSendNotification);
+            out2_.setText (so.output.isNotEmpty() ? so.output
+                                                  : (choices.outputs.size() > 1 ? choices.outputs[1] : juce::String()),
+                           juce::dontSendNotification);
+            invert_.setToggleState (so.invert, juce::dontSendNotification);
 
             setIn_.setToggleState (s->input.has_value(), juce::dontSendNotification);
             inFirst_.setText (s->input.value_or (choices.driver == rew::Driver::Asio && ! choices.inputs.isEmpty()
@@ -374,19 +400,19 @@ public:
             t->setColour (juce::TextEditor::focusedOutlineColourId, p.accent);
             t->applyColourToAllText (p.text);
         }
-        for (auto* c : { &out_, &inFirst_, &inLast_, &unit_, &length_, &ref_ })
+        for (auto* c : { &out_, &inFirst_, &inLast_, &unit_, &length_, &ref_, &out2_ })
             p.style (*c);
         for (auto* f : { &level_, &start_, &end_, &reps_, &limit_, &delay_ })
             f->style (p);
         for (auto* b : { &enabled_, &setOut_, &setIn_, &setLevel_, &setSweep_, &setReps_, &setRef_, &setProt_,
-                         &clip_, &splLimit_, &wait_ })
+                         &clip_, &splLimit_, &wait_, &setOut2_, &out2On_, &invert_ })
         {
             b->setColour (juce::ToggleButton::textColourId, p.text);
             b->setColour (juce::ToggleButton::tickColourId, p.accent);
             b->setColour (juce::ToggleButton::tickDisabledColourId, p.subtext);
         }
         for (auto* l : { &lName_, &lNotes_, &lOut_, &lIn_, &lLevel_, &lSweep_, &lReps_, &lRef_, &lProt_,
-                         &lGroup_, &lWait_, &lDelay_, &lTo_, &lHz_ })
+                         &lGroup_, &lWait_, &lDelay_, &lTo_, &lHz_, &lOut2_ })
             l->setColour (juce::Label::textColourId, p.subtext);
         title_.setColour (juce::Label::textColourId, p.text);
         empty_.setColour (juce::Label::textColourId, p.subtext);
@@ -410,6 +436,9 @@ public:
         notes_.setBounds (row (lNotes_));
         r.removeFromTop (6);
         { auto x = row (lOut_);   withSet (x, setOut_);   out_.setBounds (x.removeFromLeft (150)); }
+        { auto x = row (lOut2_);  withSet (x, setOut2_);  out2On_.setBounds (x.removeFromLeft (48));
+                                  out2_.setBounds (x.removeFromLeft (150)); x.removeFromLeft (8);
+                                  invert_.setBounds (x.removeFromLeft (80)); }
         { auto x = row (lIn_);    withSet (x, setIn_);    inFirst_.setBounds (x.removeFromLeft (90));
                                   lTo_.setBounds (x.removeFromLeft (24)); inLast_.setBounds (x.removeFromLeft (90)); }
         { auto x = row (lLevel_); withSet (x, setLevel_); level_.setBounds (x.removeFromLeft (80));
@@ -448,6 +477,8 @@ private:
             box.setText (text, juce::dontSendNotification);
         };
         fill (out_, c.outputs);
+        fill (out2_, c.outputs);
+        asio_ = c.driver == rew::Driver::Asio;
         juce::StringArray inputs = c.inputs;
         if (c.driver != rew::Driver::Asio)
         {
@@ -464,6 +495,11 @@ private:
     void updateEnablement()
     {
         out_.setEnabled (setOut_.getToggleState());
+        // Java: two outputs only via "L+R", so only "invert" can be set
+        const bool java = ! asio_;
+        out2On_.setEnabled (setOut2_.getToggleState() && (! java || out2On_.getToggleState()));
+        out2_.setEnabled (setOut2_.getToggleState() && out2On_.getToggleState());
+        invert_.setEnabled (setOut2_.getToggleState());
         inFirst_.setEnabled (setIn_.getToggleState());
         inLast_.setEnabled (setIn_.getToggleState());
         level_.setEnabled (setLevel_.getToggleState());
@@ -476,7 +512,8 @@ private:
             c->setEnabled (setProt_.getToggleState());
         limit_.setEnabled (setProt_.getToggleState() && splLimit_.getToggleState());
         prompt_.setEnabled (wait_.getToggleState());
-        for (auto* c : { (juce::Component*) &out_, (juce::Component*) &inFirst_, (juce::Component*) &inLast_,
+        for (auto* c : { (juce::Component*) &out2On_, (juce::Component*) &out2_, (juce::Component*) &invert_,
+                         (juce::Component*) &out_, (juce::Component*) &inFirst_, (juce::Component*) &inLast_,
                          (juce::Component*) &level_, (juce::Component*) &unit_, (juce::Component*) &start_,
                          (juce::Component*) &end_, (juce::Component*) &length_, (juce::Component*) &reps_,
                          (juce::Component*) &ref_, (juce::Component*) &clip_, (juce::Component*) &splLimit_,
@@ -499,6 +536,10 @@ private:
 
         auto text = [] (juce::ComboBox& c) { return c.getText().trim(); };
         s.output = setOut_.getToggleState() ? std::optional<juce::String> (text (out_)) : std::nullopt;
+        s.secondOutput = setOut2_.getToggleState()
+                             ? std::optional<rew::SecondOutput> (rew::SecondOutput { out2On_.getToggleState(), text (out2_),
+                                                                                     invert_.getToggleState() })
+                             : std::nullopt;
         if (setIn_.getToggleState())
         {
             s.input = text (inFirst_);
@@ -528,7 +569,7 @@ private:
     }
 
     rew::Step* step_ = nullptr;
-    bool loading_ = false;
+    bool loading_ = false, asio_ = false;
     Palette pal_ = Palette::get (false);
 
     juce::Label title_, empty_;
@@ -536,11 +577,12 @@ private:
                 lLevel_ { {}, "Level" }, lSweep_ { {}, "Sweep" }, lReps_ { {}, "Repetitions" },
                 lRef_ { {}, "Timing ref." }, lProt_ { {}, "Protection" }, lGroup_ { {}, "REW group" },
                 lWait_ { {}, "Wait for me" }, lDelay_ { {}, "Delay before" },
-                lTo_ { {}, U ("to") }, lHz_ { {}, "Hz" };
+                lTo_ { {}, U ("to") }, lHz_ { {}, "Hz" }, lOut2_ { {}, "2nd output" };
     juce::TextEditor name_, notes_, group_, prompt_;
     juce::ToggleButton enabled_ { "Enabled" }, setOut_, setIn_, setLevel_, setSweep_, setReps_, setRef_, setProt_,
-                       clip_ { "Clipping" }, splLimit_ { "SPL limit" }, wait_;
-    juce::ComboBox out_, inFirst_, inLast_, unit_, length_, ref_;
+                       clip_ { "Clipping" }, splLimit_ { "SPL limit" }, wait_,
+                       setOut2_, out2On_ { "On" }, invert_ { "Invert" };
+    juce::ComboBox out_, inFirst_, inLast_, unit_, length_, ref_, out2_;
     NumberField level_ { -120.0, 20.0, 1 }, start_ { 1.0, 96000.0, 0 }, end_ { 1.0, 96000.0, 0 },
                 reps_ { 1.0, rew::limits::kMaxRepetitions, 0 }, limit_ { 40.0, 160.0, 0, "dB" },
                 delay_ { 0.0, rew::limits::kMaxDelaySec, 1, "s" };
@@ -631,10 +673,39 @@ public:
         for (auto* b : { &addButton_, &dupButton_, &posButton_, &delButton_, &upButton_, &downButton_ })
             addAndMakeVisible (b);
 
+        // Run (spec §4): the processor owns the run, this window only shows it
+        runButton_.onClick = [this] { startRun(); };
+        runButton_.setTooltip ("Run the sequence in REW");
+        dryRun_.setTooltip ("Send every step's settings to REW, but do not start the sweeps");
+        pauseButton_.onClick = [this]
+        {
+            auto& sq = processor_.getRewSequencer();
+            sq.setPaused (! sq.isPaused());
+        };
+        pauseButton_.setTooltip ("Hold the run after the current step");
+        abortButton_.onClick = [this] { processor_.getRewSequencer().abort(); };
+        abortButton_.setTooltip ("Stop now: cancels the sweep in REW and restores REW's settings");
+        continueButton_.onClick = [this] { processor_.getRewSequencer().continueAfterPrompt(); };
+        skipButton_.onClick = [this] { processor_.getRewSequencer().skipPrompted(); };
+        for (auto* c : std::initializer_list<juce::Component*> { &runButton_, &dryRun_, &pauseButton_, &abortButton_,
+                                                                 &runStatus_, &progressBar_, &log_,
+                                                                 &promptText_, &continueButton_, &skipButton_ })
+            addAndMakeVisible (c);
+        runStatus_.setFont (uiFont (14.0f));
+        promptText_.setFont (uiFont (17.0f).boldened());
+        promptText_.setJustificationType (juce::Justification::centred);
+        log_.setMultiLine (true, false);
+        log_.setReadOnly (true);
+        log_.setScrollbarsShown (true);
+        log_.setCaretVisible (false);
+        log_.setFont (juce::Font (juce::FontOptions().withName (juce::Font::getDefaultMonospacedFontName()).withHeight (12.5f)));
+        progressBar_.setPercentageDisplay (false);
+
         setLightMode (light);
         changed (true);
         if (! seq_.steps.empty())
             table_.selectRow (0);
+        updateRunUi();   // a run may already be going (window reopened)
         startTimerHz (10);
     }
 
@@ -675,8 +746,28 @@ public:
             b->setColour (juce::TextButton::buttonColourId, pal_.field);
             b->setColour (juce::TextButton::textColourOffId, pal_.text);
         }
-        for (auto* l : { &statusText_, &mdatPath_, &resultsPath_ })
+        for (auto* l : { &statusText_, &mdatPath_, &resultsPath_, &runStatus_, &promptText_ })
             l->setColour (juce::Label::textColourId, pal_.text);
+        runButton_.setColour (juce::TextButton::buttonColourId, pal_.ok.withAlpha (0.85f));
+        runButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        abortButton_.setColour (juce::TextButton::buttonColourId, pal_.bad.withAlpha (0.85f));
+        abortButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        for (auto* b : { &pauseButton_, &skipButton_ })
+        {
+            b->setColour (juce::TextButton::buttonColourId, pal_.field);
+            b->setColour (juce::TextButton::textColourOffId, pal_.text);
+        }
+        continueButton_.setColour (juce::TextButton::buttonColourId, pal_.accent);
+        continueButton_.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        dryRun_.setColour (juce::ToggleButton::textColourId, pal_.text);
+        dryRun_.setColour (juce::ToggleButton::tickColourId, pal_.accent);
+        dryRun_.setColour (juce::ToggleButton::tickDisabledColourId, pal_.subtext);
+        log_.setColour (juce::TextEditor::backgroundColourId, pal_.field.withAlpha (0.6f));
+        log_.setColour (juce::TextEditor::textColourId, pal_.text);
+        log_.setColour (juce::TextEditor::outlineColourId, pal_.border);
+        log_.applyColourToAllText (pal_.text);
+        progressBar_.setColour (juce::ProgressBar::backgroundColourId, pal_.field);
+        progressBar_.setColour (juce::ProgressBar::foregroundColourId, pal_.ok);
         for (auto* l : { &portLabel_, &lName_, &lLoops_, &lGap_, &lOnError_, &lMdat_, &lResults_, &summary_ })
             l->setColour (juce::Label::textColourId, pal_.subtext);
         updateIssues();
@@ -686,12 +777,19 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (pal_.bg);
-        for (auto r : { headerCard_, optionsCard_ })
+        for (auto r : { headerCard_, optionsCard_, runCard_ })
         {
             g.setColour (pal_.card);
             g.fillRoundedRectangle (r.toFloat(), 6.0f);
             g.setColour (pal_.border);
             g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 6.0f, 1.0f);
+        }
+        if (promptShown_)
+        {
+            g.setColour (pal_.accent.withAlpha (0.18f));
+            g.fillRoundedRectangle (promptCard_.toFloat(), 6.0f);
+            g.setColour (pal_.accent);
+            g.drawRoundedRectangle (promptCard_.toFloat().reduced (0.5f), 6.0f, 1.5f);
         }
         // status dot
         g.setColour (statusColour_);
@@ -753,7 +851,30 @@ public:
         }
         r.removeFromTop (8);
 
-        auto bottom = r.removeFromBottom (54);
+        runCard_ = r.removeFromBottom (230);
+        {
+            auto x = runCard_.reduced (12, 10);
+            auto line = x.removeFromTop (30);
+            runButton_.setBounds (line.removeFromLeft (96).reduced (2, 1));
+            dryRun_.setBounds (line.removeFromLeft (92).withTrimmedLeft (8));
+            pauseButton_.setBounds (line.removeFromLeft (90).reduced (2, 1));
+            abortButton_.setBounds (line.removeFromLeft (90).reduced (2, 1));
+            line.removeFromLeft (12);
+            runStatus_.setBounds (line);
+            x.removeFromTop (6);
+            progressBar_.setBounds (x.removeFromTop (10));
+            x.removeFromTop (8);
+            log_.setBounds (x);
+            promptCard_ = x;
+            auto pc = x.reduced (16, 12);
+            auto buttons = pc.removeFromBottom (34).withSizeKeepingCentre (260, 34);
+            continueButton_.setBounds (buttons.removeFromLeft (150).reduced (2, 0));
+            skipButton_.setBounds (buttons.reduced (2, 0));
+            promptText_.setBounds (pc);
+        }
+        r.removeFromBottom (8);
+
+        auto bottom = r.removeFromBottom (44);
         summary_.setBounds (bottom.removeFromRight (220).removeFromTop (22));
         issues_.setBounds (bottom);
         r.removeFromBottom (6);
@@ -775,6 +896,7 @@ private:
     //==========================================================================
     void timerCallback() override
     {
+        updateRunUi();
         const auto st = poller_.state();
         if (st.serial == shownSerial_)
             return;
@@ -851,6 +973,7 @@ private:
         if (issues.empty())
             lines.add (choices_.fromRew ? U ("✓ The sequence fits this REW setup.")
                                         : U ("✓ No problems found. Outputs and inputs are checked once REW is connected."));
+        hasErrors_ = errors > 0;
         issues_.setText (lines.joinIntoString ("\n"), juce::dontSendNotification);
         issues_.setColour (juce::Label::textColourId, errors > 0 ? pal_.bad : (issues.empty() ? pal_.ok : pal_.warn));
 
@@ -872,6 +995,165 @@ private:
             editor_.setStep (&seq_.steps[(size_t) row], rew::stepTitle (seq_, row), choices_);
         else
             editor_.setStep (nullptr, {}, choices_);
+    }
+
+    //==========================================================================
+    // Run (spec §4, §5)
+    void startRun()
+    {
+        processor_.setRewSequence (seq_);
+        if (! processor_.startRewRun (dryRun_.getToggleState()))
+            return;
+        shownResults_ = -1;
+        updateRunUi();
+    }
+
+    static juce::String mmss (double sec)
+    {
+        const int s = juce::jmax (0, (int) std::round (sec));
+        return juce::String (s / 60) + ":" + juce::String (s % 60).paddedLeft ('0', 2);
+    }
+
+    void updateRunUi()
+    {
+        auto& sq = processor_.getRewSequencer();
+        const auto p = sq.progress();
+        const bool running = p.running();
+
+        if (running != wasRunning_)
+        {
+            wasRunning_ = running;
+            setEditing (! running);
+            if (! running)
+                poller_.refreshNow();
+        }
+        runButton_.setEnabled (! running && ! hasErrors_ && ! seq_.steps.empty());
+        dryRun_.setEnabled (! running);
+        pauseButton_.setEnabled (running);
+        pauseButton_.setButtonText (sq.isPaused() ? "Resume" : "Pause");
+        abortButton_.setEnabled (running);
+        table_.setActiveRow (running ? p.step : -1);
+
+        // Position among the enabled steps
+        int enabledIndex = 0, enabledCount = 0;
+        for (int i = 0; i < (int) seq_.steps.size(); ++i)
+            if (seq_.steps[(size_t) i].enabled)
+            {
+                ++enabledCount;
+                if (i <= p.step) enabledIndex = enabledCount;
+            }
+
+        juce::String status;
+        double fraction = 0.0;
+        if (p.totalSweeps > 0)
+        {
+            double inStep = 0.0;
+            if (p.state == rew::RunState::Measuring && p.stepExpectedSec > 0.0)
+                inStep = juce::jlimit (0.0, 0.95, p.stepElapsedSec / p.stepExpectedSec);
+            fraction = juce::jlimit (0.0, 1.0, (p.sweepsDone + inStep) / p.totalSweeps);
+        }
+        if (running)
+        {
+            status = (p.dryRun ? "Dry run" + U (" · ") : juce::String());
+            if (p.step >= 0)
+            {
+                status << "Step " << enabledIndex << "/" << enabledCount;
+                if (seq_.loops > 1)
+                    status << U (" · loop ") << (p.loop + 1) << "/" << seq_.loops;
+                status << U (" · ") << p.title << U (" · ");
+            }
+            status << rew::toString (p.state);
+            if (p.state == rew::RunState::Measuring)
+                status << " " << mmss (p.stepElapsedSec) << U (" / ~") << mmss (p.stepExpectedSec);
+        }
+        else if (p.state != rew::RunState::Idle)
+        {
+            int ok = 0, warn = 0, failed = 0, skipped = 0;
+            for (const auto& r : p.results)
+            {
+                ok      += r.status == rew::StepStatus::Done ? 1 : 0;
+                warn    += r.status == rew::StepStatus::Warning ? 1 : 0;
+                failed  += r.status == rew::StepStatus::Failed ? 1 : 0;
+                skipped += (r.status == rew::StepStatus::Skipped || r.status == rew::StepStatus::Cancelled) ? 1 : 0;
+            }
+            status << rew::toString (p.state) << ": " << ok << " ok";
+            if (warn > 0)    status << ", " << warn << " with warnings";
+            if (failed > 0)  status << ", " << failed << " failed";
+            if (skipped > 0) status << ", " << skipped << " skipped";
+            if (p.state == rew::RunState::Done) fraction = 1.0;
+        }
+        else
+        {
+            status = enabledCount > 0 ? "Ready" : "Add steps to run";
+        }
+        runStatus_.setText (status, juce::dontSendNotification);
+        progressValue_ = fraction;
+
+        // Prompt banner (wait for user)
+        const bool prompting = p.state == rew::RunState::WaitingForUser;
+        promptText_.setVisible (prompting);
+        continueButton_.setVisible (prompting);
+        skipButton_.setVisible (prompting);
+        log_.setVisible (! prompting);
+        if (prompting != promptShown_)
+        {
+            promptShown_ = prompting;
+            if (prompting)
+                if (auto* top = getTopLevelComponent())
+                    top->toFront (true);
+            repaint();
+        }
+        if (prompting)
+            promptText_.setText (p.prompt, juce::dontSendNotification);
+
+        // Run log: rebuilt when a result or the final message arrives
+        const int key = (int) p.results.size() * 4 + (running ? 0 : 1) + (p.message.isNotEmpty() ? 2 : 0);
+        if (key != shownResults_)
+        {
+            shownResults_ = key;
+            log_.setText (logText (p), false);
+            log_.moveCaretToEnd();
+        }
+    }
+
+    juce::String logText (const rew::Progress& p) const
+    {
+        juce::StringArray lines;
+        if (p.version.valid())
+            lines.add ("REW " + p.version.rew + U (" · API ") + p.version.api + (p.dryRun ? U (" · dry run") : juce::String()));
+        for (const auto& r : p.results)
+        {
+            juce::String line;
+            line << (r.start != juce::Time() ? r.start.toString (false, true, true, true) : juce::String ("--:--:--"))
+                 << "  #" << juce::String (r.step + 1).paddedRight (' ', 3)
+                 << (r.loop > 0 || seq_.loops > 1 ? "L" + juce::String (r.loop + 1) + "  " : juce::String())
+                 << r.title.paddedRight (' ', 20) << "  " << juce::String (rew::toString (r.status)).paddedRight (' ', 9);
+            if (r.uuids.size() > 0)
+                line << "  " << r.uuids.size() << (r.uuids.size() == 1 ? " measurement" : " measurements")
+                     << " (" << juce::String (r.durationSec, 1) << " s)";
+            if (r.attempts > 1)
+                line << U ("  · retried");
+            for (const auto& m : r.messages)
+                line << "\n            " << m;
+            lines.add (line);
+        }
+        if (p.savedMdat.isNotEmpty())
+            lines.add ("Saved REW measurements: " + p.savedMdat);
+        if (p.message.isNotEmpty())
+            lines.add (p.message);
+        return lines.joinIntoString ("\n");
+    }
+
+    void setEditing (bool on)
+    {
+        for (auto* c : std::initializer_list<juce::Component*> {
+                 &table_, &editor_, &seqName_, &newButton_, &loadButton_, &port_, &loops_, &gap_, &onError_,
+                 &restore_, &markers_, &mdatButton_, &mdatClear_, &resultsButton_, &resultsClear_,
+                 &addButton_, &dupButton_, &posButton_, &delButton_, &upButton_, &downButton_ })
+        {
+            c->setEnabled (on);
+            c->setAlpha (on ? 1.0f : 0.55f);
+        }
     }
 
     //==========================================================================
@@ -1082,6 +1364,18 @@ private:
     juce::TextButton addButton_ { "+ Add" }, dupButton_ { "Duplicate" }, posButton_ { U ("Add positions…") },
                      delButton_ { "Delete" }, upButton_ { U ("▲") }, downButton_ { U ("▼") };
     juce::Label issues_, summary_;
+    bool hasErrors_ = false;
+
+    juce::Rectangle<int> runCard_, promptCard_;
+    juce::TextButton runButton_ { U ("▶  Run") }, pauseButton_ { "Pause" }, abortButton_ { U ("■  Abort") },
+                     continueButton_ { "Continue" }, skipButton_ { "Skip step" };
+    juce::ToggleButton dryRun_ { "Dry run" };
+    juce::Label runStatus_, promptText_;
+    double progressValue_ = 0.0;
+    juce::ProgressBar progressBar_ { progressValue_ };
+    juce::TextEditor log_;
+    bool wasRunning_ = false, promptShown_ = false;
+    int shownResults_ = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RewSequencerComponent)
 };
@@ -1095,10 +1389,10 @@ public:
     {
         setUsingNativeTitleBar (false);
         content_ = new RewSequencerComponent (p, light);
-        content_->setSize (1180, 700);
+        content_->setSize (1180, 940);
         setContentOwned (content_, true);
         setResizable (true, false);
-        setResizeLimits (1060, 600, 2000, 1400);
+        setResizeLimits (1060, 840, 2000, 1600);
     }
 
     void setLightMode (bool light) { content_->setLightMode (light); }

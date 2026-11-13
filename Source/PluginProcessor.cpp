@@ -1307,6 +1307,16 @@ void SPLMeterAudioProcessor::setRewSequence (const rew::Sequence& sequence)
                 .setProperty ("json", rew::toJsonText (sequence), nullptr);
 }
 
+bool SPLMeterAudioProcessor::startRewRun (bool dryRun, std::unique_ptr<rew::Transport> transport,
+                                          rew::RunOptions options)
+{
+    const auto seq = getRewSequence();
+    if (transport == nullptr)
+        transport = std::make_unique<rew::HttpTransport> (seq.port);
+    options.dryRun = dryRun;
+    return rewSequencer_.start (seq, std::move (transport), options);
+}
+
 juce::var SPLMeterAudioProcessor::getInputsJson() const
 {
     juce::Array<juce::var> list;

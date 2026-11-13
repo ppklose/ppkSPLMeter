@@ -271,7 +271,8 @@ private:
 
     juce::StringArray settingPaths() const
     {
-        return { endpoints_.output, endpoints_.lastInput, endpoints_.input,
+        return { endpoints_.output, "/audio/asio/secondary-output", "/audio/asio/secondary-output-enable",
+                 "/measure/invert-second-output", endpoints_.lastInput, endpoints_.input,
                  "/measure/level", "/measure/sweep/configuration", "/measure/sweep/repetitions",
                  "/measure/timing/reference", "/measure/protection-options",
                  "/measure/naming", "/measure/notes" };
@@ -378,6 +379,16 @@ private:
         std::vector<Write> writes;
         if (s.output)
             writes.push_back ({ "POST", endpoints_.output, obj ({ { endpoints_.outputKey.toRawUTF8(), *s.output } }) });
+        if (s.secondOutput)
+        {
+            if (! endpoints_.inputIsNumber)   // ASIO: output first, then the switch
+            {
+                if (s.secondOutput->enabled)
+                    writes.push_back ({ "POST", "/audio/asio/secondary-output", obj ({ { "output", s.secondOutput->output } }) });
+                writes.push_back ({ "POST", "/audio/asio/secondary-output-enable", obj ({ { "enable", s.secondOutput->enabled } }) });
+            }
+            writes.push_back ({ "POST", "/measure/invert-second-output", s.secondOutput->invert });
+        }
         if (s.input)
         {
             // last before first, or REW clamps the range; then last again

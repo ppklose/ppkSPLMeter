@@ -22,6 +22,7 @@ rew::Sequence sampleSequence()
     rew::Step a;
     a.name = "L";
     a.output = juce::String ("L");
+    a.secondOutput = rew::SecondOutput { false, {}, true };   // invert only (Java L+R)
     a.input = juce::String ("1");
     a.lastInput = juce::String ("3");
     a.level = rew::Level { -18.5, "dBFS" };
@@ -173,6 +174,30 @@ TEST_CASE ("REW sequence: validation", "[rew]")
         CHECK (fieldsOf (rew::validate (q, c)).contains ("lastInput"));
         q.steps[0].input = juce::String ("In 9");
         CHECK (fieldsOf (rew::validate (q, c)).contains ("input"));
+    }
+
+    SECTION ("second output: ASIO only, a known output, not the first output")
+    {
+        FakeRewTransport fake;
+        c = rew::queryChoices (fake);                                   // Java
+        q.steps[0].secondOutput = rew::SecondOutput { true, "R", false };
+        CHECK (fieldsOf (rew::validate (q, c)).contains ("secondOutput"));
+        q.steps[0].secondOutput = rew::SecondOutput { false, {}, true }; // invert alone is fine on Java
+        CHECK_FALSE (rew::hasErrors (rew::validate (q, c)));
+
+        auto* d = new juce::DynamicObject();
+        d->setProperty ("driver", "ASIO");
+        fake.setValue ("/audio/driver", juce::var (d));
+        c = rew::queryChoices (fake);
+        q.steps[0].output = juce::String ("Out 1");
+        q.steps[0].input.reset();
+        q.steps[0].lastInput.reset();
+        q.steps[0].secondOutput = rew::SecondOutput { true, "Out 2", true };
+        CHECK_FALSE (rew::hasErrors (rew::validate (q, c)));
+        q.steps[0].secondOutput->output = "Out 1";
+        CHECK (fieldsOf (rew::validate (q, c)).contains ("secondOutput"));
+        q.steps[0].secondOutput->output = "Out 9";
+        CHECK (fieldsOf (rew::validate (q, c)).contains ("secondOutput"));
     }
 
     SECTION ("unreachable REW gives the offline lists")

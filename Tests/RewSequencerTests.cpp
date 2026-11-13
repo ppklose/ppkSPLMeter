@@ -167,6 +167,63 @@ TEST_CASE ("REW sequencer: inputs, multi-input, loops, groups, Save all", "[rew]
     CHECK ((int) fake.value ("/audio/java/last-input-channel").getProperty ("channel", 0) == 1);
 }
 
+TEST_CASE ("REW sequencer: second output (ASIO) and invert, restored afterwards", "[rew]")
+{
+    FakeRewTransport fake;
+    rew::Sequencer seq;
+
+    SECTION ("ASIO: output, then enable, then invert")
+    {
+        auto* d = new juce::DynamicObject();
+        d->setProperty ("driver", "ASIO");
+        fake.setValue ("/audio/driver", juce::var (d));
+        rew::Sequence q;
+        q.betweenStepsSec = 0.0;
+        rew::Step s;
+        s.name = "Stereo";
+        s.output = juce::String ("Out 1");
+        s.secondOutput = rew::SecondOutput { true, "Out 3", true };
+        q.steps = { s };
+
+        fake.clearCalls();
+        const auto p = runToEnd (seq, fake, q);
+        CHECK (p.state == rew::RunState::Done);
+        const int a = indexOfCall (fake, "/audio/asio/secondary-output", "Out 3");
+        const int b = indexOfCall (fake, "/audio/asio/secondary-output-enable", "true");
+        const int c = indexOfCall (fake, "/measure/invert-second-output", "true");
+        CHECK (a >= 0);
+        CHECK (b > a);
+        CHECK (c > b);
+        // restored
+        CHECK (fake.value ("/audio/asio/secondary-output").getProperty ("output", {}).toString() == "Out 2");
+        CHECK_FALSE ((bool) fake.value ("/audio/asio/secondary-output-enable").getProperty ("enable", true));
+        CHECK_FALSE ((bool) fake.value ("/measure/invert-second-output"));
+    }
+
+    SECTION ("Java: only invert is sent")
+    {
+        auto q = threeSteps();
+        q.steps.resize (1);
+        q.steps[0].output = juce::String ("L+R");
+        q.steps[0].secondOutput = rew::SecondOutput { false, {}, true };
+        fake.clearCalls();
+        const auto p = runToEnd (seq, fake, q);
+        CHECK (p.state == rew::RunState::Done);
+        CHECK (indexOfCall (fake, "/measure/invert-second-output", "true") >= 0);
+        CHECK (callsTo (fake, "/audio/asio/secondary-output").empty());
+        CHECK (callsTo (fake, "/audio/asio/secondary-output-enable").empty());
+    }
+
+    SECTION ("Java: second output switched on is refused before anything is written")
+    {
+        auto q = threeSteps();
+        q.steps[0].secondOutput = rew::SecondOutput { true, "R", false };
+        const auto p = runToEnd (seq, fake, q);
+        CHECK (p.state == rew::RunState::Failed);
+        CHECK (p.message.contains ("ASIO"));
+    }
+}
+
 TEST_CASE ("REW sequencer: errors follow the on-error policy", "[rew]")
 {
     FakeRewTransport fake;
